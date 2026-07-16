@@ -1,0 +1,114 @@
+[
+  {
+    "text": "震惊",
+    "offsetMs": 50,
+    "durationMs": 587.5,
+    "textOffset": 0,
+    "wordLength": 2,
+    "boundaryType": "WordBoundary"
+  },
+  {
+    "text": "！",
+    "offsetMs": 637.5,
+    "durationMs": 112.5,
+    "textOffset": 2,
+    "wordLength": 1,
+    "boundaryType": "PunctuationBoundary"
+  },
+  {
+    "text": "A",
+    "offsetMs": 1200,
+    "durationMs": 225,
+    "textOffset": 3,
+    "wordLength": 1,
+    "boundaryType": "WordBoundary"
+  },
+  {
+    "text": "&amp;",
+    "offsetMs": 1425,
+    "durationMs": 187.5,
+    "textOffset": -1,
+    "wordLength": 5,
+    "boundaryType": "WordBoundary"
+  },
+  {
+    "text": "B",
+    "offsetMs": 1612.5,
+    "durationMs": 187.5,
+    "textOffset": 5,
+    "wordLength": 1,
+    "boundaryType": "WordBoundary"
+  },
+  {
+    "text": "公司",
+    "offsetMs": 1812.5,
+    "durationMs": 350,
+    "textOffset": 6,
+    "wordLength": 2,
+    "boundaryType": "WordBoundary"
+  },
+  {
+    "text": "的",
+    "offsetMs": 2162.5,
+    "durationMs": 100,
+    "textOffset": 8,
+    "wordLength": 1,
+    "boundaryType": "WordBoundary"
+  },
+  {
+    "text": "秘密",
+    "offsetMs": 2262.5,
+    "durationMs": 462.5,
+    "textOffset": 9,
+    "wordLength": 2,
+    "boundaryType": "WordBoundary"
+  },
+  {
+    "text": "，",
+    "offsetMs": 2825,
+    "durationMs": 175,
+    "textOffset": 11,
+    "wordLength": 1,
+    "boundaryType": "PunctuationBoundary"
+  },
+  {
+    "text": "99%",
+    "offsetMs": 3000,
+    "durationMs": 1000,
+    "textOffset": 12,
+    "wordLength": 3,
+    "boundaryType": "WordBoundary"
+  },
+  {
+    "text": "的",
+    "offsetMs": 4000,
+    "durationMs": 125,
+    "textOffset": 15,
+    "wordLength": 1,
+    "boundaryType": "WordBoundary"
+  },
+  {
+    "text": "人",
+    "offsetMs": 4125,
+    "durationMs": 175,
+    "textOffset": 16,
+    "wordLength": 1,
+    "boundaryType": "WordBoundary"
+  },
+  {
+    "text": "不",
+    "offsetMs": 4325,
+    "durationMs": 112.5,
+    "textOffset": 17,
+    "wordLength": 1,
+    "boundaryType": "WordBoundary"
+  },
+  {
+    "text": "知道",
+    "offsetMs": 4437.5,
+    "durationMs": 412.5,
+    "textOffset": 18,
+    "wordLength": 2,
+    "boundaryType": "WordBoundary"
+  }
+]

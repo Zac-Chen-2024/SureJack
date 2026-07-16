@@ -154,7 +154,15 @@ data/
 >
 > 另：catdoc **忽略 `-s` 参数**，只认文档头声明的 code page。且「真实 cp936 中文 Word 2003 文件能否正确解析」**尚未验证**（无法用 LibreOffice 造出可信样本），拿到真实样本后应复验。基于内容的校验正是为这个不确定性兜底的。
 
-**入库前必须清洗 `<`、`>`、`&`。** 这不是洁癖——Azure 的 SSML 是 XML，[已知 bug](https://github.com/Azure-Samples/cognitive-services-speech-sdk/issues/2359) 是特殊字符会导致**其后所有字级时间戳错乱**。不清洗的后果是"字幕偶尔整体错位、查三天查不出原因"。
+**必须处理 `<`、`>`、`&`。** 但原因和最初设想的不同——**已实测（SDK 1.50.0 / zh-CN-XiaoxiaoNeural），见 `docs/superpowers/spikes/RESULTS.md`**：
+
+> 早前依据 [issue #2359](https://github.com/Azure-Samples/cognitive-services-speech-sdk/issues/2359) 断言「特殊字符会导致其后所有时间戳错乱」——**这条没有复现**，时间戳完全正常、单调递增。该 issue 要么已修，要么只在特定音色/条件下触发。
+>
+> **真实的问题是 XML 实体转义**：输入 `A&B`，`WordBoundary` 事件回来的 `text` 是 **`&amp;`**（5 个字符），不是 `&`。SDK 把文本包进 SSML 时做了转义，而事件报告的是转义后的形态。两个后果：
+> 1. **字幕会字面显示 `&amp;`** —— 用户看到实体码
+> 2. **`textOffset` 指向 SSML 字符串的位置，不是原文** —— `&`→`&amp;` 长度由 1 变 5，其后所有偏移量错位
+>
+> **对策**：`subtitles/` 在用 `e.text` 构造字幕行时**必须反转义 XML 实体**（`&amp;`→`&`、`&lt;`→`<`、`&gt;`→`>`）。若需要用 `textOffset` 回溯原文，必须先补偿转义带来的长度差——**或者干脆不依赖 `textOffset`，只用 `e.text`**（推荐，少一个出错来源）。
 
 ## 6. 配音
 
@@ -167,7 +175,11 @@ data/
 - `duration`, `text`, `textOffset`, `wordLength`
 - `boundaryType` —— `Word` / `Punctuation` / `Sentence`
 
-**标点会单独触发事件**，所以中文断句是白送的——不需要自己写分词。中文没有空格的问题由 Azure 内部解决。
+**标点会单独触发事件**（实测 `boundaryType` 取值为 `WordBoundary` / `PunctuationBoundary`），所以中文断句是白送的——不需要自己写分词。中文没有空格的问题由 Azure 内部解决。
+
+> **⚠️ 时间戳粒度是「词」不是「字」**（已实测）：Azure 自己做了中文分词，「震惊」「知道」「什么」都是单个整词事件。因此 **`\kf` 标签必须按词分组生成，不能按字**——卡拉OK 的效果是「震惊」两个字一起亮。这比逐字更自然，真正的卡拉OK 本来就是按词走的。
+>
+> 数字和英文边界很干净：`99%`、`AI` 各自是一个完整事件，不会被拆碎。
 
 **配音是手动触发的，不是自动的。** 改一个字就重新配音会烧配额、还会撞限速。流程是：写文案 → 点"生成配音" → 拿到音频和时间戳 → 预览。之后改文案，配音标记为 `stale`，界面提示需要重新生成。
 
