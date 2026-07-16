@@ -14,4 +14,12 @@ data/
 .env.*
 !.env.example
 
+# spike 产物：大文件和可能含真实内容的样本，只提交脚本和结论
+spikes/**/*.mp4
+spikes/**/*.mp3
+spikes/**/*.png
+spikes/**/*.ppm
+spikes/**/*.ttc
+spikes/doc-parse/samples/
+
 .DS_Store
