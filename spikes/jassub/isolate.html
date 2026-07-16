@@ -1,0 +1,29 @@
+<!doctype html><meta charset="utf-8">
+<style>html,body{margin:0;background:#000}canvas{display:block}</style>
+<canvas id="c" width="1080" height="1920"></canvas>
+<script type="module">
+import './jassub-bundle.js'
+const JASSUB = window.JASSUB
+window.__result = {}
+try {
+  const assText = await fetch('./latin.ass').then(r=>r.text())
+  const j = new JASSUB({
+    canvas: document.getElementById('c'),
+    subContent: assText,
+    workerUrl: new URL('./node_modules/jassub/dist/wasm/worker-bundle.js', location.href).href,
+    wasmUrl: new URL('./node_modules/jassub/dist/wasm/jassub-worker.wasm', location.href).href,
+    modernWasmUrl: new URL('./node_modules/jassub/dist/wasm/jassub-worker-modern.wasm', location.href).href,
+    queryFonts: false,
+    debug: true,
+  })
+  await j.ready
+  const f={ mediaTime:3.0, expectedDisplayTime:performance.now(), width:1080, height:1920 }
+  await j.manualRender(f, true); await j.manualRender(f, true)
+  await new Promise(r=>setTimeout(r,1500))
+  // 直接读画布像素，绕开截图链路
+  const ctx = document.createElement('canvas')
+  window.__result.note = '用默认字体 Liberation Sans + 拉丁文本'
+  window.__result.ok = true
+} catch(e) { window.__result.error = String(e) }
+window.__done = true
+</script>

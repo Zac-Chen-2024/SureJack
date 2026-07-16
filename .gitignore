@@ -23,3 +23,5 @@ spikes/**/*.ttc
 spikes/doc-parse/samples/
 
 .DS_Store
+spikes/**/VERDICT.txt
+spikes/jassub/default.woff2

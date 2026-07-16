@@ -1,0 +1,79 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>JASSUB 卡拉OK 验证</title>
+<style>
+  html, body { margin: 0; background: #000; }
+  canvas { display: block; }
+</style>
+
+<!-- 尺寸必须精确等于 ASS 的 PlayResX/PlayResY，也等于 ffmpeg 的输出分辨率。
+     三者一致，才谈得上「两端同一渲染器」。 -->
+<canvas id="c" width="1080" height="1920"></canvas>
+
+<!-- jassub 的依赖图里混着裸模块名和 CommonJS 包（throughput 就是 CJS），
+     浏览器原生 ES module 加载不了，必须经打包器。生产环境 Vite 会处理，
+     spike 里用 esbuild 打包成 jassub-bundle.js —— 这也更接近生产的真实形态。 -->
+<script type="module">
+  import './jassub-bundle.js'
+  const JASSUB = window.JASSUB
+
+  // 状态挂到 window 上，供 playwright 轮询
+  window.__spike = { ready: false, error: null, fontBytes: 0, fontMs: 0 }
+
+  const RENDER_AT = Number(new URLSearchParams(location.search).get('t') ?? 3.0)
+
+  try {
+    const t0 = performance.now()
+    const fontBuf = await fetch('./NotoSansCJK-Bold.ttc').then(r => r.arrayBuffer())
+    window.__spike.fontMs = Math.round(performance.now() - t0)
+    window.__spike.fontBytes = fontBuf.byteLength
+
+    const font = new Uint8Array(fontBuf)
+    const assText = await fetch('./test.ass').then(r => r.text())
+
+    console.log('STEP: 字体与 ASS 就绪，开始构造 JASSUB')
+    const jassub = new JASSUB({
+      canvas: document.getElementById('c'),
+      subContent: assText,
+      // ⚠️ worker 入口是 dist/worker/worker.js，不是 dist/wasm/jassub-worker.js
+      //（后者是 emscripten 的 wasm 胶水代码。传错了的表现是：worker 正常启动，
+      //  但 ready 永远不解决，且不报任何错——因为跑的脚本不实现通信协议）。
+      // worker 是 module worker 且有裸 import，所以同样需要打包。
+      workerUrl: new URL('./node_modules/jassub/dist/wasm/worker-bundle.js', location.href).href,
+      wasmUrl: new URL('./node_modules/jassub/dist/wasm/jassub-worker.wasm', location.href).href,
+      modernWasmUrl: new URL('./node_modules/jassub/dist/wasm/jassub-worker-modern.wasm', location.href).href,
+      // 关键：JASSUB 用不了系统字体，必须显式喂字体文件。
+      // 这正是「ffmpeg 和浏览器必须用同一个文件」的落点。
+      fonts: [font],
+      availableFonts: { 'noto sans cjk sc': font },
+      defaultFont: 'noto sans cjk sc',
+      queryFonts: false,
+      debug: true,
+    })
+
+    console.log('STEP: JASSUB 已构造，等待 ready')
+    await jassub.ready
+    console.log('STEP: ready 已解决，开始 manualRender')
+
+    // canvas 模式下手动渲染指定时刻，不需要 <video>，
+    // 于是可以和 ffmpeg 抽的同一时刻的帧精确对比。
+    const frame = {
+      mediaTime: RENDER_AT,
+      expectedDisplayTime: performance.now(),
+      width: 1080,
+      height: 1920,
+    }
+
+    // ⚠️ 必须调两次。JASSUB 的 _demandRender 在检测到尺寸变化时会
+    // 「resize 然后提前返回」——而首次调用时它内部记录的宽高是 0，
+    // 必然触发这条路径。所以第一次只 resize 不绘制，第二次才真正画。
+    // 症状是：ready 正常解决、manualRender 正常返回、画布却是空的。
+    await jassub.manualRender(frame, true)
+    await jassub.manualRender(frame, true)
+    console.log('STEP: manualRender 完成（已调用两次）')
+
+    window.__spike.ready = true
+  } catch (e) {
+    window.__spike.error = String(e && e.stack || e)
+  }
+</script>
