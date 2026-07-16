@@ -146,9 +146,13 @@ data/
 | 直接粘贴 | 无需处理 | 无 |
 | `.txt` | `chardet` 探测编码 + `iconv-lite` 转 UTF-8 | **中文 txt 大量是 GBK/GB18030**，按 UTF-8 硬读必然乱码 |
 | `.docx` | `mammoth` 提取纯文本 | 低 |
-| `.doc` | `antiword` 或 `catdoc` 抠文本 | **中文老 .doc 编码支持存疑，需实测** |
+| `.doc` | **`catdoc`**（已实测；`antiword` 对中文直接崩溃，出局） | **catdoc 静默失败——退出码不可信，见下** |
 
 `.doc` 做成**尽力而为**：抠得出来就用，失败或乱码就明确告诉用户"请在 Word 里另存为 .docx 再传"，绝不假装成功让乱码进入配音环节。
+
+> **⚠️ catdoc 会静默失败（已实测，见 `docs/superpowers/spikes/RESULTS.md`）**：喂它一个非 `.doc` 文件，它**吐出乱码却返回退出码 0**。所以**绝不能只看退出码**——必须做基于内容的校验：抽取结果中若 CJK 码点占比过低、而 Latin-1 补充区（`À`–`ÿ`）字符占比异常高，判定为乱码并拒绝。
+>
+> 另：catdoc **忽略 `-s` 参数**，只认文档头声明的 code page。且「真实 cp936 中文 Word 2003 文件能否正确解析」**尚未验证**（无法用 LibreOffice 造出可信样本），拿到真实样本后应复验。基于内容的校验正是为这个不确定性兜底的。
 
 **入库前必须清洗 `<`、`>`、`&`。** 这不是洁癖——Azure 的 SSML 是 XML，[已知 bug](https://github.com/Azure-Samples/cognitive-services-speech-sdk/issues/2359) 是特殊字符会导致**其后所有字级时间戳错乱**。不清洗的后果是"字幕偶尔整体错位、查三天查不出原因"。
 
