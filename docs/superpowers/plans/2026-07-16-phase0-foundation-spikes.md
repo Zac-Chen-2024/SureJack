@@ -15,7 +15,7 @@
 - **不能碰 `/etc/nginx/sites-enabled/plus.drziangchen.uk`**——那是生产中的另一个服务。
 - 域名：`surejack.zacchen.win` → `130.245.136.191`（Cloudflare DNS only，已验证解析正确）。
 - 每个 spike 的结论必须写进 `docs/superpowers/spikes/RESULTS.md`，包括**失败的结论**。失败的 spike 和成功的一样有价值。
-- 字体统一用 Noto Sans SC（`fonts-noto-cjk` 包）。**ffmpeg 和 JASSUB 必须用同一个字体文件**，否则"两端同一渲染器"的保证就破了。
+- 字体统一用 Noto Sans CJK SC（`fonts-noto-cjk` 包，注意族名不是「Noto Sans SC」）。**ffmpeg 和 JASSUB 必须用同一个字体文件**，否则"两端同一渲染器"的保证就破了。
 
 ---
 
@@ -25,7 +25,7 @@
 - Create: `docs/superpowers/spikes/RESULTS.md`
 
 **Interfaces:**
-- Produces: 系统上可用的 `ffmpeg`（含 libass）、Noto Sans SC 字体文件的绝对路径（后续所有任务都要用）
+- Produces: 系统上可用的 `ffmpeg`（含 libass）、Noto Sans CJK SC 字体文件的绝对路径和字体族名（后续所有任务都要用）
 
 - [ ] **Step 1: 安装 ffmpeg、字体和 .doc 解析工具**
 
@@ -48,11 +48,23 @@ Expected: 输出中同时包含 `ass` 和 `subtitles` 两个滤镜。类似：
 
 - [ ] **Step 3: 找到字体文件的确切路径和字体族名**
 
-Run: `fc-list | grep -i "noto sans sc" | head -5`
+Run:
+```bash
+fc-list | grep -iE "sanscjk" | head -5
+fc-match "Noto Sans CJK SC"
+fc-match "Noto Sans CJK SC:bold"
+```
 
-Expected: 输出若干行，形如 `/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc: Noto Sans SC,思源黑体...`
+Expected（**已实测确认**）：
+```
+/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc: Noto Sans CJK SC:style=Regular
+NotoSansCJK-Regular.ttc: "Noto Sans CJK SC" "Regular"
+NotoSansCJK-Bold.ttc: "Noto Sans CJK SC" "Bold"
+```
 
-记下**文件绝对路径**和**字体族名**（`Noto Sans SC`）。ASS 样式里的 `Fontname` 必须和字体族名**精确匹配**，拼错的表现是"字幕不显示"或"渲染成方块"，而且不报错——这是个很难查的坑。
+**字体族名是 `Noto Sans CJK SC`，不是 `Noto Sans SC`。** 这个坑已经踩过并记录在 RESULTS.md 里：`fc-match "Noto Sans SC"` 会**静默回退**到 DejaVu Sans（一个中文字都没有），于是 ASS 里写错族名的表现是"字幕渲染成方块或完全不显示，且 ffmpeg 不报任何错"。
+
+ASS 样式里的 `Fontname` 必须和族名**精确匹配**。**验证方式是 `fc-match`，不是肉眼比对**——它找不到就回退，回退是静默的。
 
 - [ ] **Step 4: 记录结论**
 
@@ -110,7 +122,7 @@ WrapStyle: 2
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Karaoke,Noto Sans SC,90,&H0000FFFF,&H00FFFFFF,&H00000000,&H00000000,1,0,0,0,100,100,0,0,1,5,0,2,40,40,300,1
+Style: Karaoke,Noto Sans CJK SC,90,&H0000FFFF,&H00FFFFFF,&H00000000,&H00000000,1,0,0,0,100,100,0,0,1,5,0,2,40,40,300,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -249,7 +261,7 @@ Expected:
 ```
 
 **如果失败**：
-- 全程 0 个黄色像素 → 十有八九是 `Fontname` 和字体族名对不上。用 Task 1 记的族名替换 `test.ass` 里的 `Noto Sans SC`，重跑。
+- 全程 0 个黄色像素 → 十有八九是 `Fontname` 和字体族名对不上。用 Task 1 记的族名替换 `test.ass` 里的 `Noto Sans CJK SC`，重跑。
 - 有黄色但不递增 → `\kf` 真的不生效。**这是 NO-GO**，停下来报告，设计文档第 7 节要改（退回只做整行显示，或改用逐帧 Canvas 渲染）。
 
 - [ ] **Step 5: 人工确认一眼**
@@ -351,8 +363,8 @@ cd -
     workerUrl: './node_modules/jassub/dist/jassub-worker.js',
     wasmUrl: './node_modules/jassub/dist/jassub-worker.wasm',
     fonts: [new Uint8Array(fontBuf)],
-    availableFonts: { 'noto sans sc': new Uint8Array(fontBuf) },
-    fallbackFont: 'noto sans sc',
+    availableFonts: { 'noto sans cjk sc': new Uint8Array(fontBuf) },
+    fallbackFont: 'noto sans cjk sc',
   })
 
   log('JASSUB 已启动。请确认字幕出现且黄色扫光随播放推进。')
