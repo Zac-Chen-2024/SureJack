@@ -25,3 +25,11 @@ spikes/doc-parse/samples/
 .DS_Store
 spikes/**/VERDICT.txt
 spikes/jassub/default.woff2
+
+# Example/ 是试验场：源素材和成片都太大，且属于用户数据
+Example/*.mp4
+spikes/demo/voice.mp3
+spikes/demo/bgm.mp3
+spikes/demo/timings.json
+spikes/demo/subtitle.ass
+spikes/demo/node_modules
