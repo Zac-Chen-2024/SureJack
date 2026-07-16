@@ -183,7 +183,13 @@ ASS 原生提供了我们需要的一切：
 
 **`PlayResX` / `PlayResY` 必须等于输出分辨率**，否则预览和成片的字幕大小会漂移。
 
-**字体：思源黑体（Noto Sans SC）**，开源、免费商用、够粗压得住画面。
+**字体：思源黑体**，开源、免费商用、够粗压得住画面。
+
+> **ASS 里的 `Fontname` 必须精确写 `Noto Sans CJK SC`**（已实测确认，见 `docs/superpowers/spikes/RESULTS.md`）。**不是 `Noto Sans SC`**——那个族名不存在，`fc-match` 会**静默回退**到 DejaVu Sans（零个中文字形），表现为字幕渲染成方块或完全不显示，**且 ffmpeg 不报错**。
+>
+> 这个值必须是**配置常量，不是散落的字符串字面量**，且服务启动时应校验字体可解析——静默失败的东西必须主动探测。
+>
+> 字体文件：`/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc`（20.0 MB）。
 
 > **注意**：JASSUB **不能使用系统字体**，必须由前端显式提供字体文件。所以同一个字体文件要同时给到两端——服务器上给 ffmpeg（`fontsdir`），HTTP 给前端（JASSUB）。完整 CJK 字体十几 MB，首次加载有感知，需要缓存。**两端必须是同一个文件**，否则"同一个渲染器"的保证就破了。
 
