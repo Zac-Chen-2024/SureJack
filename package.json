@@ -8,7 +8,9 @@
   },
   "scripts": {
     "test": "vitest run",
-    "cli": "tsx src/cli.ts"
+    "cli": "tsx src/cli.ts",
+    "server": "tsx src/server.ts",
+    "reset-password": "tsx src/cli/reset-password.ts"
   },
   "keywords": [],
   "author": "",
@@ -18,14 +20,19 @@
     "node": ">=24"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^26.1.1",
     "tsx": "^4.23.1",
     "typescript": "^7.0.2",
     "vitest": "^4.1.10"
   },
   "dependencies": {
+    "@fastify/cookie": "^11.1.2",
+    "@fastify/rate-limit": "^11.1.0",
+    "better-sqlite3": "^12.11.1",
     "chardet": "^2.2.0",
     "dotenv": "^17.4.2",
+    "fastify": "^5.10.0",
     "iconv-lite": "^0.7.3",
     "mammoth": "^1.12.0",
     "microsoft-cognitiveservices-speech-sdk": "^1.50.0"
