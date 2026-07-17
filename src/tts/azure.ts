@@ -5,6 +5,23 @@ import type { WordTiming, TtsResult } from '../types.js'
 /** F0 免费层单次请求的音频上限是 10 分钟 */
 const MAX_AUDIO_MS = 10 * 60 * 1000
 
+/**
+ * 拦截判断的保守系数。
+ *
+ * estimateAudioMs 只基于单一实测样本（单一音色、单一语速、纯中文），
+ * 而且连那一个样本都低估了：937 字 × 196ms = 183,652ms，实测却是
+ * 184,200ms。语速、停顿、标点密度都会让 196 这个系数继续波动。
+ *
+ * 这个估算的唯一用途是【提交前拦截超过 10 分钟的文案】，而高估和低估
+ * 的代价完全不对等：
+ *   - 高估 → 错误拒绝了本可用的文案，用户体验差，但零成本。
+ *   - 低估 → 放行了实际会超时的文案，打到 Azure 才失败，白白烧掉一次
+ *     限速 20 次/60 秒 的请求，且失败发生在流程末端，排查成本高。
+ *
+ * 所以拦截判断宁可错杀，不可放过：估算值再乘一个保守系数。
+ */
+const REJECTION_SAFETY_MARGIN = 1.15
+
 /** 实测：937 字 → 184.2 秒，约 196 ms/字。用于提交前拦截，不求精确。 */
 export function estimateAudioMs (charCount: number): number {
   return charCount * 196
@@ -36,7 +53,6 @@ export interface SynthesizeOptions {
   text: string
   outPath: string
   voice?: string
-  rate?: number
   key: string
   region: string
 }
@@ -51,7 +67,7 @@ export interface SynthesizeOptions {
  */
 export function synthesize (opts: SynthesizeOptions): Promise<TtsResult> {
   const est = estimateAudioMs(opts.text.length)
-  if (est > MAX_AUDIO_MS) {
+  if (est * REJECTION_SAFETY_MARGIN > MAX_AUDIO_MS) {
     throw new Error(
       `文案太长（约 ${Math.round(est / 60000)} 分钟音频），` +
       `超过免费层单次 10 分钟的上限。请拆成多个项目。`
@@ -75,7 +91,23 @@ export function synthesize (opts: SynthesizeOptions): Promise<TtsResult> {
       }))
     }
 
+    // 兜底：底层 WebSocket 若因网络分区或服务端挂起而从不触发任何回调，
+    // Promise 会永远不 settle，synth.close() 也永远不会被调用——连接
+    // 一直挂着，上层拿不到任何信号。超时后主动关闭并 reject。
+    // 时长给足 5 分钟：合成接近 10 分钟音频本身就需要时间。
+    const timeoutMs = 5 * 60 * 1000
+    let settled = false
+    const timer = setTimeout(() => {
+      if (settled) return
+      settled = true
+      synth.close()
+      reject(new Error(`配音超时：${Math.round(timeoutMs / 60000)} 分钟内未收到 Azure 响应`))
+    }, timeoutMs)
+
     synth.speakTextAsync(opts.text, (result) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
       synth.close()
       if (result.reason !== sdk.ResultReason.SynthesizingAudioCompleted) {
         // 配额耗尽和限流都会走到这里，把原始信息带出去让上层能区分
@@ -87,6 +119,12 @@ export function synthesize (opts: SynthesizeOptions): Promise<TtsResult> {
         durationMs: result.audioDuration / 10000,
         words,
       })
-    }, (err) => { synth.close(); reject(new Error(`配音出错：${err}`)) })
+    }, (err) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      synth.close()
+      reject(new Error(`配音出错：${err}`))
+    })
   })
 }
