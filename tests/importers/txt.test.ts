@@ -30,4 +30,18 @@ describe('importTxt', () => {
     expect(r.encoding.toLowerCase()).toMatch(/gb/)
     expect(r.confidence).toBeGreaterThan(0)
   })
+
+  it('空文件抛错——不能让空字符串静默流进 TTS（I2）', () => {
+    expect(() => importTxt(Buffer.alloc(0))).toThrow(/空/)
+  })
+
+  it('只有空白字符的文件也算空文本，抛错', () => {
+    expect(() => importTxt(Buffer.from('   \n\n  \t  ', 'utf-8'))).toThrow(/空/)
+  })
+
+  it('乱码内容抛错，不静默放行（I2，复用 looksLikeMojibake）', () => {
+    // 与 doc.test.ts 用的是同一份已验证的乱码样本（UTF-8 被当 cp1252 读出来的形态）
+    const mojibake = 'è¿™ä¸æ˜¯ä¸€ä¸ªçœŸæ£çš„ txt æ–‡ä»¶'
+    expect(() => importTxt(Buffer.from(mojibake, 'utf-8'))).toThrow(/乱码/)
+  })
 })
