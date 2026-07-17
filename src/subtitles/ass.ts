@@ -52,6 +52,16 @@ export function escapeAssText (s: string): string {
  * 与音频脱节——听着念到了下一个词，画面上还没亮。
  *
  * ⚠️ 按【词】分组，不按字。Azure 给的就是词级时间戳（「震惊」是一个整词）。
+ *
+ * ⚠️ 隐性契约：这个函数假设 `line.words` 是真正的词级切分（每个 word
+ * 是一个可以单独扫光的短语/词）。SRT 来源的 SubtitleLine（见 srt.ts）
+ * 把整句话塞进一个"词"里（words 数组长度恒为 1），如果把它喂给
+ * buildKaraoke，会产出一个覆盖整句时长的单个 \kf 标签——扫光效果会把
+ * 整句话当一个字等比例扫光，跟真实语速完全脱节，但不会报错也不会崩溃，
+ * 是纯视觉上的"能跑但错"。目前靠 cli.ts 的调用约定兜底（SRT 路径强制
+ * `mode: 'line'`，从不传给这里），这个函数本身没有运行时校验——新增调用
+ * 点（例如给 SRT 路径加一个 karaoke 选项）时，务必先确认 words 真的是
+ * 词级而非句级切分。
  */
 export function buildKaraoke (line: SubtitleLine): string {
   return line.words.map((word, i) => {

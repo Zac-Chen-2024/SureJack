@@ -37,3 +37,12 @@ spikes/demo/node_modules
 
 # 个人权限偏好，不该跟着仓库跑到别人机器上
 .claude/settings.local.json
+
+# ExampleReal/ 是用户真实素材（配音+字幕），大文件 + 私人内容，绝不入库
+ExampleReal/
+# Example/ 的媒体和用户文案也不入库（test.txt 作为 demo fixture 保留）
+Example/*.mp3
+Example/*.srt
+# 任何 token / 凭据文件
+*[Tt]oken*
+*.token
