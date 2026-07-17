@@ -12,8 +12,14 @@ import type { WordTiming, SubtitleLine } from '../types.js'
  * 这是纯函数：无 IO、无状态。结果是推导数据，不入库。
  */
 export function segmentLines (words: WordTiming[], maxChars: number): SubtitleLine[] {
+  if (!Number.isFinite(maxChars) || maxChars <= 0) {
+    throw new Error(`maxChars 必须是正数，收到 ${maxChars}`)
+  }
+
   const lines: SubtitleLine[] = []
   let cur: WordTiming[] = []
+
+  const curChars = (): number => cur.reduce((n, x) => n + [...x.text].length, 0)
 
   const flush = (): void => {
     if (cur.length === 0) return
@@ -28,13 +34,35 @@ export function segmentLines (words: WordTiming[], maxChars: number): SubtitleLi
   }
 
   for (const word of words) {
+    if (word.isPunctuation) {
+      // 连续标点：上一个标点刚断完行，cur 是空的。标点不能独占一行
+      // （屏幕上会闪过一个孤零零的标点），把它附回上一行末尾，并把
+      // 上一行的 endMs 延到这个标点的结束——时间戳依然完全由词时间推导。
+      const prevLine = lines[lines.length - 1]
+      if (cur.length === 0 && prevLine !== undefined) {
+        prevLine.words.push(word)
+        prevLine.endMs = word.offsetMs + word.durationMs
+        continue
+      }
+      // 标点留在本行末尾，不参与 maxChars 判断——标点通常只占 1 字，
+      // 宁可让行略微超限也要让标点跟着正文，这是排版常识。
+      cur.push(word)
+      flush()
+      continue
+    }
+
+    // 先判断再 push：若加入本词会让当前行超限，且当前行已有内容，
+    // 就先断行，避免词已经进了 cur 才检查导致最后一个词把行撑爆。
+    //
+    // 无法避免的边界：单个词本身就超过 maxChars（例如一个 5 字词配
+    // maxChars=4）时，它只能独占一行并超限——这是有意为之，不是漏洞。
+    const wordChars = [...word.text].length
+    if (cur.length > 0 && curChars() + wordChars > maxChars) {
+      flush()
+    }
     cur.push(word)
 
-    // 标点断行：标点留在本行末尾
-    if (word.isPunctuation) { flush(); continue }
-
-    const chars = cur.reduce((n, x) => n + [...x.text].length, 0)
-    if (chars >= maxChars) flush()
+    if (curChars() >= maxChars) flush()
   }
 
   flush()   // 末尾没有标点时也要收尾，否则丢最后一行

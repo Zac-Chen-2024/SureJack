@@ -56,4 +56,46 @@ describe('segmentLines', () => {
     expect(lines).toHaveLength(1)
     expect(lines[0]!.words[0]!.text).toBe('包子')
   })
+
+  it('非均匀词长下单行不超出 maxChars——老陈(2字)+包子铺(3字)，maxChars=4', () => {
+    // 真实 Azure 中文分词的词长是 1-4 字不均匀的，"先 push 再判断" 会让
+    // 最后一个词把行撑爆（2+3=5 > 4）。必须先判断再 push。
+    const words = [w('老陈', 0, 500), w('包子铺', 500, 600)]
+    const lines = segmentLines(words, 4)
+    expect(lines).toHaveLength(2)
+    expect(lines[0]!.words.map((x) => x.text).join('')).toBe('老陈')
+    expect(lines[1]!.words.map((x) => x.text).join('')).toBe('包子铺')
+    for (const line of lines) {
+      const chars = line.words.reduce((n, x) => n + [...x.text].length, 0)
+      expect(chars).toBeLessThanOrEqual(4)
+    }
+  })
+
+  it('连续标点不产出只有标点的孤行，附回上一行末尾并延长 endMs', () => {
+    const words = [
+      w('老陈', 0, 500),
+      w('！', 500, 100, true),
+      w('？', 600, 80, true),
+      w('好', 680, 100),
+    ]
+    const lines = segmentLines(words, 4)
+    expect(lines).toHaveLength(2)
+    expect(lines[0]!.words.map((x) => x.text).join('')).toBe('老陈！？')
+    expect(lines[0]!.endMs).toBe(680)   // 600 + 80，跟着最后一个标点延长
+    expect(lines[1]!.words.map((x) => x.text).join('')).toBe('好')
+  })
+
+  it('单个词本身超过 maxChars 时独占一行且允许超限（已知边界，非漏洞）', () => {
+    const words = [w('包子铺老板', 0, 500), w('好', 500, 100)]
+    const lines = segmentLines(words, 4)
+    expect(lines).toHaveLength(2)
+    expect(lines[0]!.words.map((x) => x.text).join('')).toBe('包子铺老板')
+    expect(lines[0]!.words.reduce((n, x) => n + [...x.text].length, 0)).toBe(5)
+    expect(lines[1]!.words.map((x) => x.text).join('')).toBe('好')
+  })
+
+  it('maxChars <= 0 直接抛错，不静默退化成逐词断行', () => {
+    expect(() => segmentLines([w('包子', 0, 500)], 0)).toThrow()
+    expect(() => segmentLines([w('包子', 0, 500)], -1)).toThrow()
+  })
 })
