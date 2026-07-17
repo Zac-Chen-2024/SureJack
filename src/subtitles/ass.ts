@@ -9,13 +9,39 @@ export interface BuildAssOptions {
   mode: 'line' | 'karaoke'
 }
 
-/** 毫秒 → ASS 时间码 H:MM:SS.cc */
+/**
+ * 毫秒 → ASS 时间码 H:MM:SS.cc
+ *
+ * ⚠️ 必须先把毫秒舍入到整数厘秒（ASS 的时间精度），再用整数除法/取余
+ * 逐级算出 h/m/s/cs。不能先算未舍入的 h/m，再对秒数单独 toFixed(2)——
+ * 那样秒的四舍五入进位（如 59.999 → "60.00"）不会级联回分钟/小时，
+ * 产出 "0:00:60.00" 这种非法时间码。全程整数运算，从根上避免这个问题。
+ */
 export function formatAssTime (ms: number): string {
-  const t = Math.max(0, ms) / 1000
-  const h = Math.floor(t / 3600)
-  const m = Math.floor((t % 3600) / 60)
-  const s = (t % 60).toFixed(2).padStart(5, '0')
-  return `${h}:${String(m).padStart(2, '0')}:${s}`
+  const totalCs = Math.round(Math.max(0, ms) / 10)
+  const h = Math.floor(totalCs / 360000)
+  const m = Math.floor((totalCs % 360000) / 6000)
+  const s = Math.floor((totalCs % 6000) / 100)
+  const cs = totalCs % 100
+  return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(cs).padStart(2, '0')}`
+}
+
+/**
+ * 转义 ASS 纯文本，防止用户可编辑文案（标题、免责声明、字幕词）
+ * 被当成 ASS 语法解析。
+ *
+ * ⚠️ 只能用于用户文本。我们自己生成的样式标签（如 buildKaraoke 产出的
+ * `{\kf50}`）绝不能经过这个函数——那会把我们自己的合法标签也转义掉。
+ *
+ * 顺序很重要：反斜杠必须最先替换，否则会把后面替换 { } 换行时
+ * 产生的反斜杠再次转义。
+ */
+export function escapeAssText (s: string): string {
+  return s
+    .replace(/\\/g, '\\\\')
+    .replace(/\{/g, '\\{')
+    .replace(/\}/g, '\\}')
+    .replace(/\r\n|\r|\n/g, '\\N')
 }
 
 /**
@@ -31,7 +57,8 @@ export function buildKaraoke (line: SubtitleLine): string {
   return line.words.map((word, i) => {
     const next = line.words[i + 1]
     const spanMs = next ? next.offsetMs - word.offsetMs : word.durationMs
-    return `{\\kf${Math.round(spanMs / 10)}}${word.text}`   // ASS 的 \k 单位是厘秒
+    // {\kf..} 是我们自己生成的标签，不转义；word.text 是用户/ASR 来的文本，要转义
+    return `{\\kf${Math.round(spanMs / 10)}}${escapeAssText(word.text)}`   // ASS 的 \k 单位是厘秒
   }).join('')
 }
 
@@ -51,7 +78,7 @@ export function buildAss (opts: BuildAssOptions): string {
   const dialogues = lines.map((line) => {
     const text = mode === 'karaoke'
       ? buildKaraoke(line)
-      : line.words.map((w) => w.text).join('')
+      : line.words.map((w) => escapeAssText(w.text)).join('')
     return `Dialogue: 0,${formatAssTime(line.startMs)},${formatAssTime(line.endMs)},Sub,,0,0,0,,${text}`
   })
 
@@ -59,7 +86,7 @@ export function buildAss (opts: BuildAssOptions): string {
   const overlayLines = overlays.map((o) => {
     const start = formatAssTime(o.startMs ?? 0)
     const end = formatAssTime(o.endMs ?? durationMs)
-    return `Dialogue: 1,${start},${end},${o.style},,0,0,0,,${o.content}`
+    return `Dialogue: 1,${start},${end},${o.style},,0,0,0,,${escapeAssText(o.content)}`
   })
 
   return `[Script Info]
