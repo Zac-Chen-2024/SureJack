@@ -150,6 +150,13 @@ async function main () {
   const lines = parseSrt(srtText)
   console.log(`  ${lines.length} 条字幕`)
 
+  if (lines.length === 0) {
+    throw new Error(
+      `SRT 解析出 0 条字幕：${values.srt}\n` +
+      '请检查文件格式——时间码应为 HH:MM:SS,mmm（逗号或点分隔毫秒）。'
+    )
+  }
+
   console.log('→ 探测配音时长')
   const durationMs = await probeDurationMs(values.audio!)
   console.log(`  ${(durationMs / 1000).toFixed(1)} 秒`)

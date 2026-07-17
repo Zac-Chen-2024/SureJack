@@ -1,6 +1,6 @@
 import type { SubtitleLine } from '../types.js'
 
-const TIME_RE = /^(\d{2}):(\d{2}):(\d{2}),(\d{3})\s*-->\s*(\d{2}):(\d{2}):(\d{2}),(\d{3})/
+const TIME_RE = /^(\d{2}):(\d{2}):(\d{2})[,.](\d{3})\s*-->\s*(\d{2}):(\d{2}):(\d{2})[,.](\d{3})/
 
 function toMs (h: string, m: string, s: string, ms: string): number {
   return ((parseInt(h, 10) * 3600 + parseInt(m, 10) * 60 + parseInt(s, 10)) * 1000) + parseInt(ms, 10)

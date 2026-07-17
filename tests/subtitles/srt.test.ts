@@ -93,4 +93,16 @@ describe('parseSrt', () => {
     expect(lines[0]!.startMs).toBe(0)
     expect(lines[0]!.endMs).toBe(1073)
   })
+
+  it('点分隔毫秒 00:00:01.073 也能解析成 1073ms', () => {
+    const srt = `1
+00:00:01.073 --> 00:00:02.196
+点分隔的时间码
+`
+    const lines = parseSrt(srt)
+    expect(lines).toHaveLength(1)
+    expect(lines[0]!.startMs).toBe(1073)
+    expect(lines[0]!.endMs).toBe(2196)
+    expect(lines[0]!.words[0]!.text).toBe('点分隔的时间码')
+  })
 })
