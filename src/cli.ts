@@ -104,6 +104,14 @@ async function main () {
     const tts = await synthesize({ text, outPath: '/tmp/sj-voice.mp3', key, region })
     console.log(`  ${(tts.durationMs / 1000).toFixed(1)} 秒，${tts.words.length} 个词级事件`)
 
+    // 静默失败守卫：Azure 的词级时间戳文档本身注明并非所有语音/格式
+    // 组合都保证触发 wordBoundary。如果一个都没触发，segmentLines([])
+    // 会静默返回空数组——成片有声音、有画面，就是没有任何叙述字幕，
+    // 不报错也不崩溃，用户很可能要等看完成片才会发现。必须在这里挡住。
+    if (tts.words.length === 0) {
+      throw new Error('配音没有返回任何字级时间戳，无法生成字幕。请重试，或换一个音色。')
+    }
+
     console.log('→ 断句并生成 ASS')
     const lines = segmentLines(tts.words, 14)
     const ass = buildAss({ lines, overlays, aspect, durationMs: tts.durationMs, mode })
