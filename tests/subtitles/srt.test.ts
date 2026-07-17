@@ -94,6 +94,55 @@ describe('parseSrt', () => {
     expect(lines[0]!.endMs).toBe(1073)
   })
 
+  it('两条 cue 之间缺空行——序号+时间码不能被塞进上一条的正文（I1/T11.5）', () => {
+    // 中间故意不留空行：Hello world 后直接接下一条的序号"2"
+    const srt = `1
+00:00:00,000 --> 00:00:01,000
+Hello world
+2
+00:00:02,000 --> 00:00:04,000
+Second line
+`
+    const lines = parseSrt(srt)
+    expect(lines).toHaveLength(2)
+    expect(lines[0]!.words[0]!.text).toBe('Hello world')
+    expect(lines[0]!.endMs).toBe(1000)
+    expect(lines[1]!.words[0]!.text).toBe('Second line')
+    expect(lines[1]!.startMs).toBe(2000)
+    // 关键断言：第一条正文里绝不能出现第二条的序号/时间码
+    expect(lines[0]!.words[0]!.text).not.toMatch(/\d{2}:\d{2}:\d{2}/)
+    expect(lines[0]!.words[0]!.text).not.toContain('2\n')
+  })
+
+  it('多条 cue 连续缺空行，全部正确重新切分', () => {
+    const srt = `1
+00:00:00,000 --> 00:00:01,000
+第一句
+2
+00:00:01,000 --> 00:00:02,000
+第二句
+3
+00:00:02,000 --> 00:00:03,000
+第三句
+`
+    const lines = parseSrt(srt)
+    expect(lines).toHaveLength(3)
+    expect(lines.map((l) => l.words[0]!.text)).toEqual(['第一句', '第二句', '第三句'])
+  })
+
+  it('缺空行且没有序号行（时间码直接紧跟上一条正文）也能正确切分', () => {
+    const srt = `1
+00:00:00,000 --> 00:00:01,000
+第一句
+00:00:01,000 --> 00:00:02,000
+第二句
+`
+    const lines = parseSrt(srt)
+    expect(lines).toHaveLength(2)
+    expect(lines[0]!.words[0]!.text).toBe('第一句')
+    expect(lines[1]!.words[0]!.text).toBe('第二句')
+  })
+
   it('点分隔毫秒 00:00:01.073 也能解析成 1073ms', () => {
     const srt = `1
 00:00:01.073 --> 00:00:02.196
