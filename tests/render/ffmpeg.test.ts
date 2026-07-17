@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseProgress, buildArgs } from '../../src/render/ffmpeg.js'
+import { parseProgress, buildArgs, createProgressParser } from '../../src/render/ffmpeg.js'
 import { ASPECT_PRESETS } from '../../src/config.js'
 import type { RenderJob } from '../../src/types.js'
 
@@ -25,6 +25,49 @@ describe('parseProgress', () => {
 
   it('百分比夹在 0..100，不会超过 100', () => {
     expect(parseProgress('out_time_ms=999999000', 184200)).toBe(100)
+  })
+})
+
+describe('createProgressParser', () => {
+  it('完整行正常回调', () => {
+    const calls: number[] = []
+    const parser = createProgressParser(184200, (pct) => calls.push(pct))
+    parser('out_time_ms=92100000\n')
+    expect(calls).toEqual([expect.closeTo(50, 0)])
+  })
+
+  it('行在 chunk 边界被切断时缓冲并正确解析', () => {
+    const calls: number[] = []
+    const parser = createProgressParser(184200, (pct) => calls.push(pct))
+    // out_time_ms=92100000 被拆成 out_time_ms=921 和 00000\n 两个 chunk
+    // 不应该回调 0.0005%，而是正确的 50%，且只回调一次
+    parser('out_time_ms=921')
+    expect(calls).toEqual([]) // 第一个 chunk 不完整，不应该回调
+    parser('00000\n')
+    expect(calls).toEqual([expect.closeTo(50, 0)]) // 拼完了才回调
+  })
+
+  it('一次多行也正常处理', () => {
+    const calls: number[] = []
+    const parser = createProgressParser(184200, (pct) => calls.push(pct))
+    parser('out_time_ms=46050000\nout_time_ms=92100000\n')
+    expect(calls).toEqual([expect.closeTo(25, 0), expect.closeTo(50, 0)])
+  })
+
+  it('无关行被忽略', () => {
+    const calls: number[] = []
+    const parser = createProgressParser(184200, (pct) => calls.push(pct))
+    parser('frame=100\nout_time_ms=92100000\nfps=30\n')
+    expect(calls).toEqual([expect.closeTo(50, 0)])
+  })
+
+  it('最后不完整的行被保留到下次', () => {
+    const calls: number[] = []
+    const parser = createProgressParser(184200, (pct) => calls.push(pct))
+    parser('out_time_ms=46050000\nout_time_ms=921')
+    expect(calls).toEqual([expect.closeTo(25, 0)])
+    parser('00000\n')
+    expect(calls).toEqual([expect.closeTo(25, 0), expect.closeTo(50, 0)])
   })
 })
 

@@ -15,6 +15,31 @@ export function parseProgress (chunk: string, totalMs: number): number | null {
 }
 
 /**
+ * 创建一个行缓冲解析器。
+ *
+ * stdout 的 data 事件不保证按行切分，可能在中间切断数字。例如若
+ * `out_time_ms=92100000\n` 被拆成 `out_time_ms=921` 和 `00000\n` 两个 chunk，
+ * 直接喂给 parseProgress 会得到 0.0005% 的错误百分比，导致进度条倒退。
+ * 本函数负责缓冲不完整行，确保只向回调传递完整行。
+ */
+export function createProgressParser (
+  totalMs: number,
+  onProgress: (pct: number) => void
+): (chunk: string) => void {
+  let buf = ''
+  return (chunk: string) => {
+    buf += chunk
+    const lines = buf.split('\n')
+    // 最后一段可能不完整，留到下次 chunk 再拼接
+    buf = lines.pop() ?? ''
+    for (const line of lines) {
+      const pct = parseProgress(line, totalMs)
+      if (pct !== null) onProgress(pct)
+    }
+  }
+}
+
+/**
  * 构造 ffmpeg 参数。
  *
  * 输入顺序（滤镜里靠这个索引）：0=背景视频，1=配音，2=BGM（若有）。
@@ -63,10 +88,10 @@ export function render (job: RenderJob, onProgress?: (pct: number) => void): Pro
   return new Promise((resolve, reject) => {
     const proc = spawn('ffmpeg', buildArgs(job))
     let stderr = ''
+    const parser = onProgress ? createProgressParser(job.durationMs, onProgress) : null
 
     proc.stdout.on('data', (d: Buffer) => {
-      const pct = parseProgress(d.toString(), job.durationMs)
-      if (pct !== null) onProgress?.(pct)
+      if (parser) parser(d.toString())
     })
     proc.stderr.on('data', (d: Buffer) => { stderr += d.toString() })
 
