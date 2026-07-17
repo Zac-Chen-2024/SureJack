@@ -4,7 +4,8 @@ import type { Clip, AspectPreset } from '../types.js'
  * 构造把一个片段塞进目标画幅的滤镜链。
  *
  * ⚠️ 坐标系必须和前端预览严格一致（设计文档第 15 节风险 5）。
- * cropOffset 的定义：裁切窗口中心在源画面中的归一化位置，0..1。
+ * cropOffset 的定义：裁切窗口的插值比例，0..1。0=贴源图边缘，1=贴对边，0.5=居中。
+ * 不是「窗口中心像素/源宽」，而是「窗口在可行范围内的位置比例」，与 CSS object-position 同义。
  */
 export function buildFitFilter (
   clip: Clip, aspect: AspectPreset, inLabel: string, outLabel: string,
@@ -18,6 +19,8 @@ export function buildFitFilter (
 
   switch (clip.fitMode) {
     case 'cover':
+      // cropOffset 插值公式：裁切窗口的左上角 = (源尺寸-窗口尺寸) * offset
+      // 即 offset=0 时窗口贴源图边缘，offset=1 时贴对边，offset=0.5 时居中
       return `[${inLabel}]${pre}scale=${W}:${H}:force_original_aspect_ratio=increase,` +
         `crop=${W}:${H}:(iw-ow)*${clip.cropOffsetX}:(ih-oh)*${clip.cropOffsetY}[${outLabel}]`
 

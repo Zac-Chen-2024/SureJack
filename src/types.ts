@@ -26,7 +26,12 @@ export type FitMode = 'cover' | 'contain' | 'blur'
 export interface Clip {
   path: string
   fitMode: FitMode
-  /** 裁切窗口中心在源画面中的归一化位置，0..1，默认 0.5。仅 cover 模式有意义 */
+  /**
+   * 裁切窗口的水平/竖直插值比例，范围 0..1（默认 0.5）。仅 cover 模式有意义。
+   * 语义：窗口在可行范围内的位置比例。0=贴源图左/上边缘，1=贴右/下边缘，0.5=精确居中。
+   * 实现公式：左上角=(源宽-窗宽)*X，与 CSS object-position 百分比语义同义。
+   * ⚠️ 将来写前端预览滑块时，务必按插值而非「中心像素/源宽」实现，否则预览与成片坐标会不一致。
+   */
   cropOffsetX: number
   cropOffsetY: number
   /** 源视频自身的裁剪，用于切掉烧死的字幕等。可空 */
