@@ -1,6 +1,7 @@
 import Fastify, { type FastifyInstance, type FastifyError } from 'fastify'
 import rateLimit from '@fastify/rate-limit'
-import { readFileSync } from 'node:fs'
+import fastifyStatic from '@fastify/static'
+import { readFileSync, existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { randomBytes } from 'node:crypto'
@@ -65,6 +66,25 @@ export function loadWhitelist (): string[] {
 }
 
 /**
+ * 加载欢迎页文案（姓名 → 欢迎语）。
+ * 真文案在 config/welcome.json（含真名，不入库），缺失时回退 example。
+ * 与白名单同样的规则：文件存在但格式损坏 → 抛错，绝不静默降级。
+ */
+export function loadWelcome (): Record<string, string> {
+  const root = join(__dirname, '..')
+  for (const name of ['welcome.json', 'welcome.example.json']) {
+    const p = join(root, 'config', name)
+    if (!existsSync(p)) continue
+    const parsed = JSON.parse(readFileSync(p, 'utf-8'))
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      throw new Error(`${name} 格式错误：应为 {姓名: 欢迎语} 对象`)
+    }
+    return parsed as Record<string, string>
+  }
+  return {}
+}
+
+/**
  * 全局错误处理器（设计文档第13节：不把内部错误细节泄漏给客户端）。
  * 任何未被路由自己 catch 的异常（DB I/O 错误、类型错误……）最终都会
  * 落到这里——完整记日志给服务端排障，但 5xx 只回一个通用消息，绝不把
@@ -91,6 +111,7 @@ interface BuildOpts {
   authDbPath?: string
   whitelist?: string[]
   cookieSecret?: string
+  welcome?: Record<string, string>
 }
 
 export function buildServer (opts: BuildOpts = {}): FastifyInstance {
@@ -100,6 +121,7 @@ export function buildServer (opts: BuildOpts = {}): FastifyInstance {
   // 导致 @fastify/rate-limit 的按-IP 限流形同虚设，还会污染首登IP记录。
   const app = Fastify({ logger: opts.logger ?? false, trustProxy: '127.0.0.1' })
   const whitelist = opts.whitelist ?? loadWhitelist()
+  const welcome = opts.welcome ?? loadWelcome()
   const authDb = openAuthDb(opts.authDbPath ?? join(__dirname, '..', 'data', 'auth.db'))
   // 生产必须固定 COOKIE_SECRET（否则重启后所有会话失效）；
   // 没设时用随机值兜底，至少不会用空字符串/可预测值签名 cookie。
@@ -123,11 +145,26 @@ export function buildServer (opts: BuildOpts = {}): FastifyInstance {
       max: 10, timeWindow: '1 minute',
       allowList: [],   // 生产可加内网白名单
     })
-    registerAuthRoutes(scope, { authDb, whitelist })
+    registerAuthRoutes(scope, { authDb, whitelist, welcome })
     registerProjectRoutes(scope, { whitelist })
   })
 
   app.addHook('onClose', async () => authDb.close())
+
+  // 托管前端构建产物（同域，cookie 自动生效、无 CORS）。
+  // public/ 由 `cd web && npm run build` 生成；开发时用 vite dev + proxy，不走这里。
+  const publicDir = join(__dirname, '..', 'public')
+  if (existsSync(publicDir)) {
+    app.register(fastifyStatic, { root: publicDir })
+    // SPA fallback：非 /api 的未知路径一律回 index.html，交给前端路由
+    app.setNotFoundHandler((req, reply) => {
+      if (req.url.startsWith('/api/')) {
+        return reply.code(404).send({ error: '接口不存在' })
+      }
+      return reply.sendFile('index.html')
+    })
+  }
+
   return app
 }
 

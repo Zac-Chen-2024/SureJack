@@ -3,7 +3,7 @@ import type { AuthDb } from '../db/auth-db.js'
 import { isWhitelisted } from './whitelist.js'
 import { setSession, getSession, clearSession } from './session.js'
 
-interface Deps { authDb: AuthDb; whitelist: string[] }
+interface Deps { authDb: AuthDb; whitelist: string[]; welcome: Record<string, string> }
 
 /**
  * 挂载登录/登出/whoami。
@@ -96,5 +96,9 @@ export function registerAuthRoutes (app: FastifyInstance, deps: Deps): void {
     return { ok: true }
   })
 
-  app.get('/api/whoami', async (req) => ({ name: getSession(req) }))
+  app.get('/api/whoami', async (req) => {
+    const name = getSession(req)
+    if (!name) return { name: null, welcome: null }
+    return { name, welcome: deps.welcome[name] ?? '欢迎回来' }
+  })
 }

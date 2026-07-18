@@ -48,14 +48,16 @@ describe('登录流程', () => {
     expect(res.statusCode).toBe(401)
   })
 
-  it('whoami 未登录返回 null，登录后返回姓名', async () => {
+  it('whoami 未登录返回 null，登录后返回姓名和欢迎语', async () => {
     app = await makeApp()
     const anon = await app.inject({ method: 'GET', url: '/api/whoami' })
-    expect(anon.json()).toEqual({ name: null })
+    expect(anon.json()).toEqual({ name: null, welcome: null })
     const login = await app.inject({ method: 'POST', url: '/api/login', payload: { name: '李四', password: 'pass' } })
     const cookie = login.cookies.find((c) => c.name === 'sj_session')!.value
     const who = await app.inject({ method: 'GET', url: '/api/whoami', cookies: { sj_session: cookie } })
-    expect(who.json()).toEqual({ name: '李四' })
+    // makeApp() 没传 welcome，'李四' 也不在真实/示例 welcome 配置里——
+    // 走 whoami 里的通用兜底文案 '欢迎回来'（见 src/auth/routes.ts）。
+    expect(who.json()).toEqual({ name: '李四', welcome: '欢迎回来' })
   })
 })
 

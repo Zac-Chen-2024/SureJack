@@ -54,3 +54,6 @@ config/whitelist.json
 public/
 web/node_modules/
 web/dist/
+
+# 真欢迎页文案（含真名），不入库
+config/welcome.json
