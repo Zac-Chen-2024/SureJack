@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useProjects } from '../store/projects'
 import { Button } from './ui/Button'
 import { Input } from './ui/Input'
+import { IconFileText, IconPlus, IconTrash } from './ui/Icon'
 
 export function ProjectList () {
   const { items, currentId, select, create, remove } = useProjects()
@@ -29,21 +30,16 @@ export function ProjectList () {
             onBlur={() => { if (!newName.trim()) setAdding(false) }}
           />
         ) : (
-          <Button className="w-full justify-start" onClick={() => setAdding(true)}>＋ 新建项目</Button>
+          <Button className="w-full justify-start" onClick={() => setAdding(true)}>
+            <IconPlus className="size-4" /> 新建项目
+          </Button>
         )}
       </div>
 
       <div className="flex-1 overflow-y-auto px-2">
         {items.length === 0 && (
           <div className="flex flex-col items-center gap-3 px-4 py-10 text-center">
-            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" className="text-ink-600" aria-hidden="true">
-              <path
-                d="M4 4.5A1.5 1.5 0 0 1 5.5 3h6.379a1.5 1.5 0 0 1 1.06.44l3.622 3.62A1.5 1.5 0 0 1 17 8.12V19.5A1.5 1.5 0 0 1 15.5 21h-10A1.5 1.5 0 0 1 4 19.5v-15Z"
-                stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round"
-              />
-              <path d="M12 3.4V7a1 1 0 0 0 1 1h3.6" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
-              <path d="M8 13.5h8M8 16.5h5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
-            </svg>
+            <IconFileText className="size-8 text-ink-600" />
             <div className="text-xs leading-relaxed text-ink-400">
               还没有项目<br />新建一个开始写文案
             </div>
@@ -72,9 +68,9 @@ export function ProjectList () {
             </div>
             <button
               onClick={(e) => { e.stopPropagation(); if (confirm(`删除「${p.name}」？`)) remove(p.id) }}
-              className="ml-2 hidden rounded-lg p-1 text-ink-400 hover:text-danger group-hover:block"
+              className="ml-2 hidden shrink-0 items-center justify-center rounded-lg p-1.5 text-ink-400 hover:bg-danger/10 hover:text-danger group-hover:flex"
               title="删除"
-            >×</button>
+            ><IconTrash className="size-4" /></button>
           </div>
         ))}
       </div>

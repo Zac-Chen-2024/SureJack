@@ -4,6 +4,7 @@ import { useProjects } from '../store/projects'
 import { ProjectList } from '../components/ProjectList'
 import { ScriptEditor } from '../components/ScriptEditor'
 import { Button } from '../components/ui/Button'
+import { IconChevronLeft, IconChevronRight, IconLogOut } from '../components/ui/Icon'
 
 /** 把 ISO 时间格式化成本地可读的日期时间，供属性面板展示 */
 function formatDate (iso: string) {
@@ -34,10 +35,10 @@ export function Workspace () {
           {!collapsed && <span className="text-sm font-semibold tracking-[-0.02em] text-ink-50">SureJack</span>}
           <button
             onClick={() => setCollapsed((c) => !c)}
-            className="rounded-lg p-1.5 text-ink-400 hover:bg-ink-800 hover:text-ink-100"
+            className="flex items-center justify-center rounded-lg p-1.5 text-ink-400 hover:bg-ink-800 hover:text-ink-100"
             title={collapsed ? '展开' : '收起'}
           >
-            {collapsed ? '›' : '‹'}
+            {collapsed ? <IconChevronRight className="size-4" /> : <IconChevronLeft className="size-4" />}
           </button>
         </div>
         <div className="flex-1 overflow-hidden">
@@ -46,7 +47,9 @@ export function Workspace () {
         {!collapsed && (
           <div className="border-t border-line p-2">
             <div className="mb-1 px-2 text-xs text-ink-400">{name}</div>
-            <Button className="w-full justify-start" onClick={logout}>登出</Button>
+            <Button className="w-full justify-start" onClick={logout}>
+              <IconLogOut className="size-4" /> 登出
+            </Button>
           </div>
         )}
       </aside>

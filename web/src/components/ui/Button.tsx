@@ -10,7 +10,9 @@ interface Props extends ButtonHTMLAttributes<HTMLButtonElement> {
  * 过渡与键盘 focus 光环由 index.css 全局兜底。
  */
 export function Button ({ variant = 'ghost', className = '', ...rest }: Props) {
-  const base = 'inline-flex items-center justify-center rounded-lg border border-transparent px-4 py-2 text-sm font-medium active:translate-y-[0.5px] disabled:cursor-not-allowed disabled:active:translate-y-0'
+  // gap-2 只在按钮同时有图标+文字时起作用（单一子元素时是 no-op）——
+  // 图标是界面的语法，和文字并排必须垂直居中、间距统一，不是各写各的
+  const base = 'inline-flex items-center justify-center gap-2 rounded-lg border border-transparent px-4 py-2 text-sm font-medium active:translate-y-[0.5px] disabled:cursor-not-allowed disabled:active:translate-y-0'
   const styles = {
     // 琥珀金背景亮度高，压深色字才够对比度——不是沿用旧版的白字
     // 禁用态用中性灰阶，不是把强调色调暗——调暗的 accent 会显脏

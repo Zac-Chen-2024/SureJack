@@ -63,10 +63,27 @@ button, input, textarea, a, [role="button"], .interactive {
 
 /* 键盘可见焦点：全局兜底的琥珀微光环。outline:none 绝不能不加替代就用——
    这条规则保证任何可交互元素只要能拿到焦点，就有看得见的反馈。 */
+/*
+ * 键盘焦点提示。只给「光晕」，不碰 border-color —— 边框颜色留给各组件自己定。
+ *
+ * 为什么：焦点提示的视觉重量应当与元素面积成反比。小元素（按钮、输入框）
+ * 可以有明显的环；而大面积元素（整个文案编辑区）若也套一圈亮琥珀，
+ * 整块看起来像报错状态而不是「这里被选中了」。之前全局强制
+ * border-color: accent 正是压掉了 textarea 自己那个极淡的边框。
+ *
+ * 大面积元素（.surface-focus-soft）另行降级处理，见下。
+ */
 :focus-visible {
   outline: none;
   box-shadow: 0 0 0 3px rgba(240, 180, 41, 0.15);
-  border-color: var(--color-accent);
+}
+
+/* 大面积书写表面：焦点只是边框极淡地提亮，光晕几乎察觉不到 */
+.surface-focus-soft:focus-visible {
+  box-shadow:
+    inset 0 1px 3px rgba(0, 0, 0, 0.3),
+    0 0 0 3px rgba(240, 180, 41, 0.06);
+  border-color: rgba(240, 180, 41, 0.22);
 }
 
 @media (prefers-reduced-motion: reduce) {

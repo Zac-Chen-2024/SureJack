@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useProjects } from '../store/projects'
+import { IconCheck, IconLoader } from './ui/Icon'
 
 /**
  * 文案编辑器。文案是项目的一等公民（设计文档），所以：
@@ -38,15 +39,21 @@ export function ScriptEditor () {
         <div className="tabular-nums text-xs text-ink-400">
           {charCount} 字 · 约 {Math.round(charCount * 0.196)} 秒配音
         </div>
-        <div className="text-xs text-ink-400">{saving ? '保存中…' : '已保存'}</div>
+        <div className="inline-flex items-center gap-1.5 text-xs text-ink-400">
+          {saving ? <IconLoader className="size-3.5 animate-spin" /> : <IconCheck className="size-3.5" />}
+          {saving ? '保存中…' : '已保存'}
+        </div>
       </div>
       {/* "纸面"处理：比周围主区亮一档 + 细描边 + 轻微内阴影，让编辑区读作
-          一张可以写字的纸，而不是又一块和主区同色的平面 */}
+          一张可以写字的纸，而不是又一块和主区同色的平面。
+          聚焦态刻意不用全局的琥珀光环——那是给按钮/输入框这类小面积元素的，
+          套在整块编辑区上会读作报错状态。这里只留极淡的琥珀提示 + 保留纸感阴影，
+          视觉重量和元素面积成反比。 */}
       <textarea
         value={text}
         onChange={(e) => onChange(e.target.value)}
         placeholder="把文案粘贴或写在这里…"
-        className="w-full max-w-[720px] flex-1 resize-none rounded-2xl border border-line bg-ink-800 p-6 text-[15px] leading-[1.9] text-ink-100 shadow-[inset_0_1px_3px_rgba(0,0,0,0.3)] outline-none placeholder:text-ink-400 focus:border-accent"
+        className="surface-focus-soft w-full max-w-[720px] flex-1 resize-none rounded-2xl border border-line bg-ink-800 p-6 text-[15px] leading-[1.9] text-ink-100 shadow-[inset_0_1px_3px_rgba(0,0,0,0.3)] outline-none placeholder:text-ink-400"
       />
     </div>
   )
