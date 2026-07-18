@@ -1,9 +1,12 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useSession } from './store/session'
 import { LoginPage } from './pages/LoginPage'
+import { WelcomePage } from './pages/WelcomePage'
+import { Workspace } from './pages/Workspace'
 
 export default function App () {
   const { status, check } = useSession()
+  const [entered, setEntered] = useState(false)
 
   useEffect(() => { check() }, [check])
 
@@ -12,5 +15,6 @@ export default function App () {
     return <div className="flex h-full items-center justify-center text-sm text-ink-400">载入中…</div>
   }
   if (status === 'anon') return <LoginPage />
-  return <div className="flex h-full items-center justify-center text-sm text-ink-400">已登录（工作台在 Task 6）</div>
+  if (!entered) return <WelcomePage onEnter={() => setEntered(true)} />
+  return <Workspace />
 }
