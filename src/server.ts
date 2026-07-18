@@ -11,6 +11,8 @@ import { registerAuthRoutes } from './auth/routes.js'
 import { registerProjectRoutes } from './projects/routes.js'
 import { registerAssetRoutes } from './assets/routes.js'
 import { registerTtsRoutes } from './tts/routes.js'
+import { ExportQueue } from './queue/queue.js'
+import { registerExportRoutes } from './queue/routes.js'
 import { openAuthDb } from './db/auth-db.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -129,6 +131,7 @@ export function buildServer (opts: BuildOpts = {}): FastifyInstance {
   // 生产必须固定 COOKIE_SECRET（否则重启后所有会话失效）；
   // 没设时用随机值兜底，至少不会用空字符串/可预测值签名 cookie。
   const secret = opts.cookieSecret ?? process.env.COOKIE_SECRET ?? randomBytes(32).toString('hex')
+  const queue = new ExportQueue()
 
   attachErrorHandler(app)
 
@@ -155,6 +158,7 @@ export function buildServer (opts: BuildOpts = {}): FastifyInstance {
     await scope.register(multipart, { limits: { fileSize: 500 * 1024 * 1024 } })
     registerAssetRoutes(scope, { whitelist })
     registerTtsRoutes(scope, { whitelist })
+    registerExportRoutes(scope, { whitelist, queue })
   })
 
   app.addHook('onClose', async () => authDb.close())
