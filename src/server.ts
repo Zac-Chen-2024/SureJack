@@ -1,4 +1,4 @@
-import Fastify, { type FastifyInstance } from 'fastify'
+import Fastify, { type FastifyInstance, type FastifyError } from 'fastify'
 import rateLimit from '@fastify/rate-limit'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
@@ -11,19 +11,78 @@ import { openAuthDb } from './db/auth-db.js'
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
 /**
- * 加载白名单。真名单放 config/whitelist.json（不入库），
- * 缺失时回退到 example（仅供本地起服务，生产必须提供真名单）。
+ * 读取并校验单个白名单文件：必须存在、是合法 JSON、且是字符串数组。
+ * 任何一条不满足都抛错——调用方决定"文件不存在"和"格式损坏"分别怎么处理。
  */
-export function loadWhitelist (): string[] {
-  const root = join(__dirname, '..')
-  for (const name of ['whitelist.json', 'whitelist.example.json']) {
-    try {
-      const raw = readFileSync(join(root, 'config', name), 'utf-8')
-      const list = JSON.parse(raw)
-      if (Array.isArray(list) && list.every((x) => typeof x === 'string')) return list
-    } catch { /* 试下一个 */ }
+function readWhitelistFile (path: string): string[] {
+  const raw = readFileSync(path, 'utf-8')   // 文件不存在会抛 ENOENT，交给调用方判断
+  let list: unknown
+  try {
+    list = JSON.parse(raw)
+  } catch (err) {
+    throw new Error(`白名单文件 ${path} 不是合法 JSON：${(err as Error).message}`)
   }
-  throw new Error('找不到 config/whitelist.json 或 whitelist.example.json')
+  if (!Array.isArray(list) || !list.every((x) => typeof x === 'string')) {
+    throw new Error(`白名单文件 ${path} 格式错误：必须是字符串数组`)
+  }
+  return list
+}
+
+/**
+ * 加载白名单。真名单放 config/whitelist.json（不入库），
+ * 只有"文件不存在"才回退到 example（仅供本地起服务，生产必须提供真名单）。
+ *
+ * ⚠️ "文件存在但格式损坏"绝不能静默降级到 example：生产环境如果真名单被
+ * 误改坏，服务照常起来、健康检查照常 200，但两个真实用户全部收到 403，
+ * 而示例白名单里的名字反而能登录——这是需要立刻被发现的安全事故，不是
+ * "凑合换个候选文件"就能糊过去的场景。所以这里格式错误直接抛错。
+ *
+ * 接受 root 参数是为了让测试能指向一个临时目录，不用碰真实 config/。
+ */
+export function loadWhitelistFrom (root: string): string[] {
+  const realPath = join(root, 'config', 'whitelist.json')
+  try {
+    return readWhitelistFile(realPath)
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+      throw err   // 文件存在但解析/校验失败——不静默降级，把问题打到脸上
+    }
+  }
+  const examplePath = join(root, 'config', 'whitelist.example.json')
+  try {
+    return readWhitelistFile(examplePath)
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      throw new Error('找不到 config/whitelist.json 或 whitelist.example.json')
+    }
+    throw err
+  }
+}
+
+export function loadWhitelist (): string[] {
+  return loadWhitelistFrom(join(__dirname, '..'))
+}
+
+/**
+ * 全局错误处理器（设计文档第13节：不把内部错误细节泄漏给客户端）。
+ * 任何未被路由自己 catch 的异常（DB I/O 错误、类型错误……）最终都会
+ * 落到这里——完整记日志给服务端排障，但 5xx 只回一个通用消息，绝不把
+ * error.message/stack/文件路径这类内部细节吐给客户端。4xx（比如 schema
+ * 校验失败）可以回具体消息，那是帮用户改输入，不算泄漏。
+ *
+ * 单独导出是为了让测试能在一个不接真实 DB 的最小 Fastify 实例上直接验证
+ * "非预期异常不泄漏细节"，不用去伪造真实的 SQLITE I/O 错误。
+ */
+export function attachErrorHandler (app: FastifyInstance): void {
+  app.setErrorHandler((error: FastifyError, request, reply) => {
+    request.log.error(error)
+    const status = error.statusCode ?? 500
+    if (status >= 500) {
+      reply.code(500).send({ error: '服务器内部错误' })
+    } else {
+      reply.code(status).send({ error: error.message })
+    }
+  })
 }
 
 interface BuildOpts {
@@ -45,13 +104,21 @@ export function buildServer (opts: BuildOpts = {}): FastifyInstance {
   // 没设时用随机值兜底，至少不会用空字符串/可预测值签名 cookie。
   const secret = opts.cookieSecret ?? process.env.COOKIE_SECRET ?? randomBytes(32).toString('hex')
 
+  attachErrorHandler(app)
+
   app.get('/api/health', async () => ({ status: 'ok' }))
 
   // 装配（register 是异步的，但 Fastify 会在 ready() 时按序完成）
   app.register(async (scope) => {
     await registerSession(scope, secret)
-    // 登录限流：每 IP 每分钟最多 10 次尝试。密码是唯一的门，必须挡爆破。
+    // 限流只挂在 /api/login（真正需要防爆破的入口），不挂在整个 scope 上。
+    // global:false 让插件默认不拦截任何路由；routes.ts 里 /api/login 自己
+    // 用 config.rateLimit 显式 opt-in，复用这里注册的 max/timeWindow。
+    // 之前挂在整个 scope 上时，whoami/logout 会跟 login 抢同一个"每分钟10次"
+    // 的桶——前端每次页面加载都会问一次 whoami，正常使用就能把自己的登录
+    // 顶到 429（已实测：8次whoami+2次login，第3次login直接429）。
     await scope.register(rateLimit, {
+      global: false,
       max: 10, timeWindow: '1 minute',
       allowList: [],   // 生产可加内网白名单
     })

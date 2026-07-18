@@ -16,9 +16,30 @@ interface Deps { authDb: AuthDb; whitelist: string[] }
 export function registerAuthRoutes (app: FastifyInstance, deps: Deps): void {
   const { authDb, whitelist } = deps
 
-  app.post<{ Body: { name?: string; password?: string } }>('/api/login', async (req, reply) => {
-    const name = req.body?.name?.trim() ?? ''
-    const password = req.body?.password ?? ''
+  app.post<{ Body: { name?: unknown; password?: unknown } }>('/api/login', {
+    // 限流只挂在这条路由上：登录是唯一需要防爆破的入口（见 server.ts 的
+    // rate-limit 注册，global:false，靠这里的 config.rateLimit 显式opt-in，
+    // 用注册时的全局 max/timeWindow 兜底）。whoami/logout 不受影响。
+    config: { rateLimit: {} },
+  }, async (req, reply) => {
+    // name/password 来自 JSON body，类型不受信任——JSON 允许数字/对象/数组。
+    // 注意：这里没有用 Fastify schema 校验来挡类型，是因为 Fastify 默认的
+    // ajv 校验器开着 coerceTypes（实测验证过），会把 12345 悄悄转成 "12345"
+    // 让 schema 校验通过，起不到"非字符串就该拒绝"的效果。所以显式 typeof
+    // 检查、直接回 400——不先转换类型就 .trim()/直接使用，非字符串输入会在
+    // 老代码里抛 TypeError，被 Fastify 兜底成 500 并把错误原文（"xxx.trim
+    // is not a function"）泄漏给客户端，违反设计文档第13节。未认证、零前置
+    // 条件即可触发，必须在这里挡成干净的 400。
+    const rawName = req.body?.name
+    const rawPassword = req.body?.password
+    if (rawName !== undefined && typeof rawName !== 'string') {
+      return reply.code(400).send({ error: '姓名格式错误' })
+    }
+    if (rawPassword !== undefined && typeof rawPassword !== 'string') {
+      return reply.code(400).send({ error: '密码格式错误' })
+    }
+    const name = (rawName ?? '').trim()
+    const password = rawPassword ?? ''
 
     if (!isWhitelisted(name, whitelist)) {
       return reply.code(403).send({ error: '你谁啊' })
