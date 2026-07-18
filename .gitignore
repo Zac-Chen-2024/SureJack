@@ -49,3 +49,8 @@ Example/*.srt
 
 # 真实白名单（含真名），不入库；example 模板可入库
 config/whitelist.json
+
+# 前端构建产物（由 vite build 生成，不入库）
+public/
+web/node_modules/
+web/dist/

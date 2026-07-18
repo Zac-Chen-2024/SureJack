@@ -1,0 +1,43 @@
+@import "tailwindcss";
+
+/* ───────────────────────────────────────────────
+   设计令牌。设计文档第 11 节：深色为主、配色克制、
+   一个中性灰阶 + 一个强调色、排版是主要设计手段。
+   ─────────────────────────────────────────────── */
+@theme {
+  /* 中性灰阶：从最深的背景到最亮的文字，只有一条轴 */
+  --color-ink-950: #0a0a0b;   /* 页面底色 */
+  --color-ink-900: #101013;   /* 面板 */
+  --color-ink-850: #16161a;   /* 抬升面板 */
+  --color-ink-800: #1d1d22;   /* 输入框 */
+  --color-ink-700: #2a2a31;   /* 边框 */
+  --color-ink-600: #3d3d46;   /* 分隔线 */
+  --color-ink-400: #6e6e7a;   /* 次要文字 */
+  --color-ink-300: #9a9aa6;   /* 说明文字 */
+  --color-ink-100: #d8d8de;   /* 主要文字 */
+  --color-ink-50:  #f2f2f5;   /* 强调文字 */
+
+  /* 唯一的强调色：交互焦点与状态。不再引入第二个彩色 */
+  --color-accent: #4f7cff;
+  --color-accent-dim: #3d63d6;
+
+  /* 状态色只在真正需要语义时用 */
+  --color-danger: #e5484d;
+
+  --font-sans: -apple-system, system-ui, "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+
+html, body, #root { height: 100%; }
+
+body {
+  background: var(--color-ink-950);
+  color: var(--color-ink-100);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 滚动条也要克制——默认的亮色滚动条会破坏深色沉浸感 */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--color-ink-700); border-radius: 5px; }
+::-webkit-scrollbar-thumb:hover { background: var(--color-ink-600); }
