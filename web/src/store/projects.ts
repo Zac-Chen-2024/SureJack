@@ -6,6 +6,9 @@ export interface Project {
   name: string
   scriptText: string
   aspectRatio: string
+  /** 配音状态。设计文档第 6 节：改文案后置为 stale，提示需重新生成 */
+  ttsState: 'none' | 'generating' | 'ready' | 'stale' | 'error'
+  ttsDurationMs: number | null
   createdAt: string
   updatedAt: string
 }

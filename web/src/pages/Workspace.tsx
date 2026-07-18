@@ -1,24 +1,21 @@
 import { useEffect, useState } from 'react'
 import { useSession } from '../store/session'
 import { useProjects } from '../store/projects'
+import { usePipeline } from '../store/pipeline'
 import { ProjectList } from '../components/ProjectList'
 import { ScriptEditor } from '../components/ScriptEditor'
+import { AssetPanel } from '../components/AssetPanel'
+import { VoicePanel } from '../components/VoicePanel'
+import { ExportPanel } from '../components/ExportPanel'
 import { Button } from '../components/ui/Button'
 import { Avatar } from '../components/ui/Avatar'
 import { IconChevronLeft, IconChevronRight, IconLogOut } from '../components/ui/Icon'
-
-/** 把 ISO 时间格式化成本地可读的日期时间，供属性面板展示 */
-function formatDate (iso: string) {
-  return new Date(iso).toLocaleString('zh-CN', {
-    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
-  })
-}
 
 /**
  * 三栏布局（设计文档第 11 节）：
  *   左：可折叠项目列表
  *   中：主区 —— 文案编辑；预览+时间轴留给 3B
- *   右：属性面板 —— 3A 先放项目基本信息，配音参数/字幕样式/文本层留给 3B
+ *   右：属性面板 —— 素材上传 / 配音 / 导出（3B-1 出片闭环）
  * 分栏靠背景色差异区分，不靠边框线（排版优先于框线）。
  */
 export function Workspace () {
@@ -27,6 +24,12 @@ export function Workspace () {
   const { load, current } = useProjects()
   useEffect(() => { load() }, [load])
   const project = current()
+
+  const loadAssets = usePipeline((s) => s.loadAssets)
+  const resetPipeline = usePipeline((s) => s.reset)
+  useEffect(() => {
+    if (project?.id) { resetPipeline(); void loadAssets(project.id) }
+  }, [project?.id, loadAssets, resetPipeline])
 
   return (
     <div className="flex h-full">
@@ -73,26 +76,16 @@ export function Workspace () {
         <div className="flex-1 px-6 pb-6"><ScriptEditor /></div>
       </main>
 
-      {/* 右：属性面板——3A 阶段先放项目基本信息，避免空白 */}
-      <aside className="w-64 border-l border-line bg-ink-900 p-5">
+      {/* 右：属性面板——素材 / 配音 / 导出（3B-1 出片闭环） */}
+      <aside className="w-72 border-l border-line bg-ink-900">
         {project ? (
-          <div className="space-y-3">
-            <div className="text-xs font-medium tracking-wide text-ink-400">项目信息</div>
-            <div className="rounded-lg border border-line bg-ink-850 p-3">
-              <div className="text-xs text-ink-400">画幅</div>
-              <div className="mt-1 text-sm tabular-nums text-ink-100">{project.aspectRatio}</div>
-            </div>
-            <div className="rounded-lg border border-line bg-ink-850 p-3">
-              <div className="text-xs text-ink-400">创建于</div>
-              <div className="mt-1 text-sm tabular-nums text-ink-100">{formatDate(project.createdAt)}</div>
-            </div>
-            <div className="rounded-lg border border-line bg-ink-850 p-3">
-              <div className="text-xs text-ink-400">最近更新</div>
-              <div className="mt-1 text-sm tabular-nums text-ink-100">{formatDate(project.updatedAt)}</div>
-            </div>
+          <div className="flex h-full flex-col gap-5 overflow-y-auto p-4">
+            <AssetPanel />
+            <VoicePanel />
+            <ExportPanel />
           </div>
         ) : (
-          <div className="text-xs text-ink-400">选一个项目查看信息</div>
+          <div className="p-4 text-xs text-ink-400">选一个项目</div>
         )}
       </aside>
     </div>

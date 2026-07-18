@@ -109,3 +109,57 @@ export function IconLoader (props: IconProps) {
     </Svg>
   )
 }
+
+/** 上传素材 */
+export function IconUpload (props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <path d="m17 8-5-5-5 5" />
+      <path d="M12 3v12" />
+    </Svg>
+  )
+}
+
+/** 配音 */
+export function IconMic (props: IconProps) {
+  return (
+    <Svg {...props}>
+      <rect x="9" y="2" width="6" height="12" rx="3" />
+      <path d="M19 10v1a7 7 0 0 1-14 0v-1" />
+      <path d="M12 18v4" />
+    </Svg>
+  )
+}
+
+/** 背景视频素材 */
+export function IconFilm (props: IconProps) {
+  return (
+    <Svg {...props}>
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="M7 4v16M17 4v16M3 12h18M3 8h4M3 16h4M17 8h4M17 16h4" />
+    </Svg>
+  )
+}
+
+/** 背景音乐素材 */
+export function IconMusic (props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M9 18V5l12-2v13" />
+      <circle cx="6" cy="18" r="3" />
+      <circle cx="18" cy="16" r="3" />
+    </Svg>
+  )
+}
+
+/** 下载成片 */
+export function IconDownload (props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <path d="m7 10 5 5 5-5" />
+      <path d="M12 15V3" />
+    </Svg>
+  )
+}
