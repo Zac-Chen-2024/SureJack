@@ -6,6 +6,7 @@ import { dirname, join } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import { registerSession } from './auth/session.js'
 import { registerAuthRoutes } from './auth/routes.js'
+import { registerProjectRoutes } from './projects/routes.js'
 import { openAuthDb } from './db/auth-db.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -123,6 +124,7 @@ export function buildServer (opts: BuildOpts = {}): FastifyInstance {
       allowList: [],   // 生产可加内网白名单
     })
     registerAuthRoutes(scope, { authDb, whitelist })
+    registerProjectRoutes(scope, { whitelist })
   })
 
   app.addHook('onClose', async () => authDb.close())
