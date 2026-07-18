@@ -109,6 +109,8 @@ npm run reset-password -- --name 黄诗婕
   （前端构建到 public/，由后端同域托管；不需要动 nginx）
 - **忘记密码/被抢注**：`npm run reset-password -- --name <姓名>`
 - **证书续期**：自动。手动测试续期：`sudo certbot renew --dry-run`
+- **导出的成片存在**：`data/<姓名>/assets/<项目id>/export.mp4`。
+  磁盘吃紧时可以安全删除——重新导出即可再生成。
 - **备份**：打包 `/root/SureJack/{data,config/whitelist.json,.env}`——数据库、白名单、密钥全在这。
 
 ## 端口/文件总览
