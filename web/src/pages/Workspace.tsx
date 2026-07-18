@@ -4,6 +4,7 @@ import { useProjects } from '../store/projects'
 import { ProjectList } from '../components/ProjectList'
 import { ScriptEditor } from '../components/ScriptEditor'
 import { Button } from '../components/ui/Button'
+import { Avatar } from '../components/ui/Avatar'
 import { IconChevronLeft, IconChevronRight, IconLogOut } from '../components/ui/Icon'
 
 /** 把 ISO 时间格式化成本地可读的日期时间，供属性面板展示 */
@@ -44,14 +45,24 @@ export function Workspace () {
         <div className="flex-1 overflow-hidden">
           {!collapsed && <ProjectList />}
         </div>
-        {!collapsed && (
-          <div className="border-t border-line p-2">
-            <div className="mb-1 px-2 text-xs text-ink-400">{name}</div>
-            <Button className="w-full justify-start" onClick={logout}>
-              <IconLogOut className="size-4" /> 登出
-            </Button>
-          </div>
-        )}
+        {/* 折叠时只留头像——收起状态下它是唯一还能表明「你是谁」的元素 */}
+        <div className="border-t border-line p-2">
+          {collapsed ? (
+            <div className="flex justify-center py-1">
+              <Avatar name={name ?? ''} />
+            </div>
+          ) : (
+            <>
+              <div className="mb-2 flex items-center gap-2.5 px-1.5 py-1">
+                <Avatar name={name ?? ''} />
+                <span className="min-w-0 flex-1 truncate text-sm font-medium text-ink-100">{name}</span>
+              </div>
+              <Button className="w-full justify-start" onClick={logout}>
+                <IconLogOut className="size-4" /> 登出
+              </Button>
+            </>
+          )}
+        </div>
       </aside>
 
       {/* 中：主区 */}
