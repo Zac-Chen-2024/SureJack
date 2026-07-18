@@ -104,7 +104,9 @@ npm run reset-password -- --name 黄诗婕
 
 - **看日志**：`journalctl -u surejack -f`
 - **重启后端**：`sudo systemctl restart surejack`
-- **改代码后**：`git pull && sudo systemctl restart surejack`（tsx 直接跑 TS，无需构建）
+- **改后端代码后**：`git pull && sudo systemctl restart surejack`（tsx 直接跑 TS，无需构建）
+- **改前端代码后**：`cd web && npm run build && sudo systemctl restart surejack`
+  （前端构建到 public/，由后端同域托管；不需要动 nginx）
 - **忘记密码/被抢注**：`npm run reset-password -- --name <姓名>`
 - **证书续期**：自动。手动测试续期：`sudo certbot renew --dry-run`
 - **备份**：打包 `/root/SureJack/{data,config/whitelist.json,.env}`——数据库、白名单、密钥全在这。
