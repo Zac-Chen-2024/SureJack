@@ -293,7 +293,11 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
     },
 
     latestJob (projectId) {
-      const row = db.prepare('SELECT * FROM export_jobs WHERE project_id = ? ORDER BY created_at DESC LIMIT 1').get(projectId)
+      const row = db.prepare(
+        // 按 rowid 排序：created_at 是毫秒精度的 ISO 串，同毫秒建的两个作业
+        // 顺序不确定（实测会随机失败）。rowid 是 SQLite 每张普通表天然自带的
+        // 隐藏列，按插入顺序单调递增，且无需 ALTER TABLE 就能用。
+        'SELECT * FROM export_jobs WHERE project_id = ? ORDER BY rowid DESC LIMIT 1').get(projectId)
       return row ? toJob(row as Record<string, unknown>) : null
     },
 
