@@ -43,13 +43,17 @@ export function ProjectList () {
           <div
             key={p.id}
             onClick={() => select(p.id)}
-            className={`group mb-0.5 flex cursor-pointer items-center justify-between rounded-lg px-3 py-2.5 transition-colors ${
-              p.id === currentId ? 'bg-ink-800 text-ink-50' : 'text-ink-300 hover:bg-ink-850'
+            className={`group mb-0.5 flex cursor-pointer items-center justify-between rounded-lg border-l-2 px-3 py-2.5 transition-colors ${
+              p.id === currentId
+                ? 'border-accent bg-ink-800'
+                : 'border-transparent hover:bg-ink-850'
             }`}
           >
             <div className="min-w-0 flex-1">
-              <div className="truncate text-sm font-medium">{p.name}</div>
-              <div className="truncate text-xs text-ink-400">
+              <div className={`truncate text-sm font-medium ${p.id === currentId ? 'text-ink-50' : 'text-ink-100'}`}>
+                {p.name}
+              </div>
+              <div className="mt-1 truncate text-xs text-ink-400">
                 {p.scriptText ? `${[...p.scriptText].length} 字` : '空文案'}
               </div>
             </div>

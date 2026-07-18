@@ -31,8 +31,10 @@ export function ScriptEditor () {
   const charCount = [...text].length
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex items-baseline justify-between pb-3">
+    <div className="flex h-full flex-col items-center">
+      {/* 限宽居中成一栏——正文行宽有上限才好读（约 30-40 字/行），
+          宽屏下两侧留白是有意为之，不是空间浪费 */}
+      <div className="flex w-full max-w-[720px] items-baseline justify-between pb-3">
         <div className="text-xs text-ink-400">
           {charCount} 字 · 约 {Math.round(charCount * 0.196)} 秒配音
         </div>
@@ -42,7 +44,7 @@ export function ScriptEditor () {
         value={text}
         onChange={(e) => onChange(e.target.value)}
         placeholder="把文案粘贴或写在这里…"
-        className="flex-1 resize-none rounded-xl bg-ink-900 p-5 text-[15px] leading-[1.9] text-ink-100 placeholder:text-ink-400 outline-none"
+        className="w-full max-w-[720px] flex-1 resize-none rounded-xl bg-ink-900 p-5 text-[15px] leading-[1.9] text-ink-100 placeholder:text-ink-400 outline-none"
       />
     </div>
   )
