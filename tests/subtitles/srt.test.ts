@@ -85,8 +85,8 @@ describe('parseSrt', () => {
     expect(lines[1]!.words[0]!.text).toBe('但他的室友军师很暖')
   })
 
-  it('端到端：解析真实文件 ExampleReal/军师.srt', () => {
-    const text = readFileSync('ExampleReal/军师.srt', 'utf-8')
+  it('端到端：解析真实文件 Material/Text/军师.srt', () => {
+    const text = readFileSync('Material/Text/军师.srt', 'utf-8')
     const lines = parseSrt(text)
     expect(lines.length).toBeGreaterThan(600)
     expect(lines[0]!.words[0]!.text).toBe('网恋对象的嘴巴很毒')
