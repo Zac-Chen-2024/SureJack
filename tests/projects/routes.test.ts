@@ -6,11 +6,11 @@ import type { FastifyInstance } from 'fastify'
 let app: FastifyInstance
 afterEach(async () => { await app?.close() })
 
-const LIST = ['测试甲', '测试乙']
+const LIST = ['测试路由甲', '测试路由乙']
 
 // ⚠️ 这段不在 brief 给的测试代码里，是补的：openUserDb 打开的是【真实落盘】的库
 // （物理隔离设计的一部分——Task1 就是这么定的），`authDbPath: ':memory:'` 只管
-// auth db，管不到每个用户自己的 project 库。用例里 '测试甲'/'测试乙' 是复用的
+// auth db，管不到每个用户自己的 project 库。用例里 '测试路由甲'/'测试路由乙' 是复用的
 // 真实姓名，不清理的话上一条用例建的项目会在下一条用例的库里赖着不走——哪怕
 // 用全新的 data/ 目录跑，"删项目"这条内部也会因为前两条用例（"能建项目并列出来"
 // "改文案"）留下的项目而不是 0 条而失败。跟 tests/db/user-db-crud.test.ts 的
@@ -53,7 +53,7 @@ describe('项目接口 —— 鉴权', () => {
 describe('项目接口 —— CRUD', () => {
   it('登录后能建项目并列出来', async () => {
     app = await makeApp()
-    const cookie = await loginAs(app, '测试甲')
+    const cookie = await loginAs(app, '测试路由甲')
     const created = await app.inject({
       method: 'POST', url: '/api/projects',
       payload: { name: '新项目' }, cookies: { sj_session: cookie },
@@ -67,7 +67,7 @@ describe('项目接口 —— CRUD', () => {
 
   it('改文案', async () => {
     app = await makeApp()
-    const cookie = await loginAs(app, '测试甲')
+    const cookie = await loginAs(app, '测试路由甲')
     const p = (await app.inject({
       method: 'POST', url: '/api/projects', payload: { name: '稿子' }, cookies: { sj_session: cookie },
     })).json()
@@ -81,7 +81,7 @@ describe('项目接口 —— CRUD', () => {
 
   it('删项目', async () => {
     app = await makeApp()
-    const cookie = await loginAs(app, '测试甲')
+    const cookie = await loginAs(app, '测试路由甲')
     const p = (await app.inject({
       method: 'POST', url: '/api/projects', payload: { name: '待删' }, cookies: { sj_session: cookie },
     })).json()
@@ -93,36 +93,36 @@ describe('项目接口 —— CRUD', () => {
 
   it('取不存在的项目返回 404', async () => {
     app = await makeApp()
-    const cookie = await loginAs(app, '测试甲')
+    const cookie = await loginAs(app, '测试路由甲')
     const res = await app.inject({ method: 'GET', url: '/api/projects/不存在', cookies: { sj_session: cookie } })
     expect(res.statusCode).toBe(404)
   })
 
   it('建项目缺 name 返回 400', async () => {
     app = await makeApp()
-    const cookie = await loginAs(app, '测试甲')
+    const cookie = await loginAs(app, '测试路由甲')
     const res = await app.inject({ method: 'POST', url: '/api/projects', payload: {}, cookies: { sj_session: cookie } })
     expect(res.statusCode).toBe(400)
   })
 
   it('🔒 一个用户看不到另一个用户的项目——物理隔离端到端', async () => {
     app = await makeApp()
-    const cookieA = await loginAs(app, '测试甲')
+    const cookieA = await loginAs(app, '测试路由甲')
     await app.inject({ method: 'POST', url: '/api/projects', payload: { name: '甲的秘密' }, cookies: { sj_session: cookieA } })
 
-    const cookieB = await loginAs(app, '测试乙')
+    const cookieB = await loginAs(app, '测试路由乙')
     const listB = await app.inject({ method: 'GET', url: '/api/projects', cookies: { sj_session: cookieB } })
     expect(listB.json()).toHaveLength(0)
   })
 
   it('🔒 用别人的项目 id 也拿不到——库都不是同一个', async () => {
     app = await makeApp()
-    const cookieA = await loginAs(app, '测试甲')
+    const cookieA = await loginAs(app, '测试路由甲')
     const pA = (await app.inject({
       method: 'POST', url: '/api/projects', payload: { name: '甲的' }, cookies: { sj_session: cookieA },
     })).json()
 
-    const cookieB = await loginAs(app, '测试乙')
+    const cookieB = await loginAs(app, '测试路由乙')
     const res = await app.inject({ method: 'GET', url: `/api/projects/${pA.id}`, cookies: { sj_session: cookieB } })
     expect(res.statusCode).toBe(404)   // 乙的库里根本没这条
   })

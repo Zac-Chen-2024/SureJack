@@ -1,11 +1,11 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import { openUserDb, type UserDb } from '../../src/db/user-db.js'
 
-const LIST = ['测试甲', '测试乙']
+const LIST = ['测试CRUD甲', '测试CRUD乙']
 let dbs: UserDb[] = []
 afterEach(() => { dbs.forEach((d) => d.close()); dbs = [] })
 
-function fresh (name = '测试甲'): UserDb {
+function fresh (name = '测试CRUD甲'): UserDb {
   const db = openUserDb(name, LIST)
   // 每个用例从干净状态开始
   db.raw.exec('DELETE FROM projects')
@@ -79,8 +79,8 @@ describe('项目 CRUD', () => {
   })
 
   it('两个用户的项目互不可见——物理隔离', () => {
-    const a = openUserDb('测试甲', LIST); dbs.push(a); a.raw.exec('DELETE FROM projects')
-    const b = openUserDb('测试乙', LIST); dbs.push(b); b.raw.exec('DELETE FROM projects')
+    const a = openUserDb('测试CRUD甲', LIST); dbs.push(a); a.raw.exec('DELETE FROM projects')
+    const b = openUserDb('测试CRUD乙', LIST); dbs.push(b); b.raw.exec('DELETE FROM projects')
     a.createProject('甲的项目')
     expect(b.listProjects()).toEqual([])   // 乙看不到甲的
   })
