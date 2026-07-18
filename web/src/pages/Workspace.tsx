@@ -28,13 +28,13 @@ export function Workspace () {
 
   return (
     <div className="flex h-full">
-      {/* 左：项目列表 */}
-      <aside className={`flex flex-col bg-ink-900 transition-all duration-200 ${collapsed ? 'w-14' : 'w-64'}`}>
-        <div className="flex h-14 items-center justify-between px-3">
-          {!collapsed && <span className="text-sm font-semibold tracking-tight text-ink-50">SureJack</span>}
+      {/* 左：项目列表——用细描边而不是纯背景色差把三栏"接住光"地分开 */}
+      <aside className={`flex flex-col border-r border-line bg-ink-900 transition-all duration-200 ${collapsed ? 'w-14' : 'w-64'}`}>
+        <div className="flex h-14 items-center justify-between border-b border-line px-3">
+          {!collapsed && <span className="text-sm font-semibold tracking-[-0.02em] text-ink-50">SureJack</span>}
           <button
             onClick={() => setCollapsed((c) => !c)}
-            className="rounded-md p-1.5 text-ink-400 hover:bg-ink-800 hover:text-ink-100"
+            className="rounded-lg p-1.5 text-ink-400 hover:bg-ink-800 hover:text-ink-100"
             title={collapsed ? '展开' : '收起'}
           >
             {collapsed ? '›' : '‹'}
@@ -44,7 +44,7 @@ export function Workspace () {
           {!collapsed && <ProjectList />}
         </div>
         {!collapsed && (
-          <div className="p-2">
+          <div className="border-t border-line p-2">
             <div className="mb-1 px-2 text-xs text-ink-400">{name}</div>
             <Button className="w-full justify-start" onClick={logout}>登出</Button>
           </div>
@@ -53,28 +53,28 @@ export function Workspace () {
 
       {/* 中：主区 */}
       <main className="flex flex-1 flex-col bg-ink-950">
-        <div className="flex h-14 items-center px-6">
+        <div className="flex h-14 items-center border-b border-line px-6">
           <span className="text-sm font-medium text-ink-100">{project?.name ?? '选一个项目开始'}</span>
         </div>
         <div className="flex-1 px-6 pb-6"><ScriptEditor /></div>
       </main>
 
       {/* 右：属性面板——3A 阶段先放项目基本信息，避免空白 */}
-      <aside className="w-64 bg-ink-900 p-5">
+      <aside className="w-64 border-l border-line bg-ink-900 p-5">
         {project ? (
-          <div className="space-y-5">
+          <div className="space-y-3">
             <div className="text-xs font-medium tracking-wide text-ink-400">项目信息</div>
-            <div>
+            <div className="rounded-lg border border-line bg-ink-850 p-3">
               <div className="text-xs text-ink-400">画幅</div>
-              <div className="mt-1 text-sm text-ink-100">{project.aspectRatio}</div>
+              <div className="mt-1 text-sm tabular-nums text-ink-100">{project.aspectRatio}</div>
             </div>
-            <div>
+            <div className="rounded-lg border border-line bg-ink-850 p-3">
               <div className="text-xs text-ink-400">创建于</div>
-              <div className="mt-1 text-sm text-ink-100">{formatDate(project.createdAt)}</div>
+              <div className="mt-1 text-sm tabular-nums text-ink-100">{formatDate(project.createdAt)}</div>
             </div>
-            <div>
+            <div className="rounded-lg border border-line bg-ink-850 p-3">
               <div className="text-xs text-ink-400">最近更新</div>
-              <div className="mt-1 text-sm text-ink-100">{formatDate(project.updatedAt)}</div>
+              <div className="mt-1 text-sm tabular-nums text-ink-100">{formatDate(project.updatedAt)}</div>
             </div>
           </div>
         ) : (

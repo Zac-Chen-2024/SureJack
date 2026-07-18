@@ -15,9 +15,11 @@ export function LoginPage () {
 
   return (
     <div className="flex h-full items-center justify-center px-6">
-      <form onSubmit={onSubmit} className="w-full max-w-[320px]">
-        {/* 排版建立层级：靠字号字重，不靠框线 */}
-        <div className="mb-1 text-[28px] font-semibold leading-tight tracking-tight text-ink-50">SureJack</div>
+      {/* 卡片给登录框一点重量——细描边 + 比页面底色亮一档，
+          让它读作"一件物体"而不是漂浮在纯黑上的几行文字 */}
+      <form onSubmit={onSubmit} className="w-full max-w-[360px] rounded-2xl border border-line bg-ink-900 p-8">
+        {/* 排版建立层级：靠字号字重和字距，不靠额外框线 */}
+        <div className="mb-1 text-[28px] font-semibold leading-tight tracking-[-0.02em] text-ink-50">SureJack</div>
         <div className="mb-8 text-sm text-ink-400">输入你的名字</div>
 
         <div className="space-y-3">

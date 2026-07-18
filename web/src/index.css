@@ -3,28 +3,47 @@
 /* ───────────────────────────────────────────────
    设计令牌。设计文档第 11 节：深色为主、配色克制、
    一个中性灰阶 + 一个强调色、排版是主要设计手段。
+
+   本轮"质感提升"：从纯平色块升级成分层表面 + 极细描边，
+   建立真正的光影层次；补齐微交互；强调色换成产品自带的琥珀金。
    ─────────────────────────────────────────────── */
 @theme {
-  /* 中性灰阶：从最深的背景到最亮的文字，只有一条轴 */
-  --color-ink-950: #0a0a0b;   /* 页面底色 */
-  --color-ink-900: #101013;   /* 面板 */
-  --color-ink-850: #16161a;   /* 抬升面板 */
-  --color-ink-800: #1d1d22;   /* 输入框 */
-  --color-ink-700: #2a2a31;   /* 边框 */
-  --color-ink-600: #3d3d46;   /* 分隔线 */
-  --color-ink-400: #6e6e7a;   /* 次要文字 */
-  --color-ink-300: #9a9aa6;   /* 说明文字 */
-  --color-ink-100: #d8d8de;   /* 主要文字 */
-  --color-ink-50:  #f2f2f5;   /* 强调文字 */
+  /* 中性灰阶：分层表面体系。每一级都是一次"抬升"，靠边框+背景差共同表达深度 */
+  --color-ink-950: #08080a;   /* 页面底色——更深、更冷的黑 */
+  --color-ink-900: #0d0d10;   /* 面板 */
+  --color-ink-850: #121216;   /* 抬升面板 */
+  --color-ink-800: #17171c;   /* 输入框 / 纸面 */
+  --color-ink-700: #212128;   /* 选中态背景 */
+  --color-ink-600: #2e2e37;   /* 分隔线（重） */
+  --color-ink-400: #6b6b78;   /* 次要文字 */
+  --color-ink-300: #9c9caa;   /* 说明文字 */
+  --color-ink-100: #dcdce4;   /* 主要文字 */
+  --color-ink-50:  #f4f4f8;   /* 强调文字 */
 
-  /* 唯一的强调色：交互焦点与状态。不再引入第二个彩色 */
-  --color-accent: #4f7cff;
-  --color-accent-dim: #3d63d6;
+  /* 极细白描边——深色 UI 质感的核心手法：让边缘"接住光"。
+     面板之间靠这个分隔，不再单纯靠背景色差硬分；
+     抬升的表面（选中项、编辑区卡片）用 line-strong。 */
+  --color-line: rgba(255, 255, 255, 0.06);
+  --color-line-strong: rgba(255, 255, 255, 0.10);
+
+  /*
+   * 唯一的强调色：琥珀金 #f0b429，不是随手挑的"好看的黄"，也不是
+   * 通用 SaaS 蓝（#4f7cff 那种是 AI 默认配色，没有产品辨识度）。
+   * 卡拉OK字幕的高亮色在 ASS 字幕格式里写作 &H0000E5FF（BGR 顺序），
+   * 换算成 RGB 正是 #FFE500 附近的琥珀金——用户在界面上聚焦时看到
+   * 的琥珀光环，和他做出来的成片里字幕逐字点亮的颜色，是同一枚色。
+   * 这个强调色是从产品本身"长"出来的。琥珀金在近黑底上读作
+   * "电影感 / 创作工具"，且与下面的 danger 红界限分明。
+   */
+  --color-accent: #f0b429;
+  --color-accent-dim: #d99a1a;
 
   /* 状态色只在真正需要语义时用 */
   --color-danger: #e5484d;
 
-  --font-sans: -apple-system, system-ui, "PingFang SC", "Microsoft YaHei", sans-serif;
+  /* 中文优质字体优先；系统栈兜底 */
+  --font-sans: -apple-system, "SF Pro SC", "PingFang SC", "HarmonyOS Sans SC",
+    "Source Han Sans SC", "Noto Sans CJK SC", "Microsoft YaHei", system-ui, sans-serif;
 }
 
 html, body, #root { height: 100%; }
@@ -34,6 +53,27 @@ body {
   color: var(--color-ink-100);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
+}
+
+/* 微交互：可交互元素统一过渡曲线，避免状态切换生硬跳变。
+   .interactive 供非原生表单元素的可点击容器（如项目列表项）复用。 */
+button, input, textarea, a, [role="button"], .interactive {
+  transition: all 150ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* 键盘可见焦点：全局兜底的琥珀微光环。outline:none 绝不能不加替代就用——
+   这条规则保证任何可交互元素只要能拿到焦点，就有看得见的反馈。 */
+:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(240, 180, 41, 0.15);
+  border-color: var(--color-accent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 /* 滚动条也要克制——默认的亮色滚动条会破坏深色沉浸感 */

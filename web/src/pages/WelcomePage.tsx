@@ -20,7 +20,7 @@ export function WelcomePage ({ onEnter }: { onEnter: () => void }) {
       <div
         className={`text-center transition-all duration-500 ${shown ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-2'}`}
       >
-        <div className="text-[40px] font-semibold leading-tight tracking-tight text-ink-50">
+        <div className="text-[40px] font-semibold leading-tight tracking-[-0.02em] text-ink-50">
           {welcome ?? '欢迎回来'}
         </div>
         <div className="mt-2 text-sm text-ink-400">{name}</div>

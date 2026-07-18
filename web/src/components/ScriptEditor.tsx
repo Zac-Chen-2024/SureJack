@@ -35,16 +35,18 @@ export function ScriptEditor () {
       {/* 限宽居中成一栏——正文行宽有上限才好读（约 30-40 字/行），
           宽屏下两侧留白是有意为之，不是空间浪费 */}
       <div className="flex w-full max-w-[720px] items-baseline justify-between pb-3">
-        <div className="text-xs text-ink-400">
+        <div className="tabular-nums text-xs text-ink-400">
           {charCount} 字 · 约 {Math.round(charCount * 0.196)} 秒配音
         </div>
         <div className="text-xs text-ink-400">{saving ? '保存中…' : '已保存'}</div>
       </div>
+      {/* "纸面"处理：比周围主区亮一档 + 细描边 + 轻微内阴影，让编辑区读作
+          一张可以写字的纸，而不是又一块和主区同色的平面 */}
       <textarea
         value={text}
         onChange={(e) => onChange(e.target.value)}
         placeholder="把文案粘贴或写在这里…"
-        className="w-full max-w-[720px] flex-1 resize-none rounded-xl bg-ink-900 p-5 text-[15px] leading-[1.9] text-ink-100 placeholder:text-ink-400 outline-none"
+        className="w-full max-w-[720px] flex-1 resize-none rounded-2xl border border-line bg-ink-800 p-6 text-[15px] leading-[1.9] text-ink-100 shadow-[inset_0_1px_3px_rgba(0,0,0,0.3)] outline-none placeholder:text-ink-400 focus:border-accent"
       />
     </div>
   )
