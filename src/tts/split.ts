@@ -1,4 +1,4 @@
-import { estimateAudioMs } from './azure.js'
+import { estimateAudioMs, maxCharsForMs } from './azure.js'
 
 /**
  * 每段的目标上限。Azure 单次硬上限是 10 分钟，这里取 8 分钟：
@@ -30,7 +30,7 @@ export function splitScript (text: string, maxMs = DEFAULT_MAX_MS): string[] {
   }
   if (cur) sentences.push(cur)   // 结尾没标点的残句
 
-  const maxChars = Math.floor(maxMs / 196)
+  const maxChars = maxCharsForMs(maxMs)
   const chunks: string[] = []
   let buf = ''
 

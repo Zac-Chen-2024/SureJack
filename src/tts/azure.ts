@@ -22,9 +22,22 @@ const MAX_AUDIO_MS = 10 * 60 * 1000
  */
 const REJECTION_SAFETY_MARGIN = 1.15
 
-/** 实测：937 字 → 184.2 秒，约 196 ms/字。用于提交前拦截，不求精确。 */
+/**
+ * 实测：937 字 → 184.2 秒，约 196 ms/字。
+ *
+ * 导出这个常量是为了让反向换算（给定毫秒预算能放几个字）也走同一个来源。
+ * 曾经 split.ts 里另抄了一份 196，改这里就会静默漂移。
+ */
+export const MS_PER_CHAR = 196
+
+/** 由字数估算音频时长。用于切段与提交前校验，不求精确。 */
 export function estimateAudioMs (charCount: number): number {
-  return charCount * 196
+  return charCount * MS_PER_CHAR
+}
+
+/** estimateAudioMs 的反函数：给定毫秒预算，最多能放几个字。 */
+export function maxCharsForMs (ms: number): number {
+  return Math.floor(ms / MS_PER_CHAR)
 }
 
 /**
