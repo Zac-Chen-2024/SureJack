@@ -34,7 +34,11 @@ interface BuildOpts {
 }
 
 export function buildServer (opts: BuildOpts = {}): FastifyInstance {
-  const app = Fastify({ logger: opts.logger ?? false, trustProxy: true })
+  // 部署拓扑（设计文档第 16 节）：nginx 单跳反代到 127.0.0.1。
+  // 只信任这一跳，从 X-Forwarded-For 里解析出真实客户端 IP；
+  // trustProxy: true 会信任整条链、取最左侧（客户端可任意伪造）的值，
+  // 导致 @fastify/rate-limit 的按-IP 限流形同虚设，还会污染首登IP记录。
+  const app = Fastify({ logger: opts.logger ?? false, trustProxy: '127.0.0.1' })
   const whitelist = opts.whitelist ?? loadWhitelist()
   const authDb = openAuthDb(opts.authDbPath ?? join(__dirname, '..', 'data', 'auth.db'))
   // 生产必须固定 COOKIE_SECRET（否则重启后所有会话失效）；

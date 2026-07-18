@@ -29,6 +29,11 @@ export function registerAuthRoutes (app: FastifyInstance, deps: Deps): void {
 
     const ip = req.ip
     if (!authDb.hasPassword(name)) {
+      // 首次设密码才校验最小长度（与 reset CLI 标准一致，见 cli/reset-password.ts）。
+      // 已设密码的验证阶段不校验长度——那会把已有短密码的人锁死。
+      if (password.length < 4) {
+        return reply.code(400).send({ error: '密码至少4位' })
+      }
       // 首次登录：设密码（记 IP 供抢注检测）。
       // 并发下两个"首次登录"请求都会看到这里的 hasPassword()===false
       // （已实测验证：hashPassword 是 await 点，会把两个请求都放行到这里）。

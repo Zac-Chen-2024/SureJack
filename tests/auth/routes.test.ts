@@ -27,17 +27,23 @@ describe('登录流程', () => {
     expect(res.cookies.find((c) => c.name === 'sj_session')).toBeTruthy()
   })
 
+  it('首次登录密码太短被拒 400', async () => {
+    app = await makeApp()
+    const res = await app.inject({ method: 'POST', url: '/api/login', payload: { name: '张三', password: 'ab' } })
+    expect(res.statusCode).toBe(400)
+  })
+
   it('第二次用正确密码登入', async () => {
     app = await makeApp()
-    await app.inject({ method: 'POST', url: '/api/login', payload: { name: '张三', password: 'pw' } })
-    const res = await app.inject({ method: 'POST', url: '/api/login', payload: { name: '张三', password: 'pw' } })
+    await app.inject({ method: 'POST', url: '/api/login', payload: { name: '张三', password: 'pass' } })
+    const res = await app.inject({ method: 'POST', url: '/api/login', payload: { name: '张三', password: 'pass' } })
     expect(res.statusCode).toBe(200)
     expect(res.json()).toMatchObject({ name: '张三', firstLogin: false })
   })
 
   it('第二次用错误密码被拒 401', async () => {
     app = await makeApp()
-    await app.inject({ method: 'POST', url: '/api/login', payload: { name: '张三', password: 'pw' } })
+    await app.inject({ method: 'POST', url: '/api/login', payload: { name: '张三', password: 'pass' } })
     const res = await app.inject({ method: 'POST', url: '/api/login', payload: { name: '张三', password: 'wrong' } })
     expect(res.statusCode).toBe(401)
   })
@@ -46,7 +52,7 @@ describe('登录流程', () => {
     app = await makeApp()
     const anon = await app.inject({ method: 'GET', url: '/api/whoami' })
     expect(anon.json()).toEqual({ name: null })
-    const login = await app.inject({ method: 'POST', url: '/api/login', payload: { name: '李四', password: 'pw' } })
+    const login = await app.inject({ method: 'POST', url: '/api/login', payload: { name: '李四', password: 'pass' } })
     const cookie = login.cookies.find((c) => c.name === 'sj_session')!.value
     const who = await app.inject({ method: 'GET', url: '/api/whoami', cookies: { sj_session: cookie } })
     expect(who.json()).toEqual({ name: '李四' })
