@@ -1,17 +1,23 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useSession } from '../store/session'
+import { useProjects } from '../store/projects'
+import { ProjectList } from '../components/ProjectList'
+import { ScriptEditor } from '../components/ScriptEditor'
 import { Button } from '../components/ui/Button'
 
 /**
  * 三栏布局（设计文档第 11 节）：
- *   左：可折叠项目列表（Task 7 填内容）
- *   中：主区 —— 文案编辑（Task 7）；预览+时间轴留给 3B
+ *   左：可折叠项目列表
+ *   中：主区 —— 文案编辑；预览+时间轴留给 3B
  *   右：属性面板 —— 3B 填
  * 分栏靠背景色差异区分，不靠边框线（排版优先于框线）。
  */
 export function Workspace () {
   const [collapsed, setCollapsed] = useState(false)
   const { name, logout } = useSession()
+  const { load, current } = useProjects()
+  useEffect(() => { load() }, [load])
+  const project = current()
 
   return (
     <div className="flex h-full">
@@ -27,8 +33,8 @@ export function Workspace () {
             {collapsed ? '›' : '‹'}
           </button>
         </div>
-        <div className="flex-1 overflow-y-auto px-2">
-          {!collapsed && <div className="px-2 py-3 text-xs text-ink-400">项目列表（Task 7）</div>}
+        <div className="flex-1 overflow-hidden">
+          {!collapsed && <ProjectList />}
         </div>
         {!collapsed && (
           <div className="p-2">
@@ -40,12 +46,10 @@ export function Workspace () {
 
       {/* 中：主区 */}
       <main className="flex flex-1 flex-col bg-ink-950">
-        <div className="flex h-14 items-center px-6 text-sm text-ink-400">选一个项目开始</div>
-        <div className="flex-1 px-6 pb-6">
-          <div className="flex h-full items-center justify-center text-sm text-ink-400">
-            文案编辑区（Task 7）
-          </div>
+        <div className="flex h-14 items-center px-6">
+          <span className="text-sm font-medium text-ink-100">{project?.name ?? '选一个项目开始'}</span>
         </div>
+        <div className="flex-1 px-6 pb-6"><ScriptEditor /></div>
       </main>
 
       {/* 右：属性面板 */}
