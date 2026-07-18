@@ -1,6 +1,7 @@
 import Fastify, { type FastifyInstance, type FastifyError } from 'fastify'
 import rateLimit from '@fastify/rate-limit'
 import fastifyStatic from '@fastify/static'
+import multipart from '@fastify/multipart'
 import { readFileSync, existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
@@ -8,6 +9,7 @@ import { randomBytes } from 'node:crypto'
 import { registerSession } from './auth/session.js'
 import { registerAuthRoutes } from './auth/routes.js'
 import { registerProjectRoutes } from './projects/routes.js'
+import { registerAssetRoutes } from './assets/routes.js'
 import { openAuthDb } from './db/auth-db.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -147,6 +149,10 @@ export function buildServer (opts: BuildOpts = {}): FastifyInstance {
     })
     registerAuthRoutes(scope, { authDb, whitelist, welcome })
     registerProjectRoutes(scope, { whitelist })
+
+    // 背景视频可能很大；nginx 侧已放开到 500M
+    await scope.register(multipart, { limits: { fileSize: 500 * 1024 * 1024 } })
+    registerAssetRoutes(scope, { whitelist })
   })
 
   app.addHook('onClose', async () => authDb.close())
