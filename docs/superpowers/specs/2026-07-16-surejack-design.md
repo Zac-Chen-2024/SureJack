@@ -282,7 +282,10 @@ Vite + React + TypeScript。
 
 Node 24 LTS + Fastify + TypeScript。模块划分如下，每个模块一个明确职责。
 
-> **实现状态**（截至阶段 1 完成，2026-07-17）：`importers` / `tts` / `subtitles` / `render` 四个核心模块已实现，100 个测试全绿，一条 CLI 端到端跑通并产出成片。`queue` / `auth` / `db` / `cli/reset-password` 属于阶段 2（认证与部署），尚未开始。Fastify（HTTP 层）也在阶段 2。
+> **实现状态**（截至阶段 2 完成，2026-07-18）：
+> - **阶段 1**：`importers` / `tts` / `subtitles` / `render` 四个核心模块 + CLI，端到端产出成片。两条输入路径（文案→TTS、自带配音+SRT）。
+> - **阶段 2**：`auth`（scrypt 密码、白名单防穿越、签名会话、登录限流）/ `db`（auth.db + 每用户物理隔离库）/ `cli/reset-password` / Fastify HTTP 层已实现，158 测试全绿。**已作为真 HTTPS 服务部署到 `https://surejack.zacchen.win`**（systemd + nginx + Let's Encrypt，与 plus 生产站共存）。
+> - **仍属阶段 3**：`queue`（导出队列）、项目 CRUD 的 HTTP 接口、前端编辑器。这些与前端一起做，避免凭空猜接口形状。
 
 - **`importers/`** ✅ —— 文案导入。输入文件，输出干净的 UTF-8 文本。编码探测、格式解析、特殊字符清洗都在这里，外面不需要知道文件格式的存在。已实现 txt（GBK/GB18030 探测）、docx（mammoth）、doc（catdoc + 乱码检测）。
 - **`tts/`** ✅ —— 封装 Azure SDK。输入文本 + 参数，输出音频文件 + 字级时间戳。**这是一个可替换接口**——哪天换服务商，只动这一个模块。已实现，含超时兜底和提交前时长拦截。

@@ -1,0 +1,23 @@
+[Unit]
+Description=SureJack 营销号视频生成后端
+After=network.target
+# 与同机的 plus 生产站互不依赖，各自独立
+
+[Service]
+Type=simple
+WorkingDirectory=/root/SureJack
+# 从 .env 读 COOKIE_SECRET / AZURE_SPEECH_KEY 等（.env 不入库）
+EnvironmentFile=/root/SureJack/.env
+Environment=PORT=8809
+Environment=NODE_ENV=production
+# 用 nvm 装的 Node 24 绝对路径 + tsx 直接跑 TS（阶段1/2 用 tsx，无需预编译）
+ExecStart=/root/.nvm/versions/node/v24.18.0/bin/node --import tsx /root/SureJack/src/server.ts
+Restart=always
+RestartSec=3
+# 只监听 127.0.0.1:8809，由 nginx 反代——不直接对外
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=surejack
+
+[Install]
+WantedBy=multi-user.target

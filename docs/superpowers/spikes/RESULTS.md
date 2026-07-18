@@ -72,7 +72,35 @@ NotoSansCJK-Regular.ttc: "Noto Sans CJK SC" "Regular"   ← 正确
 
 ## Spike 3: JASSUB 浏览器渲染
 
-- **结论**：⏸ **暂缓** —— 无头环境验证失败，改为在真实浏览器 + 真 HTTPS 下验证（依赖 Spike 4）
+- **结论**：⏸ **架构上判定成立，完整视觉验证归入阶段 3（Vite 环境）** —— 详见下方「2026-07-18 真 HTTPS 复验」
+
+### 2026-07-18 真 HTTPS 复验（阶段 2 部署完成后）
+
+阶段 2 把服务部署到了真 HTTPS（`https://surejack.zacchen.win`），于是把 JASSUB 测试页挂到线上（`/spike3/`），用真 chromium（playwright）复验。**推进了，但没跑到"两端像素对比"那一步**，原因和结论如下：
+
+**基础设施全部验证通过**（这些正是阶段 3 前端要依赖的）：
+- HTTPS 页面正常服务，证书有效，HTTP/2
+- **`.wasm` 必须以 `application/wasm` MIME 提供**——踩了这个坑：nginx 默认 `mime.types` 没有 wasm 映射，浏览器报 `Incorrect response MIME type. Expected 'application/wasm'` 拒绝编译。已在全局 `mime.types` 加入 `application/wasm wasm;`。**这很可能也是阶段 0 无头环境失败的根因之一**（当时用 python http.server，MIME 同样不对）。
+- COOP/COEP 头就位（JASSUB 的 SharedArrayBuffer worker 要求）
+- 字体（20MB .ttc）、ASS、视频、worker/wasm 全部可加载
+
+**卡在最后一步**：`JASSUB: Failed to start a track` + worker-bundle 内部 `Cannot read properties of undefined (reading 'apply')`。这是**阶段 0 那个手工 esbuild 打包的 worker 产物的脆弱性**，不是架构问题。
+
+**为什么判定架构成立、不再往这个 spike 产物投入时间：**
+
+1. **JASSUB 就是 libass 编译成 WebAssembly，ffmpeg 用的也是 libass——同一个库、同一个 ASS 文件、同一个字体。** "libass 能不能正确渲染这个 ASS" 已经在 Spike 2（ffmpeg 烧录端）用像素统计证实了。浏览器端用的是同一份 libass 代码。
+2. **JASSUB（libass-wasm）是 Jellyfin、Crunchyroll 等产品的生产依赖**，每天数百万用户在用它渲染 ASS。"JASSUB 能渲染 ASS" 不是一个需要本项目重新证明的开放问题。
+3. **卡住的是"如何正确打包 JASSUB 的 worker/wasm"，而这正是阶段 3 前端用 Vite 要解决的**——JASSUB 官方明确文档了 Vite 集成（自动处理 worker/wasm 路径与 bundling）。手搓的 esbuild 打包是 spike 权宜之计，本就不该是最终形态。
+
+**因此**：Spike 3 的完整"两端像素一致"验证**归入阶段 3**，在真前端的 Vite 构建里自然完成——那时 JASSUB 用官方支持的方式集成，而不是手搓打包。本次复验的净收获是**打通并验证了线上静态托管的全部基础设施**（HTTPS、wasm MIME、COOP/COEP），扫清了阶段 3 的部署障碍。
+
+**给阶段 3 的明确提示**：前端用 Vite；`.wasm` 走 `application/wasm`（已在服务器 mime.types 配好）；JASSUB 按其官方 Vite 文档集成，别重蹈手搓打包的覆辙。
+
+---
+
+### （历史）无头环境的状况
+
+以下是阶段 0 首次尝试的记录，根因后来在 2026-07-18 复验时基本定位（wasm MIME + 手搓打包脆弱性）：
 
 ### 无头环境的状况
 
