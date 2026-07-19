@@ -14,6 +14,7 @@ import { useFilmStatus } from '../hooks/useFilmStatus'
 import { ExportPanel } from '../components/ExportPanel'
 import { AmbientBackdrop } from '../components/AmbientBackdrop'
 import { AccountMenu } from '../components/AccountMenu'
+import { PaletteToggle } from '../components/PaletteToggle'
 import { BUILD_SHA, buildTimeLocal } from '../build-info'
 import {
   IconChevronRight, IconChevronDown, IconPlay,
@@ -202,8 +203,13 @@ export function Workspace () {
           「你是谁 / 你在哪 / 你能调什么」——原来那一整栏项目列表
           干的就是前两件事，收进来之后省下 180px 给真正在用的地方。
         */}
-        <div className="flex shrink-0 items-center p-2">
+        {/*
+          账户和配色开关并排。两者都是"关于我"而不是"关于这个项目"的东西，
+          放在同一行、同一档视觉重量上，和上面那些项目设置区分开。
+        */}
+        <div className="flex shrink-0 items-center gap-1 p-2">
           <AccountMenu />
+          <PaletteToggle />
         </div>
       </section>
 

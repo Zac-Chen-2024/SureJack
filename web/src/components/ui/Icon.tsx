@@ -203,6 +203,35 @@ export function IconVolume (props: IconProps) {
   )
 }
 
+/**
+ * 咖啡杯 —— 暖调配色。
+ * 杯身 + 把手 + 三缕热气；热气用 strokeLinecap round 才有"飘"的感觉。
+ */
+export function IconCoffee (props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M4 10h12v5a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4v-5Z" />
+      <path d="M16 11h1.5a2.5 2.5 0 0 1 0 5H16" />
+      <path d="M7 3v2.5M10.5 2.5V5M14 3v2.5" />
+    </Svg>
+  )
+}
+
+/**
+ * 冰块 —— 冷调配色。
+ * 一个立方体的三个可见面：顶面菱形 + 两条竖棱，共用一个中心点。
+ * 比画一堆碎冰更容易在 16px 上读出来。
+ */
+export function IconIce (props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M12 3 21 8v8l-9 5-9-5V8l9-5Z" />
+      <path d="M3 8l9 5 9-5" />
+      <path d="M12 13v8" />
+    </Svg>
+  )
+}
+
 /** 竖着的三个点。收纳次要动作的通用入口 */
 export function IconMore (props: IconProps) {
   return (
