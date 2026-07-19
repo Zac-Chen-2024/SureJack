@@ -165,7 +165,7 @@ export function buildServer (opts: BuildOpts = {}): FastifyInstance {
       allowList: [],   // 生产可加内网白名单
     })
     registerAuthRoutes(scope, { authDb, whitelist, welcome })
-    registerProjectRoutes(scope, { whitelist })
+    registerProjectRoutes(scope, { whitelist, libraryDataDir })
     registerSubtitleRoutes(scope, { whitelist })
     registerLibraryRoutes(scope, { dataDir: libraryDataDir })
 

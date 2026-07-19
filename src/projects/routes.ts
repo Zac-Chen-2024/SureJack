@@ -1,8 +1,14 @@
 import type { FastifyInstance } from 'fastify'
 import { openUserDb } from '../db/user-db.js'
 import { getSession, requireAuth } from '../auth/session.js'
+import { openLibraryDb } from '../library/library-db.js'
+import { hasVideoMaterials, planProjectBackground } from '../library/background.js'
 
-interface Deps { whitelist: string[] }
+interface Deps {
+  whitelist: string[]
+  /** 素材库所在的 data 根目录（全局公用，不经过 userDbDir） */
+  libraryDataDir: string
+}
 
 /**
  * 项目 CRUD。
@@ -16,7 +22,7 @@ interface Deps { whitelist: string[] }
  * 比维护连接池简单得多，且天然避免了"连接绑错用户"这类 bug。
  */
 export function registerProjectRoutes (app: FastifyInstance, deps: Deps): void {
-  const { whitelist } = deps
+  const { whitelist, libraryDataDir } = deps
 
   /** 用当前会话身份开库，跑一段逻辑，然后必定关库 */
   function withUserDb<T> (name: string, fn: (db: ReturnType<typeof openUserDb>) => T): T {
@@ -54,6 +60,37 @@ export function registerProjectRoutes (app: FastifyInstance, deps: Deps): void {
       const updated = withUserDb(name, (db) => db.updateProject(req.params.id, patch))
       if (!updated) return reply.code(404).send({ error: '项目不存在' })
       return updated
+    })
+
+  /**
+   * 这个项目的背景轨排布：开头 → 常规 → 地铁跑酷，与配音精确等长。
+   *
+   * 只读、每次现算，**不落库**——项目只存素材 id 引用，绝不复制素材
+   * （地铁跑酷单桶就 4.7GB）。前端拿它画预览条，导出时用同一个函数
+   * 算出同一份排布，所见即所得。
+   */
+  app.get<{ Params: { id: string } }>(
+    '/api/projects/:id/background-plan', { preHandler: requireAuth }, async (req, reply) => {
+      const name = getSession(req)!
+      const project = withUserDb(name, (db) => db.getProject(req.params.id))
+      if (!project) return reply.code(404).send({ error: '项目不存在' })
+
+      const lib = openLibraryDb(libraryDataDir)
+      try {
+        /*
+         * 配音未就绪是正常中间态，planProjectBackground 自己回空排布。
+         * 但【素材库一条视频都没有】是另一回事——库还没扫过，是个能靠
+         * POST /api/library/scan 解决的状态问题。不先判这一下的话，
+         * planBackground 会抛错、落到全局错误处理器变成 500「服务器内部
+         * 错误」，可操作的原因全被抹掉。用 409 明确说出来。
+         */
+        if (project.ttsDurationMs !== null && project.ttsDurationMs > 0 && !hasVideoMaterials(lib)) {
+          return reply.code(409).send({ error: '素材库里没有可用的视频素材，请先扫描素材库' })
+        }
+        return planProjectBackground(lib, project.id, project.ttsDurationMs)
+      } finally {
+        lib.close()
+      }
     })
 
   app.delete<{ Params: { id: string } }>('/api/projects/:id', { preHandler: requireAuth }, async (req, reply) => {
