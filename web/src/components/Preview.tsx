@@ -32,8 +32,26 @@ const ASPECT: Record<string, { width: number; height: number }> = {
   '16:9': { width: 1920, height: 1080 },
 }
 
-/** 画面与音频允许的最大偏差（秒）。超过就把画面拽回来。 */
-const MAX_DRIFT_S = 0.15
+/*
+ * ── 画面跟随音频的两档策略 ──────────────────────────────────────────
+ *
+ * 【为什么不能一律用 seek】设 currentTime 会冲掉解码器已经解好的缓冲，
+ * 浏览器要重新从关键帧解起——每校正一次画面就顿一下。原来阈值 0.15 秒、
+ * 一超就 seek，于是漂移一到就卡，用户看到的就是持续的顿挫。
+ *
+ * 播放器界的成熟做法是【微调播放速率让它平滑追上】：差得少就让画面
+ * 快一点点或慢一点点，几秒内无感地对齐，解码器全程不中断。只有差得
+ * 太多（拖进度条、循环回绕、切段）才值得付一次 seek 的代价。
+ */
+
+/** 超过这个偏差就认为是"跳转"，只能硬 seek。1 秒足够容下循环回绕以外的所有正常漂移 */
+const HARD_SEEK_S = 1.0
+
+/** 小于这个偏差就当已经对齐，不做任何干预——追求零误差会让速率一直抖 */
+const IN_SYNC_S = 0.04
+
+/** 微调的速率上下限。±4% 人眼看不出快慢，再大就能觉察到画面"赶" */
+const RATE_TRIM = 0.04
 
 function fmt (ms: number): string {
   const total = Math.max(0, Math.round(ms / 1000))
@@ -208,12 +226,24 @@ export function Preview ({ onTimeChange, seek }: Props) {
   useEffect(() => {
     if (!playing) return
     let lastPushed = -1
+    let lastRenderS = -1
 
     const tick = () => {
       const audio = audioRef.current
       if (audio) {
         const t = audio.currentTime
-        renderAt(t * 1000)
+        /*
+         * 字幕按 ~30fps 重画而不是每一帧。
+         *
+         * JASSUB 是 wasm 渲染，每次 manualRender 都要走一遍 libass 排版 +
+         * 位图合成。在 60Hz 下这是每秒 60 次；而卡拉OK 扫光是逐字点亮，
+         * 30fps 已经完全看不出台阶。省下的那一半 CPU 直接还给视频解码——
+         * 这台机器只有 4 核，两边抢起来画面就顿。
+         */
+        if (t - lastRenderS >= 1 / 30) {
+          lastRenderS = t
+          renderAt(t * 1000)
+        }
 
         // 状态更新按 50ms 粒度节流：进度条和时间轴高亮根本用不着 60fps，
         // 而每帧 setState 会让整棵子树跟着重渲染。字幕本身走 canvas，
@@ -230,7 +260,23 @@ export function Preview ({ onTimeChange, seek }: Props) {
         const v = videoRef.current
         if (v && v.duration > 0 && Number.isFinite(v.duration)) {
           const want = t % v.duration
-          if (Math.abs(v.currentTime - want) > MAX_DRIFT_S) v.currentTime = want
+          const drift = v.currentTime - want
+          const ad = Math.abs(drift)
+          if (ad > HARD_SEEK_S) {
+            // 大跳：拖进度条、循环回绕、切段。这时 seek 的代价必须付
+            v.currentTime = want
+            v.playbackRate = 1
+          } else if (ad > IN_SYNC_S) {
+            /*
+             * 小漂移：用速率把它"拉"回去，不中断解码。
+             * 画面快了就放慢一点，慢了就加快一点；偏差越大调得越多，
+             * 但封顶 ±4%——超过这个幅度人眼能看出画面在赶。
+             */
+            const trim = Math.max(-RATE_TRIM, Math.min(RATE_TRIM, -drift * 0.5))
+            v.playbackRate = 1 + trim
+          } else if (v.playbackRate !== 1) {
+            v.playbackRate = 1   // 已经对齐，收回微调
+          }
         }
       }
       rafRef.current = requestAnimationFrame(tick)
