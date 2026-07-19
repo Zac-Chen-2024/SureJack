@@ -1,5 +1,8 @@
 import type { FastifyInstance } from 'fastify'
+import { readFile } from 'node:fs/promises'
 import { openUserDb } from '../db/user-db.js'
+import { adoptSrtText, overrunWarning, scriptFromSrtWords } from '../subtitles/from-srt.js'
+import { probeDurationMs } from '../render/probe.js'
 import { getSession, requireAuth } from '../auth/session.js'
 import { openLibraryDb } from '../library/library-db.js'
 import { hasVideoMaterials, planProjectBackground } from '../library/background.js'
@@ -113,6 +116,87 @@ export function registerProjectRoutes (app: FastifyInstance, deps: Deps): void {
         return planProjectBackground(lib, project.id, project.ttsDurationMs)
       } finally {
         lib.close()
+      }
+    })
+
+  /**
+   * 采用自备的配音 + 字幕：把上传的 SRT 变成项目的时间轴。
+   *
+   * 【为什么是显式接口，而不是上传完 srt 自动触发】：配音和字幕是**两个
+   * 文件**，到达顺序不定。挂在 srt 上传上的话，先传字幕后传配音就永远
+   * 派生不了；挂在两个上传上各判一次，则同一段逻辑要写两遍、还要处理
+   * 并发到达。做成一个显式的、幂等的接口最简单：前端两个都传完调一次，
+   * 用户重试就再调一次，前置条件不满足时给的是【能照着做的】提示。
+   *
+   * 这一步之后**下游全部零改动**：字幕派生、预览、背景排布、导出都只认
+   * wordTimingsJson + ttsDurationMs，不关心它们是 Azure 生成的还是传的。
+   */
+  app.post<{ Params: { id: string } }>(
+    '/api/projects/:id/adopt-srt', { preHandler: requireAuth }, async (req, reply) => {
+      const name = getSession(req)!
+      const project = withUserDb(name, (db) => db.getProject(req.params.id))
+      if (!project) return reply.code(404).send({ error: '项目不存在' })
+
+      const assets = withUserDb(name, (db) => db.listAssets(req.params.id))
+      const srtAsset = assets.find((a) => a.kind === 'srt')
+      const voiceAsset = assets.find((a) => a.kind === 'voice')
+
+      // 前置校验给的是【可操作的】话，不是笼统的「参数错误」
+      if (!srtAsset && !voiceAsset) {
+        return reply.code(400).send({ error: '还差配音文件和字幕文件，把 mp3 和 srt 一起拖进来' })
+      }
+      if (!voiceAsset) return reply.code(400).send({ error: '还差配音文件（mp3 / wav / m4a / aac）' })
+      if (!srtAsset) return reply.code(400).send({ error: '还差字幕文件（.srt）' })
+
+      let text: string
+      try {
+        text = await readFile(srtAsset.path, 'utf8')
+      } catch {
+        return reply.code(400).send({ error: '字幕文件已丢失，请重新上传' })
+      }
+
+      const { words, cueCount, lastEndMs } = adoptSrtText(text)
+      if (cueCount === 0) {
+        return reply.code(400).send({ error: '字幕文件解析不出内容，确认是标准 SRT 格式' })
+      }
+
+      /*
+       * 成片时长跟【配音】走，不是最后一条 cue 的结束时间：尾部往往有
+       * 自然静音，用字幕结尾会把配音掐断。probeDurationMs 已经 Math.round
+       * 成整数毫秒——小数毫秒会让背景排布直接 500，别在这里再引入新的小数源。
+       */
+      let durationMs: number
+      try {
+        durationMs = await probeDurationMs(voiceAsset.path)
+      } catch {
+        return reply.code(400).send({ error: '配音文件无法解码，可能已损坏，请重新上传' })
+      }
+
+      /*
+       * 文案回填：文案是项目的一等公民，自备路径下没有它这条视频在列表里
+       * 就"没有内容"。
+       * ⚠️ **只在文案为空时填**。用户可能先写了文案再传字幕，静默覆盖是
+       * 不可逆的数据丢失。已有文案时原样保留，并在响应里说明没有回填。
+       */
+      const hasScript = project.scriptText.trim().length > 0
+      const scriptText = hasScript ? undefined : scriptFromSrtWords(words)
+
+      withUserDb(name, (db) => db.updateProject(req.params.id, {
+        ttsState: 'ready',
+        ttsDurationMs: durationMs,
+        wordTimingsJson: JSON.stringify(words),
+        // 自备 SRT 是句级时间戳，做不了逐字扫光——整句显示
+        subtitleMode: 'line',
+        ...(scriptText === undefined ? {} : { scriptText }),
+      }))
+
+      return {
+        cueCount,
+        durationMs,
+        subtitleMode: 'line' as const,
+        /** 是否把 SRT 正文回填进了文案区。false 表示原有文案被保留了 */
+        scriptFilled: !hasScript,
+        warning: overrunWarning(lastEndMs, durationMs),
       }
     })
 

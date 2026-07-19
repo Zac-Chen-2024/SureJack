@@ -32,9 +32,35 @@ export function aspectOf (project: Project): AspectPreset {
 /**
  * 从存下来的词时间轴推字幕行。还没生成配音时 wordTimingsJson 为 null，
  * 返回空数组——「没有字幕」是正常状态，不是错误。
+ *
+ * ⚠️ **两条来源的分行方式不同，靠 subtitleMode 分流**：
+ *
+ * - `karaoke`（AI 配音）：wordTimingsJson 是 Azure 的**词级**时间轴，
+ *   一个 WordTiming 是一个词，要靠 segmentLines 按标点+字数攒成行。
+ * - `line`（自备 SRT）：wordTimingsJson 是**句级**的，一个 WordTiming
+ *   就是一条 cue 的整句话，分行是用户/剪辑软件已经断好的。这时
+ *   **一条时间轴项 = 一行字幕，不再断句**。
+ *
+ * 【为什么不能对 SRT 也跑 segmentLines】：两条都很短的相邻 cue（'甲'、
+ * '乙'）加起来才 2 个字，远不到 14 字上限，会被攒进同一行，显示时间从
+ * 第一条的起点一路盖到第二条的终点，中间的静音也顶着字幕；长 cue 则会
+ * 被拦腰切开，用户断好的行全废。srt.ts 和 from-srt.ts 的注释里写了同一
+ * 条禁令，这里是它唯一的执行点。
+ *
+ * 【subtitleMode 在这里的含义】：它不只是渲染开关（buildAss 的整句 vs
+ * 扫光），也是**时间轴粒度的标记**——`line` 蕴含「words 是句级的」。
+ * 将来若要给 AI 配音路径加一个「整句显示」的渲染选项，**不能复用这个
+ * 值**，否则词级时间轴会被当成句级，每个词各成一行。那种需求要另加字段。
  */
 export function deriveSubtitleLines (project: Project): SubtitleLine[] {
   const words: WordTiming[] = JSON.parse(project.wordTimingsJson ?? '[]')
+  if (project.subtitleMode === 'line') {
+    return words.map((w) => ({
+      startMs: w.offsetMs,
+      endMs: w.offsetMs + w.durationMs,
+      words: [w],
+    }))
+  }
   return segmentLines(words, SUBTITLE_MAX_CHARS)
 }
 
