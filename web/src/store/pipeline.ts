@@ -349,15 +349,24 @@ export const usePipeline = create<PipelineState>((set, get) => ({
   },
 
   /*
-   * 【失败就当"还没到时候"】，同 loadBgTrack。500 或者断网时我们根本
-   * 不知道成片怎么样，说 error 是在编造一个自己没看见的失败——而那条
-   * 红色 error 是留给真正的合成失败的。
+   * 【失败要拉回"未知"，不是"不能合"】。
+   *
+   * 断网、500、或者后端正在重启时，我们根本不知道成片怎么样。说 error
+   * 是在编造一个自己没看见的失败——那条红色是留给真正的合成失败的。
+   *
+   * ⚠️ 但也【绝不能填成 'none'】。踩过：none 是终态，shouldPollFilm 不再问，
+   * 于是一次转瞬即逝的请求失败（比如一次 systemctl restart）会让按钮
+   * 永久停在"还不能合成成片"，哪怕后台早就把片子合完了——只有切项目或
+   * 刷新页面才能解开。而且那句话是前端瞎编的：后端每条 none 都带着
+   * 具体原因，reason 为 null 只可能是这里造出来的。
+   *
+   * null 表示"还没问出来"，shouldPollFilm(null) 为真，下一轮自己会恢复。
    */
   async loadFilm (projectId) {
     try {
       set({ film: await api.get<Film>(`/api/projects/${projectId}/film`) })
     } catch {
-      set({ film: { state: 'none', jobId: null, progress: 0, error: null, reason: null } })
+      set({ film: null })
     }
   },
 
