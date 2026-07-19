@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   useProjects, maxSubtitleMarginV, subtitleHeightLabel, DEFAULT_SUBTITLE_MARGIN_V,
+  MIN_SUBTITLE_MARGIN_V,
 } from '../store/projects'
 import { IconSubtitles } from './ui/Icon'
 
@@ -62,7 +63,7 @@ export function SubtitleHeight () {
       </div>
       <input
         type="range"
-        min={0} max={max} step={10}
+        min={MIN_SUBTITLE_MARGIN_V} max={max} step={10}
         value={Math.min(value, max)}
         onChange={(e) => onChange(Number(e.target.value))}
         aria-label="字幕高度"

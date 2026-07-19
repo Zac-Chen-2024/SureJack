@@ -9,6 +9,18 @@ import { api } from '../api/client'
  */
 export const DEFAULT_SUBTITLE_MARGIN_V = 300
 
+/**
+ * 字幕能贴多低。**必须与后端 src/subtitles/project-ass.ts 的
+ * MIN_SUBTITLE_MARGIN_V 相等**——低于这个值字幕会压在免责声明上。
+ *
+ * 免责声明固定在 MarginV=90、字号 32，占据 90～122；字幕底边就是它的
+ * MarginV，160 是在 122 之上再留约 38px 呼吸。
+ *
+ * 前端设了它，滑块就拖不到后端会悄悄钳回去的位置——那种"松手就弹回"
+ * 的手感比直接拖不过去更让人困惑。
+ */
+export const MIN_SUBTITLE_MARGIN_V = 160
+
 /** 和后端 ASPECT_PRESETS 一致。认不出的画幅回落竖屏，与 aspectOf 同规则 */
 const ASPECT_HEIGHT: Record<string, number> = {
   '9:16': 1920, '4:5': 1350, '1:1': 1080, '16:9': 1080,

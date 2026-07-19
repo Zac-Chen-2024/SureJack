@@ -42,13 +42,30 @@ export function maxSubtitleMarginV (aspectRatio: string): number {
 }
 
 /**
+ * 字幕能贴多低。
+ *
+ * 免责声明固定在 MarginV=90、字号 32，所以它占据 90～122 这一段。
+ * 字幕从自己的 MarginV 往上长，底边就是 MarginV——低于 122 就会压在
+ * 免责声明上。取 160 是在 122 之上再留约 38px 呼吸，两行不会挤在一起。
+ *
+ * 【为什么给字幕设下限而不是让免责声明避让】：免责声明是固定的合规
+ * 标记，位置稳定本身就是它的价值；每条片子的它都在同一个地方，观众
+ * 扫一眼就跳过。让它随字幕浮动，反而会让人以为那是内容的一部分。
+ */
+export const MIN_SUBTITLE_MARGIN_V = 160
+
+/**
  * 把用户给的值钳进合法范围并取整（像素）。
  *
  * ⚠️ **调用点在路由层，不要指望前端**：滑块的 min/max 只是体验，
  * 接口是公开的，脏值不能靠界面挡。
  */
 export function clampSubtitleMarginV (value: number, aspectRatio: string): number {
-  return Math.min(maxSubtitleMarginV(aspectRatio), Math.max(0, Math.round(value)))
+  const max = maxSubtitleMarginV(aspectRatio)
+  // 极窄画幅上限可能低于下限（比如 16:9 高 1080，上限 540 > 160，没问题；
+  // 但若将来加了更矮的画幅），此时以上限为准，不能返回一个大于上限的值
+  const lo = Math.min(MIN_SUBTITLE_MARGIN_V, max)
+  return Math.min(max, Math.max(lo, Math.round(value)))
 }
 
 /**

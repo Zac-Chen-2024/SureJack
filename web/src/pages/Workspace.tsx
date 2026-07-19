@@ -22,11 +22,11 @@ import {
  * 三栏工作台：**说什么 → 出来什么（以及用了什么料）**。
  *
  *   ┌────────┬──────────────────┬──────────────────┐
- *   │ 项目   │  文案编辑         │   9:16 预览       │
+ *   │ 项目   │   9:16 预览       │  文案编辑         │
  *   │ 列表   │  ──────────────  │  ──────────────  │
- *   │(可折叠)│  配音 + 字幕      │  背景（自动）     │
- *   │        │                  │  背景音乐 / 音量  │
- *   │  240   │   minmax(0,1fr)  │  minmax(380,460) │
+ *   │(可折叠)│  背景（自动）     │  配音 + 字幕      │
+ *   │        │  背景音乐 / 音量  │                  │
+ *   │  240   │  minmax(380,460) │   minmax(0,1fr)  │
  *   └────────┴──────────────────┴──────────────────┘
  *
  * ── 为什么从四栏收成三栏 ─────────────────────────────────────────────
@@ -34,7 +34,7 @@ import {
  * 素材库按三段式公式**全自动**拼的，人只需要选一首背景音乐、拖一下音量——
  * 一整栏的宽度配不上这点操作量。留着它只会让人以为那里有事要做。
  *
- * 收掉之后素材并到右栏：右栏的意思变成「出来什么 + 用了什么料」，
+ * 收掉之后素材并进预览那栏：那一栏的意思变成「出来什么 + 用了什么料」，
  * 预览在上占大头，素材设置在下且紧凑。腾出的宽度全给了文案栏，
  * 那才是主战场。
  *
@@ -46,7 +46,7 @@ import {
  * 一条 6% 白的描边就足够"接住光"，画粗线反而把三栏切成三个不相干的窗口。
  */
 
-/** 宽度低于这个值，项目列表自动收起——切项目的频率远低于编辑，先让出这 240px */
+/** 宽度低于这个值，项目列表自动收起——切项目的频率远低于编辑，先让出这 180px */
 const NARROW = '(max-width: 1400px)'
 
 /** 各列共用的列头，高度对齐成一条横向的头部带 */
@@ -128,12 +128,35 @@ export function Workspace () {
    *   - 预览 + 素材列 minmax(380,460)：比原来的预览栏宽一点（要多装素材设置），
    *     但仍给上限，否则 2560 宽的屏上它会大到喧宾夺主。
    */
+  /*
+   * 【预览在中、文案在右】：预览是定宽的，夹在两个位置固定的东西
+   * （项目列表、屏幕右边缘）之间会让它左右都不着力。放中间之后，
+   * 它左边贴着同样定宽的项目列表，右边是唯一会伸缩的文案栏——
+   * 拉窗口时只有文案在变，视觉上稳得多。
+   *
+   * ⚠️ 栅格按 DOM 顺序排列，所以下面两个 section 的书写顺序也必须
+   * 跟着换：预览那节在前、文案那节在后。
+   */
   const cols = collapsed
-    ? 'grid-cols-[3.5rem_minmax(0,1fr)_minmax(380px,460px)]'
-    : 'grid-cols-[240px_minmax(0,1fr)_minmax(380px,460px)]'
+    ? 'grid-cols-[3.5rem_minmax(440px,540px)_minmax(0,1fr)]'
+    : 'grid-cols-[180px_minmax(440px,540px)_minmax(0,1fr)]'
 
   return (
-    <div className={`grid h-full ${cols}`}>
+    /*
+     * 整个工作台限宽居中，两侧留白。
+     *
+     * 【为什么不铺满】：三栏铺满 1920 时，文案栏能到 1200px 宽——一行排到
+     * 七八十个汉字，读起来要来回甩头，而且屏幕最外侧那两条其实什么都没有。
+     * 铺满不等于用得上。
+     *
+     * 1200px 上限在 1920 屏上是每边 18.75% 的留白，接近对半分的视觉舒适区；
+     * 1200 及以下则自动铺满，小屏不会被凭空挤掉宽度。
+     *
+     * 外层保留 bg-ink-950，留白区域和最深的那栏同色——不然会看出一个
+     * 悬浮的方块，那不是想要的效果。
+     */
+    <div className="flex h-full justify-center bg-ink-950">
+      <div className={`grid h-full w-full max-w-[1200px] border-x border-line ${cols}`}>
       {/* ① 项目列表 —— 可折叠 */}
       <aside className="flex min-w-0 flex-col border-r border-line bg-ink-900">
         <div className="flex h-14 shrink-0 items-center justify-between border-b border-line px-3">
@@ -186,20 +209,8 @@ export function Workspace () {
         </div>
       </aside>
 
-      {/* ② 说什么 —— 上半文案编辑，下半「配音 + 字幕」。
-          这一列是三栏里唯一用 ink-950 的，最深的那块就是让人写字的地方。 */}
-      <section className="flex min-h-0 min-w-0 flex-col border-r border-line bg-ink-950">
-        <ColumnHeader>{project?.name ?? '选一个项目开始'}</ColumnHeader>
-        {/* 上下各占一半，中间一条 border-line。两行都写 minmax(0,1fr)：
-            不写 0 下限的话，子元素内容一多就会把行撑高，"一半"就名存实亡了 */}
-        <div className="grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)_minmax(0,1fr)]">
-          <div className="min-h-0 px-6 pb-4 pt-4"><ScriptEditor /></div>
-          <div className="min-h-0 border-t border-line"><SubtitleList /></div>
-        </div>
-      </section>
-
-      {/* ③ 出来什么 + 用了什么料 —— 预览在上，素材在下，导出常驻底部 */}
-      <section className="flex min-h-0 min-w-0 flex-col bg-ink-900">
+      {/* ② 出来什么 + 用了什么料 —— 预览在上，素材在下，导出常驻底部 */}
+      <section className="flex min-h-0 min-w-0 flex-col border-r border-line bg-ink-900">
         <ColumnHeader icon={<IconPlay className="size-4 text-ink-400" />}>预览与素材</ColumnHeader>
         {project ? (
           <>
@@ -246,6 +257,19 @@ export function Workspace () {
           </>
         ) : <NeedProject />}
       </section>
+      {/* ③ 说什么 —— 上半文案编辑，下半「配音 + 字幕」。
+          这一列是三栏里唯一用 ink-950 的，最深的那块就是让人写字的地方。 */}
+      <section className="flex min-h-0 min-w-0 flex-col bg-ink-950">
+        <ColumnHeader>{project?.name ?? '选一个项目开始'}</ColumnHeader>
+        {/* 上下各占一半，中间一条 border-line。两行都写 minmax(0,1fr)：
+            不写 0 下限的话，子元素内容一多就会把行撑高，"一半"就名存实亡了 */}
+        <div className="grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)_minmax(0,1fr)]">
+          <div className="min-h-0 px-6 pb-4 pt-4"><ScriptEditor /></div>
+          <div className="min-h-0 border-t border-line"><SubtitleList /></div>
+        </div>
+      </section>
+
+      </div>
     </div>
   )
 }

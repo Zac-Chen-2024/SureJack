@@ -82,11 +82,16 @@ describe('PATCH /api/projects/:id —— subtitleMarginV', () => {
    * 字幕就跑到画外了——用户看到的是"字幕没了"，而不是"我拖过头了"。
    * 所以钳位必须在【路由层】，前端的滑块范围只是体验，不是防线。
    */
-  it('负数被钳到 0', async () => {
+  /*
+   * 下限是 160 而不是 0：免责声明固定在 MarginV=90、字号 32，占据 90～122。
+   * 字幕底边就是它的 MarginV，低于 122 会压在免责声明上。160 是在 122 之上
+   * 再留约 38px 呼吸。
+   */
+  it('负数被钳到下限 160，不是 0', async () => {
     const a = await makeApp()
     const cookie = await loginAs(a, '测试字幕高度乙')
     const id = await newProject(a, cookie)
-    expect((await patch(a, cookie, id, { subtitleMarginV: -200 })).body.subtitleMarginV).toBe(0)
+    expect((await patch(a, cookie, id, { subtitleMarginV: -200 })).body.subtitleMarginV).toBe(160)
   })
 
   it('超过画面高度一半的值被钳到一半（9:16 → 960）', async () => {
@@ -125,11 +130,11 @@ describe('PATCH /api/projects/:id —— subtitleMarginV', () => {
     expect(res.body.subtitleMarginV).toBe(540)
   })
 
-  it('0 是有效值——贴着底边，不是"没设置过"', async () => {
+  it('低于下限的值被抬到 160——绝不让字幕压在免责声明上', async () => {
     const a = await makeApp()
     const cookie = await loginAs(a, '测试字幕高度乙')
     const id = await newProject(a, cookie)
-    expect((await patch(a, cookie, id, { subtitleMarginV: 0 })).body.subtitleMarginV).toBe(0)
+    expect((await patch(a, cookie, id, { subtitleMarginV: 0 })).body.subtitleMarginV).toBe(160)
   })
 
   it('小数被取整——MarginV 是像素，样式行里不该出现 300.5', async () => {
