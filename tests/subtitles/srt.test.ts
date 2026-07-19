@@ -85,13 +85,37 @@ describe('parseSrt', () => {
     expect(lines[1]!.words[0]!.text).toBe('但他的室友军师很暖')
   })
 
-  it('端到端：解析真实文件 Material/Text/军师.srt', () => {
-    const text = readFileSync('Material/Text/军师.srt', 'utf-8')
+  /*
+   * 端到端：整份大文件。
+   *
+   * 这条原本读 Material/Text/军师.srt（645 条 cue、带 BOM）。但 Material/
+   * 被 .gitignore 挡着，只存在于开发者本机——别人克隆仓库跑测试就是红的，
+   * 而本机上永远发现不了。改成现场生成同等规模的样本。
+   *
+   * 【BOM 必须保留】：那份真实文件带 BOM，不剥 BOM 的解析器会把第一条
+   * cue 的序号读成「﻿1」而整条丢失。这是这条用例真正在守的东西。
+   */
+  it('端到端：解析带 BOM 的大文件', () => {
+    const cues: string[] = []
+    for (let i = 1; i <= 645; i++) {
+      const s = (i - 1) * 1073
+      const e = i * 1073
+      const fmt = (ms: number) => {
+        const h = String(Math.floor(ms / 3600000)).padStart(2, '0')
+        const m = String(Math.floor(ms / 60000) % 60).padStart(2, '0')
+        const sec = String(Math.floor(ms / 1000) % 60).padStart(2, '0')
+        const mil = String(ms % 1000).padStart(3, '0')
+        return `${h}:${m}:${sec},${mil}`
+      }
+      cues.push(`${i}\n${fmt(s)} --> ${fmt(e)}\n第${i}句台词\n`)
+    }
+    const text = '﻿' + cues.join('\n')   // 开头的 BOM 是关键
+
     const lines = parseSrt(text)
-    expect(lines.length).toBeGreaterThan(600)
-    expect(lines[0]!.words[0]!.text).toBe('网恋对象的嘴巴很毒')
-    expect(lines[0]!.startMs).toBe(0)
-    expect(lines[0]!.endMs).toBe(1073)
+    expect(lines.length).toBe(645)
+    expect(lines.map((l) => l.words.map((w) => w.text).join(''))[0]).toBe('第1句台词')
+    expect(lines.map((l) => l.startMs)[0]).toBe(0)
+    expect(lines.map((l) => l.endMs)[0]).toBe(1073)
   })
 
   it('两条 cue 之间缺空行——序号+时间码不能被塞进上一条的正文（I1/T11.5）', () => {

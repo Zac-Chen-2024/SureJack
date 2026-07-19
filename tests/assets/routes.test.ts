@@ -2,6 +2,31 @@ import { describe, it, expect, afterEach } from 'vitest'
 import { buildServer } from '../../src/server.js'
 import type { FastifyInstance } from 'fastify'
 import { readFileSync } from 'node:fs'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
+
+const run = promisify(execFile)
+
+/**
+ * 现场生成一段指定秒数的小视频，返回它的字节。
+ *
+ * 【不要改回读 spikes/ 或 Material/ 下的文件】：那些目录都被 .gitignore
+ * 挡着，只存在于开发者本机。测试引用它们的话，别人克隆这个仓库跑
+ * npm test 就是红的，而在本机上永远发现不了——这个问题正是子代理在
+ * 干净的 git worktree 里跑测试时才暴露出来的。
+ */
+async function makeTestVideo (seconds: number): Promise<Buffer> {
+  const dir = await mkdtemp(join(tmpdir(), 'asset-test-'))
+  try {
+    const path = join(dir, 'v.mp4')
+    await run('ffmpeg', ['-y', '-f', 'lavfi', '-i', `color=c=black:s=64x64:d=${seconds}`,
+      '-pix_fmt', 'yuv420p', path])
+    return readFileSync(path)
+  } finally { await rm(dir, { recursive: true, force: true }) }
+}
 
 let app: FastifyInstance
 afterEach(async () => { await app?.close() })
@@ -58,8 +83,9 @@ describe('上传接口', () => {
     app = await makeApp()
     const cookie = await loginAs(app, '测试上传甲')
     const p = (await app.inject({ method: 'POST', url: '/api/projects', payload: { name: '项目' }, cookies: { sj_session: cookie } })).json()
-    // 用阶段 0 生成的真实小 mp4（黑底 6 秒）
-    const video = readFileSync('spikes/karaoke/bg.mp4')
+    // 现场生成 6 秒小视频。不引用 spikes/karaoke/bg.mp4——那个文件被
+    // .gitignore 挡着，只存在于开发者本机，别人克隆后这条测试必红。
+    const video = await makeTestVideo(6)
     const { boundary, payload } = multipartBody('file', 'bg.mp4', video, 'video/mp4')
     const up = await app.inject({
       method: 'POST', url: `/api/projects/${p.id}/assets?kind=video`,
