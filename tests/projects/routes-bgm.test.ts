@@ -114,3 +114,79 @@ describe('PATCH /api/projects/:id —— bgmLibraryId', () => {
     expect(res.json().bgmLibraryId).toBe(null)
   })
 })
+
+/**
+ * 音量平衡滑块的落库通道。
+ *
+ * bgm_volume 这一列后端从第一天就在用（导出时经 buildAudioFilter 生效），
+ * 但 PATCH 路由一直没接它——前端就算画出滑块也拖不动。
+ * 这几条测试守的就是那条刚接上的通道。
+ */
+describe('PATCH /api/projects/:id —— bgmVolume', () => {
+  it('能改音量，默认值是 0.1', async () => {
+    const a = await makeApp()
+    const cookie = await loginAs(a, '测试选曲甲')
+    const id = await newProject(a, cookie)
+
+    const before = await a.inject({ method: 'GET', url: `/api/projects/${id}`, cookies: { sj_session: cookie } })
+    expect(before.json().bgmVolume).toBe(0.1)
+
+    const res = await a.inject({
+      method: 'PATCH', url: `/api/projects/${id}`,
+      payload: { bgmVolume: 0.35 }, cookies: { sj_session: cookie },
+    })
+    expect(res.statusCode).toBe(200)
+    expect(res.json().bgmVolume).toBe(0.35)
+
+    const got = await a.inject({ method: 'GET', url: `/api/projects/${id}`, cookies: { sj_session: cookie } })
+    expect(got.json().bgmVolume).toBe(0.35)
+  })
+
+  it('0 是有效值——"完全不要背景音"和"没设置过"是两回事', async () => {
+    const a = await makeApp()
+    const cookie = await loginAs(a, '测试选曲甲')
+    const id = await newProject(a, cookie)
+
+    const res = await a.inject({
+      method: 'PATCH', url: `/api/projects/${id}`,
+      payload: { bgmVolume: 0 }, cookies: { sj_session: cookie },
+    })
+    expect(res.json().bgmVolume).toBe(0)
+  })
+
+  it('越界值被钳到 0..1，不让脏值进 ffmpeg 的 volume 滤镜', async () => {
+    const a = await makeApp()
+    const cookie = await loginAs(a, '测试选曲甲')
+    const id = await newProject(a, cookie)
+
+    const high = await a.inject({
+      method: 'PATCH', url: `/api/projects/${id}`,
+      payload: { bgmVolume: 100 }, cookies: { sj_session: cookie },
+    })
+    expect(high.json().bgmVolume).toBe(1)
+
+    const low = await a.inject({
+      method: 'PATCH', url: `/api/projects/${id}`,
+      payload: { bgmVolume: -5 }, cookies: { sj_session: cookie },
+    })
+    expect(low.json().bgmVolume).toBe(0)
+  })
+
+  it('非数字和 NaN 一律忽略，保持原值', async () => {
+    const a = await makeApp()
+    const cookie = await loginAs(a, '测试选曲甲')
+    const id = await newProject(a, cookie)
+    await a.inject({
+      method: 'PATCH', url: `/api/projects/${id}`,
+      payload: { bgmVolume: 0.4 }, cookies: { sj_session: cookie },
+    })
+
+    for (const bad of ['0.8', null, {}]) {
+      const res = await a.inject({
+        method: 'PATCH', url: `/api/projects/${id}`,
+        payload: { bgmVolume: bad }, cookies: { sj_session: cookie },
+      })
+      expect(res.json().bgmVolume).toBe(0.4)
+    }
+  })
+})

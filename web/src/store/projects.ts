@@ -9,6 +9,10 @@ export interface Project {
   /** 配音状态。设计文档第 6 节：改文案后置为 stale，提示需重新生成 */
   ttsState: 'none' | 'generating' | 'ready' | 'stale' | 'error'
   ttsDurationMs: number | null
+  /** 选中的素材库 BGM 的 id。null = 不要背景音乐，是个有意义的值 */
+  bgmLibraryId: string | null
+  /** 背景音乐相对配音的音量，0..1。后端一直在用，默认 0.1 */
+  bgmVolume: number
   createdAt: string
   updatedAt: string
 }
@@ -22,6 +26,12 @@ interface ProjectsState {
   create: (name: string) => Promise<void>
   select: (id: string) => void
   updateScript: (text: string) => Promise<void>
+  /** 素材选择类字段的通用补丁（乐观更新）。setBgm / setBgmVolume 的共用底座 */
+  patchProject: (patch: Partial<Pick<Project, 'bgmLibraryId' | 'bgmVolume'>>) => Promise<void>
+  /** 选/取消选背景音乐。null 表示不要 BGM */
+  setBgm: (bgmLibraryId: string | null) => Promise<void>
+  /** 调背景音乐音量。调用方负责节流——见 AssetPanel 的滑块 */
+  setBgmVolume: (volume: number) => Promise<void>
   remove: (id: string) => Promise<void>
   current: () => Project | null
 }
@@ -60,6 +70,26 @@ export const useProjects = create<ProjectsState>((set, get) => ({
     }))
     const updated = await api.patch<Project>(`/api/projects/${id}`, { scriptText: text })
     set((s) => ({ saving: false, items: s.items.map((p) => (p.id === id ? updated : p)) }))
+  },
+
+  /**
+   * 素材选择类的补丁。和 updateScript 一样走乐观更新——
+   * 点一下 BGM 要立刻选中、拖滑块要跟手，不能等一个来回。
+   * 后端回来的整条项目再覆盖一次，以它为准。
+   */
+  async patchProject (patch: Partial<Pick<Project, 'bgmLibraryId' | 'bgmVolume'>>) {
+    const id = get().currentId
+    if (!id) return
+    set((s) => ({ items: s.items.map((p) => (p.id === id ? { ...p, ...patch } : p)) }))
+    const updated = await api.patch<Project>(`/api/projects/${id}`, patch)
+    set((s) => ({ items: s.items.map((p) => (p.id === id ? updated : p)) }))
+  },
+
+  async setBgm (bgmLibraryId) { await get().patchProject({ bgmLibraryId }) },
+
+  async setBgmVolume (volume) {
+    // 钳到 0..1：滑块本身给不出越界值，但 store 是公共入口，脏值不该落库
+    await get().patchProject({ bgmVolume: Math.min(1, Math.max(0, volume)) })
   },
 
   async remove (id) {

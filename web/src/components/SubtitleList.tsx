@@ -3,13 +3,18 @@ import {
   useSubtitles, formatTimestamp, findCurrentLineIndex, lineText,
 } from '../store/subtitles'
 import { IconSubtitles, IconLoader } from './ui/Icon'
+import { VoicePanel } from './VoicePanel'
 
 /**
- * 字幕时间列表。
+ * 配音 + 字幕，一栏。
  *
  * 本产品的核心设定：字幕【完全由配音时间轴推导】，不手写、不可编辑。
  * 所以这个列表是只读的索引视图——左边时间、右边文字，点一行跳到那个
  * 时间点。它的价值不是"编辑字幕"，是"按时间检索自己的片子"。
+ *
+ * 正因为字幕是配音生成的，配音的生成按钮就长在这一栏的【头部】：
+ * 空字幕的原因（还没配音）和解决它的按钮必须在同一个视野里。
+ * 配音曾经在另一栏，用户得左右对照才想明白字幕为什么是空的。
  */
 export function SubtitleList () {
   const lines = useSubtitles((s) => s.lines)
@@ -30,6 +35,8 @@ export function SubtitleList () {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
+      <VoicePanel />
+
       <div className="flex items-center gap-1.5 px-3 py-2 text-[11px] uppercase tracking-wider text-ink-400">
         <IconSubtitles className="size-3.5" />
         字幕
@@ -41,7 +48,7 @@ export function SubtitleList () {
       {error !== null
         ? <Notice text={error} />
         : lines.length === 0
-          ? (loading ? null : <Notice text="字幕由配音时间轴自动生成，先生成配音" />)
+          ? (loading ? null : <Notice text="先生成配音，字幕会自动出现" />)
           : (
             <div className="min-h-0 flex-1 overflow-y-auto pb-2">
               {lines.map((line, i) => {
@@ -79,11 +86,16 @@ export function SubtitleList () {
   )
 }
 
-/** 空态/错误态的说明文字。空白屏幕不解释任何事，一句话才解释。 */
+/**
+ * 空态/错误态的说明文字。空白屏幕不解释任何事，一句话才解释。
+ *
+ * 【顶部对齐，不居中】：这句话解释的是正上方那个「生成配音」按钮，
+ * 把它甩到一整栏的垂直中央就等于把因和果拉开半屏——原因要贴着结果。
+ */
 function Notice ({ text }: { text: string }) {
   return (
-    <div className="flex min-h-0 flex-1 items-center justify-center px-6 py-8">
-      <p className="max-w-[15rem] text-center text-xs leading-relaxed text-ink-400">{text}</p>
+    <div className="min-h-0 flex-1 px-4 pt-1">
+      <p className="text-xs leading-relaxed text-ink-400">{text}</p>
     </div>
   )
 }

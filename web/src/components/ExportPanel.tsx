@@ -5,12 +5,19 @@ import { IconDownload } from './ui/Icon'
 
 export function ExportPanel () {
   const project = useProjects((s) => s.current())
-  const { job, startExport, assets } = usePipeline()
+  const { job, startExport } = usePipeline()
   if (!project) return null
 
-  const hasVideo = assets.some((a) => a.kind === 'video')
+  /*
+   * 唯一的前置条件是【配音】。
+   *
+   * 老代码这里还要求「有上传的背景视频」——那句话现在不成立了：背景由素材库
+   * 按三段式公式现拼，本来就不用传。后端的校验顺序也已经改成
+   * 多个上传视频 → 配音 → 素材库（src/queue/routes.ts）。
+   * 而多个上传视频在这一版界面里根本产生不了（素材栏没有上传），
+   * 所以前端只剩配音这一条要挡。
+   */
   const voiceReady = project.ttsState === 'ready'
-  const canExport = hasVideo && voiceReady
   const running = job?.status === 'queued' || job?.status === 'running'
 
   return (
@@ -51,17 +58,16 @@ export function ExportPanel () {
       ) : (
         <Button
           variant="primary" className="w-full"
-          disabled={!canExport || running}
+          disabled={!voiceReady || running}
           onClick={() => startExport(project.id)}
         >
           {running ? '导出中…' : '导出视频'}
         </Button>
       )}
 
-      {!canExport && !running && (
+      {!voiceReady && !running && (
         <div className="mt-1.5 text-[11px] leading-relaxed text-ink-400">
-          {!hasVideo && '需要先上传背景视频。'}
-          {hasVideo && !voiceReady && '需要先生成配音。'}
+          需要先生成配音——背景的长度由配音决定。
         </div>
       )}
     </div>

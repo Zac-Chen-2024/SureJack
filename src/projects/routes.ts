@@ -50,11 +50,13 @@ export function registerProjectRoutes (app: FastifyInstance, deps: Deps): void {
   })
 
   app.patch<{ Params: { id: string }; Body: {
-    name?: unknown; scriptText?: unknown; aspectRatio?: unknown; bgmLibraryId?: unknown
+    name?: unknown; scriptText?: unknown; aspectRatio?: unknown
+    bgmLibraryId?: unknown; bgmVolume?: unknown
   } }>(
     '/api/projects/:id', { preHandler: requireAuth }, async (req, reply) => {
       const patch: {
-        name?: string; scriptText?: string; aspectRatio?: string; bgmLibraryId?: string | null
+        name?: string; scriptText?: string; aspectRatio?: string
+        bgmLibraryId?: string | null; bgmVolume?: number
       } = {}
       if (typeof req.body?.name === 'string') patch.name = req.body.name
       if (typeof req.body?.scriptText === 'string') patch.scriptText = req.body.scriptText
@@ -66,6 +68,16 @@ export function registerProjectRoutes (app: FastifyInstance, deps: Deps): void {
        */
       const bgm = req.body?.bgmLibraryId
       if (typeof bgm === 'string' || bgm === null) patch.bgmLibraryId = bgm
+
+      /*
+       * bgmVolume：背景音乐相对配音的音量，0..1（导出时经 buildAudioFilter
+       * 生效）。**必须钳位**——它会原样进 ffmpeg 的 volume 滤镜，
+       * 一个 100 会把整条音轨削爆。NaN/Infinity 也要挡在库外。
+       */
+      const vol = req.body?.bgmVolume
+      if (typeof vol === 'number' && Number.isFinite(vol)) {
+        patch.bgmVolume = Math.min(1, Math.max(0, vol))
+      }
 
       const name = getSession(req)!
       const updated = withUserDb(name, (db) => db.updateProject(req.params.id, patch))
