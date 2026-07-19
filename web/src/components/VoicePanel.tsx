@@ -11,7 +11,7 @@ const STATE_TEXT: Record<string, string> = {
 export function VoicePanel () {
   const project = useProjects((s) => s.current())
   const reload = useProjects((s) => s.load)
-  const { generateVoice, voiceBusy } = usePipeline()
+  const { generateVoice, voiceBusy, voiceSegmentCount } = usePipeline()
   if (!project) return null
 
   const state = project.ttsState ?? 'none'
@@ -32,6 +32,12 @@ export function VoicePanel () {
           <div className="mt-0.5 text-[11px] tabular-nums text-ink-400">
             {Math.floor(seconds / 60)} 分 {seconds % 60} 秒
           </div>
+        )}
+        {voiceSegmentCount !== null && voiceSegmentCount > 1 && state === 'ready' && (
+          <p className="mt-1.5 text-[12px] leading-relaxed text-ink-400">
+            文案较长，已分 {voiceSegmentCount} 段合成并自动拼接。
+            段落衔接处语气可能略有变化。
+          </p>
         )}
       </div>
       <Button

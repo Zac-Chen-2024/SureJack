@@ -1,2 +1,6 @@
-export { synthesize, toWordTiming, estimateAudioMs } from './azure.js'
+export { synthesize, toWordTiming, estimateAudioMs, maxCharsForMs } from './azure.js'
 export type { SynthesizeOptions } from './azure.js'
+export { splitScript } from './split.js'
+export { concatAudio } from './concat.js'
+export { shiftWords, synthesizeLong } from './long.js'
+export type { LongTtsResult } from './long.js'

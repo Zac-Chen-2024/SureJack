@@ -117,6 +117,8 @@ interface BuildOpts {
   whitelist?: string[]
   cookieSecret?: string
   welcome?: Record<string, string>
+  /** 仅供测试注入假合成，生产不传——真调 Azure 会烧配额 */
+  synthesizeLong?: Parameters<typeof registerTtsRoutes>[1]['synthesizeLong']
 }
 
 export function buildServer (opts: BuildOpts = {}): FastifyInstance {
@@ -157,7 +159,7 @@ export function buildServer (opts: BuildOpts = {}): FastifyInstance {
     // 背景视频可能很大；nginx 侧已放开到 500M
     await scope.register(multipart, { limits: { fileSize: 500 * 1024 * 1024 } })
     registerAssetRoutes(scope, { whitelist })
-    registerTtsRoutes(scope, { whitelist })
+    registerTtsRoutes(scope, { whitelist, synthesizeLong: opts.synthesizeLong })
     registerExportRoutes(scope, { whitelist, queue })
   })
 

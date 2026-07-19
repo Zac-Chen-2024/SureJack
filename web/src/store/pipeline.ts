@@ -19,11 +19,25 @@ export interface JobState {
   error?: string
 }
 
+/**
+ * 生成配音接口的响应。字段要与 src/tts/routes.ts 的返回体保持一致——
+ * 前后端类型不同步是这个项目踩过的坑。
+ */
+export interface VoiceResult {
+  ttsState: string
+  durationMs: number
+  wordCount: number
+  /** 实际分了几段。1 表示文案不长，走的是直通路径。 */
+  segmentCount: number
+}
+
 interface PipelineState {
   assets: Asset[]
   job: JobState | null
   uploading: boolean
   voiceBusy: boolean
+  /** 最近一次生成配音分了几段。null 表示本次会话还没生成过。 */
+  voiceSegmentCount: number | null
   error: string | null
   loadAssets: (projectId: string) => Promise<void>
   upload: (projectId: string, file: File, kind: 'video' | 'bgm') => Promise<void>
@@ -34,9 +48,11 @@ interface PipelineState {
 }
 
 export const usePipeline = create<PipelineState>((set, get) => ({
-  assets: [], job: null, uploading: false, voiceBusy: false, error: null,
+  assets: [], job: null, uploading: false, voiceBusy: false,
+  voiceSegmentCount: null, error: null,
 
-  reset () { set({ assets: [], job: null, error: null }) },
+  // 切换项目时清掉：分段提示是「本次生成」的结果，跟着项目走会误导
+  reset () { set({ assets: [], job: null, voiceSegmentCount: null, error: null }) },
 
   async loadAssets (projectId) {
     const assets = await api.get<Asset[]>(`/api/projects/${projectId}/assets`)
@@ -70,9 +86,10 @@ export const usePipeline = create<PipelineState>((set, get) => ({
   },
 
   async generateVoice (projectId) {
-    set({ voiceBusy: true, error: null })
+    set({ voiceBusy: true, voiceSegmentCount: null, error: null })
     try {
-      await api.post(`/api/projects/${projectId}/voice`)
+      const r = await api.post<VoiceResult>(`/api/projects/${projectId}/voice`)
+      set({ voiceSegmentCount: r.segmentCount })
       await get().loadAssets(projectId)
     } catch (e) {
       set({ error: e instanceof ApiError ? e.message : '配音失败' })
