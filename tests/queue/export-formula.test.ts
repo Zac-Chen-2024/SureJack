@@ -161,7 +161,7 @@ async function exportAndWait (
   expect(res.statusCode).toBe(200)
   const jobId = res.json().jobId as string
 
-  for (let i = 0; i < 300; i++) {
+  for (let i = 0; i < 900; i++) {   // 180 秒。机器在跑归一化，负载 11+，60 秒会假红
     const db = openUserDb('测试公式甲', LIST)
     const job = db.getJob(jobId)
     db.close()

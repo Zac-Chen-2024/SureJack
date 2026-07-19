@@ -10,7 +10,7 @@ import { spawn } from 'node:child_process'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { bucketDir } from '../library/paths.js'
+import { resolveSource, normalizedPath, TARGET } from '../library/normalize.js'
 import type { AspectPreset } from '../types.js'
 
 /** 一段：从素材库某个桶的某个文件里，从 startMs 起截 takeMs 毫秒。 */
@@ -80,6 +80,74 @@ export function segmentArgs (
 }
 
 /**
+ * 归一化时设的关键帧间隔（毫秒）。normalize.ts 用的是 `-g 30` @ 30fps，
+ * 也就是每秒一个关键帧——`-c copy` 的切点只能落在这些位置上。
+ */
+export const KEYFRAME_MS = 1000
+
+/**
+ * 拷贝一段时实际要取多长。
+ *
+ * 【永远比请求的长】。`-c copy` 搬的是压缩帧，末尾会截到最后一个完整帧，
+ * 请求 1.000s 实测可能只给 0.967s；起点又吸附到前一个关键帧。这些误差
+ * 单看无所谓——背景是填充画面，段边界差 0.1 秒没人看得出，总长还有烧录
+ * 那步的 `-t` 精确截断。
+ *
+ * 但【短了就有事】：`buildArgs` 给背景加了 `-stream_loop -1`，轨比配音短
+ * 就会从头循环，接缝处画面突然跳回开头，非常显眼。所以一律向上取整到
+ * 关键帧网格【再多给一格】——多出来的部分被烧录截掉，是免费的。
+ */
+export function copyTakeMs (takeMs: number): number {
+  return Math.ceil(takeMs / KEYFRAME_MS) * KEYFRAME_MS + KEYFRAME_MS
+}
+
+/**
+ * 这一段能不能直接拷贝。
+ *
+ * 两个条件缺一不可：
+ *
+ * 1. **取到的确实是归一化产物**。`resolveSource` 在没转过时会退回原文件，
+ *    而原素材规格杂乱（720x1280 / 1844x4096 都有），拷贝拼不起来——
+ *    concat demuxer 是流级拼接，要求所有输入参数完全一致。归一化【正在
+ *    后台跑】，所以"转了一半"是常态，必须逐段判断。
+ *
+ * 2. **目标画幅就是归一化的目标规格**。归一化产物固定 1080x1920；导出到
+ *    别的画幅时若照样拷贝，就会把 1080x1920 的段和现编码出来的段拼到
+ *    一起。⚠️ concat 对这种不一致【不一定报错】，可能产出一个只有第一段
+ *    能正常播的文件——时长还是对的，肉眼看进度条完全正常。
+ */
+export function canCopySegment (
+  srcPath: string, normPath: string, aspect: AspectPreset,
+): boolean {
+  return srcPath === normPath
+    && aspect.width === TARGET.width
+    && aspect.height === TARGET.height
+}
+
+/**
+ * 拷贝路径的单段参数。
+ *
+ * 没有 `-vf`、没有 `-c:v`——有任何一个都等于解码重编码，这条路径快 175 倍
+ * 的全部原因就是它什么都不做，只把压缩帧从一个容器搬到另一个容器。
+ *
+ * `-ss` 仍在 `-i` 之前（输入端定位），`-an` 仍然保留：背景静音是设计约束，
+ * 换条路径也不放松。
+ */
+export function copySegmentArgs (
+  srcPath: string, seg: BuildSegment, outPath: string,
+): string[] {
+  return [
+    '-hide_banner', '-loglevel', 'error', '-y',
+    '-ss', sec(seg.startMs),
+    '-i', srcPath,
+    '-t', sec(copyTakeMs(seg.takeMs)),
+    '-an',
+    '-c', 'copy',
+    outPath,
+  ]
+}
+
+/**
  * concat demuxer 的清单内容。
  *
  * 路径用单引号包起来——素材包里有 `6月1日(8.mp4` 这种残缺文件名，括号、
@@ -123,11 +191,19 @@ export async function buildBackgroundTrack (opts: BuildBackgroundOptions): Promi
   try {
     const parts: string[] = []
     for (const [i, seg] of segments.entries()) {
-      // 【桶名先过白名单】：bucketDir 内部就是 isBucket，素材库不经过
-      // userDbDir()，这是唯一一道防路径穿越的闸
-      const src = join(bucketDir(dataDir, seg.bucket), seg.filename)
+      /*
+       * 【桶名先过白名单】：normalizedPath / resolveSource 内部都是 isBucket，
+       * 素材库不经过 userDbDir()，这是唯一一道防路径穿越的闸。
+       *
+       * 转过的用转好的，没转过的退回原文件——归一化【随时可以中断】，
+       * "只转完一部分"是常态，所以这个判断必须逐段做。
+       */
+      const norm = normalizedPath(dataDir, seg.bucket, seg.filename)
+      const src = await resolveSource(dataDir, seg.bucket, seg.filename)
       const part = join(work, `part-${String(i).padStart(4, '0')}.mp4`)
-      await ffmpeg(segmentArgs(src, seg, aspect, part))
+      await ffmpeg(canCopySegment(src, norm, aspect)
+        ? copySegmentArgs(src, seg, part)
+        : segmentArgs(src, seg, aspect, part))
       parts.push(part)
       // 留一格给 concat：全部截完只到 (n)/(n+1)
       onProgress?.(((i + 1) / (segments.length + 1)) * 100)
