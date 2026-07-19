@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest'
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import type { FastifyInstance } from 'fastify'
 import { buildServer } from '../../src/server.js'
 import { openUserDb } from '../../src/db/user-db.js'
@@ -197,11 +197,46 @@ describe('字幕派生接口 —— ASS', { timeout: 30_000 }, () => {
    * 端到端验，太重。改用源码级约束钉住另一半：导出路由必须调
    * buildAssForProject，且不得自己再拼一遍 ASS。
    */
-  it('导出路由用的是同一个共用函数，没有自己拼 ASS', () => {
-    const src = readFileSync(new URL('../../src/queue/routes.ts', import.meta.url), 'utf-8')
-    expect(src).toContain('buildAssForProject')
-    expect(src).not.toContain('buildAss(')
-    expect(src).not.toContain('segmentLines(')
+  /*
+   * 【全仓库只能有一处拼 ASS】——这是「预览所见 = 成片所得」的唯一保证。
+   *
+   * 这条断言原本盯着 src/queue/routes.ts。自动合成把烧录逻辑搬进
+   * src/compose/film.ts 之后它就红了——守的不变式没破，只是搬了家。
+   * 所以改成【扫描整个 src/】：谁都可以调 buildAssForProject，
+   * 但除了 project-ass.ts 自己，任何文件都不许直接碰 buildAss / segmentLines。
+   * 这样将来再搬家也不会误报，而真的另起一套仍然会被抓住。
+   */
+  it('全仓库只有 project-ass.ts 直接拼 ASS，其余一律走共用函数', () => {
+    const root = new URL('../../src/', import.meta.url)
+    const offenders: string[] = []
+    const walk = (dir: URL) => {
+      for (const e of readdirSync(dir, { withFileTypes: true })) {
+        const child = new URL(e.name + (e.isDirectory() ? '/' : ''), dir)
+        if (e.isDirectory()) { walk(child); continue }
+        if (!e.name.endsWith('.ts')) continue
+        /*
+         * 白名单，每一条都有理由：
+         *   project-ass.ts / ass.ts  ASS 构造的实现本身
+         *   segment.ts               segmentLines 的定义处
+         *   cli.ts                   独立命令行工具，不走 web 这条管线；
+         *                            它有自己的参数，不该被迫走项目模型
+         */
+        if (['project-ass.ts', 'ass.ts', 'segment.ts', 'cli.ts'].includes(e.name)) continue
+        const src = readFileSync(child, 'utf-8')
+        // 去掉注释再查，免得把说明文字当成调用
+        const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '')
+        if (/\bbuildAss\s*\(/.test(code) || /\bsegmentLines\s*\(/.test(code)) {
+          offenders.push(e.name)
+        }
+      }
+    }
+    walk(root)
+    expect(offenders).toEqual([])
+  })
+
+  it('烧录路径确实在调共用函数', () => {
+    const film = readFileSync(new URL('../../src/compose/film.ts', import.meta.url), 'utf-8')
+    expect(film).toContain('buildAssForProject')
   })
 
   it('ASS 随画幅设置变化（预览与导出共享同一份画幅推导）', async () => {

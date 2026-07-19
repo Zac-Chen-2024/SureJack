@@ -6,9 +6,9 @@ import { getSession, requireAuth } from '../auth/session.js'
 import { assetDir } from '../assets/storage.js'
 import { synthesizeLong } from './index.js'
 import { normalizeScript } from '../importers/sanitize.js'
-import { enqueueBgTrack, type PrebuildDeps } from '../compose/prebuild.js'
+import { enqueueFilm, type FilmDeps } from '../compose/film.js'
 
-interface Deps extends PrebuildDeps {
+interface Deps extends FilmDeps {
   /** 仅供测试注入假合成，生产不传——真调 Azure 会烧配额 */
   synthesizeLong?: typeof synthesizeLong
 }
@@ -68,18 +68,19 @@ export function registerTtsRoutes (app: FastifyInstance, deps: Deps): void {
         })
 
         /*
-         * 【配音一就绪就把背景轨排进后台】。素材归一化之后拼一条轨只要
-         * 十几秒，没理由留到用户点导出时才做——那时他正等着看进度条。
+         * 【配音一就绪，成片就该开始合】——用户不用再点「导出视频」。
+         * 到这一步为止，文案、配音、字幕、BGM 全都定下来了，剩下的几分钟
+         * 里需要他做的事是零，那就不该占用他的注意力。
          *
-         * 不 await：这是个后台优化，配音接口不该为它多等一秒。
-         * 也【不进 try/catch 的失败分支】——入队本身失败了顶多是没预拼上，
-         * 导出照样能走即时生成，不该让用户看到一个"配音失败"。
+         * enqueueFilm 会先把背景轨排进队列再排成片（背景轨是成片的输入，
+         * 队列是 FIFO 串行的，顺序就此保证）。
+         *
+         * 不 await：这是后台活儿，配音接口不该为它多等一秒。
+         * 失败也只记一行日志——入队没成功顶多是用户下次打开时由状态接口
+         * 补排一条，绝不该让他看到一个"配音失败"。
          */
-        try {
-          enqueueBgTrack(deps, name, req.params.id)
-        } catch (e) {
-          req.log.warn({ err: e }, '背景轨预拼入队失败，导出时会即时生成')
-        }
+        void enqueueFilm(deps, name, req.params.id)
+          .catch((e: unknown) => { req.log.warn({ err: e }, '成片自动合成入队失败，稍后由状态接口补排') })
 
         return {
           ttsState: updated!.ttsState,

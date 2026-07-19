@@ -138,6 +138,84 @@ export function shouldPollBgTrack (bg: BgTrack | null): boolean {
 }
 
 /**
+ * 成片的状态。字段与 GET /api/projects/:id/film 一一对应
+ * （src/compose/film.ts 的 FilmInfo）——前后端类型不同步是这个项目踩过的坑。
+ *
+ * ⚠️【成片不是预览播的那个东西】。预览播的是背景轨（无字幕，bgTrack 那套），
+ * 成片是字幕烧死 + 混好 BGM 的下载物。两个产物各有各的用途，别把预览的
+ * <video> 指过来——那会出现"烧死的字幕 + JASSUB 渲染的字幕"两层重影。
+ */
+export interface Film {
+  state: 'none' | 'building' | 'ready' | 'error'
+  jobId: string | null
+  progress: number
+  /** state=error 时的原因 */
+  error: string | null
+  /** state=none 时还缺什么 */
+  reason: string | null
+}
+
+/** 主按钮该长什么样。渲染只管照着画，判断全在这儿，好测。 */
+export interface FilmButton {
+  label: string
+  enabled: boolean
+  /** download = 直接下载；retry = 重新合成；none = 现在点不了 */
+  action: 'download' | 'retry' | 'none'
+  /** 按钮下面那句解释。null = 不用说话 */
+  hint: string | null
+}
+
+/**
+ * ⚠️【「导出视频」已经不存在了】。成片在配音就绪时就由后台自动合成
+ * （src/compose/film.ts），用户要做的只剩下载。所以这个按钮永远不叫
+ * "导出"——叫导出就等于告诉用户"还有一步要你点"，而那一步已经没有了。
+ *
+ * 失败时【必须把原因原样说出来】，并且按钮要变成可点的重试。一个只写着
+ * "合成失败"、还点不动的按钮，会让用户以为这个项目废了。
+ */
+export function filmButton (film: Film | null, voiceReady: boolean): FilmButton {
+  if (!voiceReady) {
+    return {
+      label: '下载视频', enabled: false, action: 'none',
+      hint: '需要先生成配音——成片的长度由配音决定。',
+    }
+  }
+  switch (film?.state) {
+    case 'ready':
+      return { label: '下载视频', enabled: true, action: 'download', hint: null }
+    case 'building':
+      return {
+        label: '合成中…', enabled: false, action: 'none',
+        hint: '配音已就绪，成片正在后台合成，好了这里就能下载。',
+      }
+    case 'error':
+      return {
+        label: '重新合成', enabled: true, action: 'retry',
+        hint: film.error ?? '合成失败，点上面的按钮再试一次。',
+      }
+    case 'none':
+      return {
+        label: '下载视频', enabled: false, action: 'none',
+        hint: film.reason ?? '还不能合成成片。',
+      }
+    default:
+      // 状态还没拉回来的那一瞬间。什么都别说，别闪一句吓人的话
+      return { label: '下载视频', enabled: false, action: 'none', hint: null }
+  }
+}
+
+/**
+ * 还要不要接着问成片状态。
+ *
+ * 只有"在合"才继续问。ready/error/none 都是终态——**none 也是**：
+ * 缺的是配音或素材，那两样变了都会改到 project，界面自然会重新触发一轮。
+ * 终态还接着轮询等于让两个用户的机器白跑一串请求。
+ */
+export function shouldPollFilm (film: Film | null): boolean {
+  return film === null || film.state === 'building'
+}
+
+/**
  * ⚠️ 这里的 upload 【只给配音和字幕用】，不是素材上传。
  *
  * 素材是 data/library/ 里那 210 个本地文件，用户只能选、不能传（见
@@ -149,7 +227,8 @@ interface PipelineState {
   assets: Asset[]
   /** 背景轨预拼状态。null = 本次会话还没问过 */
   bgTrack: BgTrack | null
-  job: JobState | null
+  /** 成片状态。null = 本次会话还没问过 */
+  film: Film | null
   voiceBusy: boolean
   /** 最近一次生成配音分了几段。null 表示本次会话还没生成过。 */
   voiceSegmentCount: number | null
@@ -165,22 +244,25 @@ interface PipelineState {
   loadAssets: (projectId: string) => Promise<void>
   /** 问一次背景轨状态。**永远不抛、永远不置 error** */
   loadBgTrack: (projectId: string) => Promise<void>
+  /** 问一次成片状态。**永远不抛、永远不置 error** */
+  loadFilm: (projectId: string) => Promise<void>
+  /** 手动强制重合一遍。用户偶尔需要不问指纹重来 */
+  recomposeFilm: (projectId: string) => Promise<void>
   generateVoice: (projectId: string) => Promise<void>
   /** 拖进来的文件 → 上传 → 齐了就派生。返回是否真的派生了 */
   adoptFiles: (projectId: string, files: File[]) => Promise<boolean>
-  startExport: (projectId: string) => Promise<void>
   reset: () => void
 }
 
 export const usePipeline = create<PipelineState>((set, get) => ({
-  assets: [], bgTrack: null, job: null, voiceBusy: false,
+  assets: [], bgTrack: null, film: null, voiceBusy: false,
   voiceSegmentCount: null, error: null,
   byoBusy: false, byoHint: null, byoWarning: null, byoScriptFilled: null,
 
   // 切换项目时清掉：这些都是「本次操作」的结果，跟着项目走会误导
   reset () {
     set({
-      assets: [], bgTrack: null, job: null, voiceSegmentCount: null, error: null,
+      assets: [], bgTrack: null, film: null, voiceSegmentCount: null, error: null,
       byoBusy: false, byoHint: null, byoWarning: null, byoScriptFilled: null,
     })
   },
@@ -266,25 +348,38 @@ export const usePipeline = create<PipelineState>((set, get) => ({
     }
   },
 
-  async startExport (projectId) {
-    set({ error: null })
+  /*
+   * 【失败就当"还没到时候"】，同 loadBgTrack。500 或者断网时我们根本
+   * 不知道成片怎么样，说 error 是在编造一个自己没看见的失败——而那条
+   * 红色 error 是留给真正的合成失败的。
+   */
+  async loadFilm (projectId) {
+    try {
+      set({ film: await api.get<Film>(`/api/projects/${projectId}/film`) })
+    } catch {
+      set({ film: { state: 'none', jobId: null, progress: 0, error: null, reason: null } })
+    }
+  },
+
+  /**
+   * 手动强制重合。
+   *
+   * 【不是主流程】：成片在配音就绪时就自动开始合了，这个动作只给
+   * "我就是想重来一遍"和"上次失败了想重试"用。
+   *
+   * 乐观地先置成 building，好让按钮立刻变样——否则用户点完要等一整个
+   * 轮询周期才看到反应，会以为没点上、然后再点一次，白排一条渲染。
+   */
+  async recomposeFilm (projectId) {
+    set({ error: null, film: { state: 'building', jobId: null, progress: 0, error: null, reason: null } })
     try {
       const { jobId } = await api.post<{ jobId: string }>(`/api/projects/${projectId}/export`)
-      set({ job: { jobId, status: 'queued', progress: 0 } })
-
-      // SSE 订阅进度。用原生 EventSource——它自带重连，且我们只需单向接收。
-      const es = new EventSource(`/api/jobs/${jobId}/stream`, { withCredentials: true })
-      es.onmessage = (ev) => {
-        const e = JSON.parse(ev.data) as JobState
-        set({ job: e })
-        if (e.status === 'done' || e.status === 'error') {
-          es.close()
-          if (e.status === 'done') void get().loadAssets(projectId)
-        }
-      }
-      es.onerror = () => { es.close() }
+      set({ film: { state: 'building', jobId, progress: 0, error: null, reason: null } })
     } catch (e) {
-      set({ error: e instanceof ApiError ? e.message : '导出失败' })
+      set({
+        error: e instanceof ApiError ? e.message : '重新合成失败',
+        film: null,   // 拉回未知态，让下一轮轮询问出真相
+      })
     }
   },
 }))

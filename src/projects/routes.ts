@@ -8,7 +8,8 @@ import { getSession, requireAuth } from '../auth/session.js'
 import { assetDir } from '../assets/storage.js'
 import { openLibraryDb } from '../library/library-db.js'
 import { hasVideoMaterials, planProjectBackground } from '../library/background.js'
-import { bgTrackInfo, enqueueBgTrack, type PrebuildDeps } from '../compose/prebuild.js'
+import { bgTrackInfo, type PrebuildDeps } from '../compose/prebuild.js'
+import { enqueueFilm } from '../compose/film.js'
 
 type Deps = PrebuildDeps
 
@@ -219,13 +220,11 @@ export function registerProjectRoutes (app: FastifyInstance, deps: Deps): void {
 
       /*
        * 自备配音这条路和 Azure 那条一样，到这里就"配音就绪"了——
-       * 背景轨该开始拼了。不 await、失败不影响这次派生（见 tts/routes.ts）。
+       * 背景轨和成片都该开始做了。不 await、失败不影响这次派生
+       * （见 tts/routes.ts 里同一段注释）。
        */
-      try {
-        enqueueBgTrack(deps, name, req.params.id)
-      } catch (e) {
-        req.log.warn({ err: e }, '背景轨预拼入队失败，导出时会即时生成')
-      }
+      void enqueueFilm(deps, name, req.params.id)
+        .catch((e: unknown) => { req.log.warn({ err: e }, '成片自动合成入队失败，稍后由状态接口补排') })
 
       return {
         cueCount,
