@@ -259,3 +259,33 @@ describe('seedFrom / rng', () => {
     expect(new Set(a).size > 90).toBe(true)
   })
 })
+
+/*
+ * 小数时长必须被吸收，不能打成 500。
+ *
+ * 真实 bug：Azure 的 HNS 除以 10000 会出小数（实测 65087.5ms），
+ * planBackground 要求正整数，于是整条背景排布抛错、变成 500。
+ * 406 个单元测试全绿却漏掉它——测试数据用的都是 1800/200/3000 这种整数。
+ */
+describe('小数时长（真实 Azure 会给出的形态）', () => {
+  it('65087.5ms 不抛错，且总长取整后精确相等', async () => {
+    const { db, dataDir } = await freshDb()
+    try {
+      seed(db)
+      const p = planProjectBackground(db, '项目甲', 65087.5)
+      expect(p.totalMs).toBe(65088)
+      expect(p.segments.reduce((a, s) => a + s.takeMs, 0)).toBe(65088)
+    } finally { await rm(dataDir, { recursive: true, force: true }) }
+  })
+
+  it('一批带小数尾巴的时长都不抛错', async () => {
+    const { db, dataDir } = await freshDb()
+    try {
+      seed(db)
+      for (const ms of [1000.5, 60000.1, 65087.5, 123456.999]) {
+        const p = planProjectBackground(db, '项目甲', ms)
+        expect(p.segments.reduce((a, s) => a + s.takeMs, 0)).toBe(Math.round(ms))
+      }
+    } finally { await rm(dataDir, { recursive: true, force: true }) }
+  })
+})

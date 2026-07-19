@@ -21,6 +21,21 @@ export function maxCharsForMs (ms: number): number {
 }
 
 /**
+ * Azure 的时间单位是 100 纳秒（HNS），换成【整数】毫秒。
+ *
+ * 【必须取整】：直接除以 10000 会出小数——实测一条 1 分钟配音返回
+ * 65087.5ms。而 planBackground() 要求正整数才能保证三段之和精确等于
+ * 总长，小数会让整条背景排布抛错。
+ *
+ * 这个 bug 曾经躲过 406 个单元测试，因为测试数据用的都是整数时长；
+ * 也曾经只在短文案上出现——长文案走 synthesizeLong，总时长来自
+ * 已经 Math.round 过的 probeDurationMs。
+ */
+export function hnsToMs (hns: number): number {
+  return Math.round(hns / 10000)
+}
+
+/**
  * 把 Azure 的 WordBoundary 事件归一化成我们的结构。
  *
  * 两个坑（都已实测）：
@@ -36,8 +51,8 @@ export function toWordTiming (e: {
 }): WordTiming {
   return {
     text: unescapeXml(e.text),
-    offsetMs: e.audioOffset / 10000,
-    durationMs: e.duration / 10000,
+    offsetMs: hnsToMs(e.audioOffset),
+    durationMs: hnsToMs(e.duration),
     isPunctuation: e.boundaryType.toLowerCase().includes('punct'),
   }
 }
@@ -105,7 +120,7 @@ export function synthesize (opts: SynthesizeOptions): Promise<TtsResult> {
       }
       resolve({
         audioPath: opts.outPath,
-        durationMs: result.audioDuration / 10000,
+        durationMs: hnsToMs(result.audioDuration),
         words,
       })
     }, (err) => {

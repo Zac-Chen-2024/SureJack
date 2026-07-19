@@ -112,6 +112,17 @@ export function planProjectBackground (
 ): BackgroundPlan {
   if (ttsDurationMs === null || ttsDurationMs <= 0) return { segments: [], totalMs: 0 }
 
+  /*
+   * 【在这里取整】：这是「实测出来的时长」和「要求整数的纯算法」之间的边界。
+   *
+   * planBackground 要正整数才能保证三段之和精确等于总长，这个要求是对的，
+   * 不该为了迁就上游而放宽。但上游的时长是量出来的：Azure 的 HNS 除以 10000
+   * 会出小数（实测一条 1 分钟配音给了 65087.5ms），历史数据里也已经存着
+   * 这样的值。源头已经修成整数（azure.ts 的 hnsToMs），这一道是边界防护，
+   * 防止任何新的小数来源再把整条背景排布打成 500。
+   */
+  const totalMs = Math.round(ttsDurationMs)
+
   const rand = rng(seedFrom(projectId))
   // 三个桶依次用同一条随机流打乱：流是确定的，所以整体仍然可复现
   const [opening = [], regular = [], parkour = []] =
@@ -122,7 +133,7 @@ export function planProjectBackground (
 
   // 素材库为空时 planBackground 会抛错——那是"库还没扫过"，
   // 和"配音没好"是两回事，不能都压成空排布，否则运维看不出该去扫库
-  const plan = planBackground(ttsDurationMs, { opening, regular, parkour })
+  const plan = planBackground(totalMs, { opening, regular, parkour })
 
   return {
     totalMs: plan.totalMs,
