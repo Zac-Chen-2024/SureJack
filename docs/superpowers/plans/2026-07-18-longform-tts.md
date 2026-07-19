@@ -462,7 +462,29 @@ git commit -m "feat(tts): 词时间轴平移"
 
 **`deps` 参数是为了测试**——注入假的 synthesize，就能在不打 Azure、不花配额的前提下测完整的分段+平移逻辑。生产调用不传它。
 
-**azure.ts 的改动**：删掉 `synthesize()` 里 `if (est * REJECTION_SAFETY_MARGIN > MAX_AUDIO_MS) throw` 这段。切不切现在由 `splitScript` 决定，`synthesize` 只管合成拿到的这一段。`REJECTION_SAFETY_MARGIN` 常量一并删除（不再有使用者）。
+**⚠️ 但 `concatAudio` 不可注入**（有意如此：多段路径要真跑一次 ffmpeg 才算测到）。
+所以假的 synthesize **必须产出真正可解码的音频**，不能只 `writeFile(outPath, 'x')`——
+那样多段路径会让 ffmpeg 去拼几个内容是字母 x 的文件，必然失败。用 ffmpeg 现生成
+一秒静音即可：
+
+```typescript
+const silence = async (path: string) => {
+  await promisify(execFile)('ffmpeg', ['-y', '-f', 'lavfi', '-i',
+    'anullsrc=r=24000:cl=mono', '-t', '1', path])
+}
+```
+
+测试里的输出路径请用 `mkdtemp` 临时目录，不要写死 `/tmp/lt-out.mp3`——
+写死的话，上一次运行的残留会污染「中间文件不残留」那条断言。
+
+**azure.ts 的改动**：删掉 `synthesize()` 里 `if (est * REJECTION_SAFETY_MARGIN > MAX_AUDIO_MS) throw` 这段。切不切现在由 `splitScript` 决定，`synthesize` 只管合成拿到的这一段。**`REJECTION_SAFETY_MARGIN` 和 `MAX_AUDIO_MS` 两个常量都要删**（都不再有使用者）。保留 `estimateAudioMs` / `MS_PER_CHAR` / `maxCharsForMs`——`splitScript` 在用。
+
+**⚠️ 这一步还会波及一个既有测试，计划原先漏了：** `tests/tts/azure.test.ts` 里的
+`synthesize 的拦截阈值` 用例必须一并删除。它传的是 `key: 'fake-key'`，而它自己的注释
+写着「拦截发生在 new Promise 之前的 throw，不会真的发起网络请求，所以可以放心传假的
+key/region」——**它用假密钥的安全性完全建立在那道拦截会先抛错上**。拦截一删，
+`synthesize()` 就会继续往下建连接，这个用例会挂到 5 分钟超时才失败。
+删除时留一行注释说明覆盖已转移到 `splitScript` 的预算测试。
 
 - [ ] **Step 1: 写失败的测试（追加到 tests/tts/long.test.ts）**
 
@@ -572,7 +594,12 @@ export interface LongTtsResult extends TtsResult {
   segmentCount: number
 }
 
-/** 段间停顿。Azure 每段结尾自带尾音，再补一点让接缝像一次自然换气。 */
+/**
+ * 段间额外停顿，当前为 0——Azure 每段结尾自带的尾音已经足够像一次换气。
+ *
+ * 【若改成非零值，必须同时改两处】：这里的时间轴偏移，以及 concatAudio
+ * 拼接时真的插入等长静音。只改一处会让之后每一句字幕都整体错位。
+ */
 const SEGMENT_GAP_MS = 0
 
 /**
@@ -605,10 +632,14 @@ export async function synthesizeLong (
   let offsetMs = 0
 
   try {
-    for (let i = 0; i < chunks.length; i++) {
+    // 用 entries() 而不是 chunks[i]：tsconfig 开了 noUncheckedIndexedAccess，
+    // chunks[i] 的类型是 string | undefined，过不了 tsc。
+    for (const [i, chunk] of chunks.entries()) {
       const partPath = join(dir, `${stem}.part${i}.mp3`)
-      const r = await synth({ ...opts, text: chunks[i], outPath: partPath })
+      // 【先登记再合成】：synth 抛错时文件可能已经落盘了一半，
+      // 顺序反过来的话 finally 就漏清这一个。
       parts.push(partPath)
+      const r = await synth({ ...opts, text: chunk, outPath: partPath })
 
       words.push(...shiftWords(r.words, offsetMs))
 
