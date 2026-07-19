@@ -51,6 +51,9 @@ interface BgSegment {
 - `GET /api/projects/:id/background-plan` → `{ segments: BgSegment[], totalMs: number }`
   - 配音未就绪时返回 `{ segments: [], totalMs: 0 }`，**不是 404**
 - `PATCH /api/projects/:id` 新增可选字段 `bgmLibraryId: string | null`
+  - **归属 Task 3**（见下）。它要给 `projects` 表加一列，而加列不在 Task 1/2 的
+    文件清单里——第一版计划把这个字段写进了契约却没分配给任何任务，导致
+    Task 4 的 BGM 选择器没有后端可存。
 
 ---
 
@@ -119,7 +122,14 @@ function shuffled<T> (items: T[], rand: () => number): T[] { … }
 
 ### Task 3: 背景公式接入导出
 
-**Files:** `src/compose/build.ts`（新）、`src/queue/routes.ts`、`src/render/*`、测试
+**Files:** `src/compose/build.ts`（新）、`src/queue/routes.ts`、`src/db/user-db.ts`、`src/projects/routes.ts`、测试
+
+**先做数据模型**：`projects` 表加 `bgm_library_id TEXT`（可空），`PATCH /api/projects/:id`
+接受 `bgmLibraryId`。**必须走 `PRAGMA table_info` + `ALTER TABLE` 增量迁移**——
+`CREATE TABLE IF NOT EXISTS` 对已存在的表不生效，线上库已有真实数据，
+本项目为这个陷阱踩过一次坑。
+
+导出时用它从素材库取 BGM 路径；为空则不混 BGM。
 
 按排布生成一条与配音等长的背景轨，再进现有烧录管线。
 
