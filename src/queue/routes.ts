@@ -7,12 +7,32 @@ import { getSession, requireAuth } from '../auth/session.js'
 import { assetDir } from '../assets/storage.js'
 import { buildAssForProject, aspectOf } from '../subtitles/project-ass.js'
 import { render } from '../render/index.js'
+import { openLibraryDb } from '../library/library-db.js'
+import { getLibraryItem } from '../library/scan.js'
+import { libraryItemPath } from '../library/paths.js'
+import { hasVideoMaterials, planProjectBackground, type BackgroundPlan } from '../library/background.js'
+import { buildBackgroundTrack } from '../compose/build.js'
+import type { Clip } from '../types.js'
 import type { ExportQueue } from './queue.js'
 
-interface Deps { whitelist: string[]; queue: ExportQueue }
+interface Deps {
+  whitelist: string[]
+  queue: ExportQueue
+  /** 素材库所在的 data 根目录（全局公用，不经过 userDbDir） */
+  libraryDataDir: string
+}
+
+/**
+ * 背景轨生成在整条导出进度里占的比重。
+ *
+ * 拍脑袋定的 30%：一条 13 分钟的成片要截十几段再拼，几分钟起步，
+ * 【不能让进度条在这段时间里一动不动】——那和卡死没有区别。
+ * 精确的比重取决于素材和机器，也没必要精确：进度条要的是"在动"。
+ */
+const BG_TRACK_SHARE = 0.3
 
 export function registerExportRoutes (app: FastifyInstance, deps: Deps): void {
-  const { whitelist, queue } = deps
+  const { whitelist, queue, libraryDataDir } = deps
 
   function withUserDb<T> (name: string, fn: (db: ReturnType<typeof openUserDb>) => T): T {
     const db = openUserDb(name, whitelist)
@@ -26,17 +46,60 @@ export function registerExportRoutes (app: FastifyInstance, deps: Deps): void {
       if (!project) return reply.code(404).send({ error: '项目不存在' })
 
       const videos = withUserDb(name, (db) => db.listAssets(req.params.id, 'video'))
-      if (videos.length === 0) {
-        return reply.code(400).send({ error: '还没有背景视频，先上传一个' })
-      }
       if (videos.length > 1) {
         // 阶段 1 划界：多片段需要两趟渲染，尚未实现。显式报错而非悄悄出错。
         return reply.code(400).send({ error: '暂时只支持一个背景视频，请删掉多余的' })
       }
 
+      /*
+       * 【公式模式】：没有上传的背景视频 → 背景由素材库按三段式公式现拼。
+       * 有上传的 → 走原来的单视频路径，行为一字不变。公式模式是新增，不是替换。
+       */
+      const uploaded = videos[0]
+      const formulaMode = uploaded === undefined
+
       const voices = withUserDb(name, (db) => db.listAssets(req.params.id, 'voice'))
-      if (voices.length === 0 || project.ttsState !== 'ready') {
+      const voice = voices[0]
+      if (voice === undefined || project.ttsState !== 'ready') {
+        /*
+         * 配音先判。公式模式下【背景长度完全由配音决定】——没有配音就没有
+         * 排布可算，"先传素材"那句老提示在这条路径上已经不成立了。
+         */
         return reply.code(400).send({ error: '还没有配音，先点「生成配音」' })
+      }
+
+      /*
+       * 素材库只在真用得上时才打开：旧路径 + 没选库里的 BGM 时，
+       * 一次都不该去碰它。
+       */
+      let plan: BackgroundPlan | null = null
+      let libraryBgmPath: string | undefined
+      if (formulaMode || project.bgmLibraryId !== null) {
+        const lib = openLibraryDb(libraryDataDir)
+        try {
+          if (formulaMode) {
+            /*
+             * 库里一条视频都没有是【能靠扫库解决的状态问题】，必须在提交前
+             * 说清楚。不先判这一下，planBackground 会在队列里抛错，
+             * 用户只看到一句 ffmpeg 风格的天书。
+             */
+            if (!hasVideoMaterials(lib)) {
+              return reply.code(400).send({ error: '素材库里没有可用的视频素材，请先扫描素材库' })
+            }
+            plan = planProjectBackground(lib, project.id, project.ttsDurationMs)
+            if (plan.segments.length === 0) {
+              return reply.code(400).send({ error: '算不出背景排布，请确认配音时长和素材库' })
+            }
+          }
+          if (project.bgmLibraryId !== null) {
+            const item = getLibraryItem(lib, project.bgmLibraryId)
+            // 选中的 BGM 被从库里删掉了：不混 BGM 继续导出，别让整条导出失败。
+            // 成片没有背景音乐是看得见的，比导出直接崩了好收拾。
+            if (item !== null) libraryBgmPath = libraryItemPath(libraryDataDir, item)
+          }
+        } finally {
+          lib.close()
+        }
       }
 
       const bgms = withUserDb(name, (db) => db.listAssets(req.params.id, 'bgm'))
@@ -55,14 +118,43 @@ export function registerExportRoutes (app: FastifyInstance, deps: Deps): void {
         const assPath = join(dir, 'subtitle.ass')
         await writeFile(assPath, ass, 'utf-8')
 
+        /*
+         * 公式模式：先把三段排布拼成一条与配音等长的无声背景轨，
+         * 再当作【单个背景视频】进现有烧录管线——烧录那一侧一行都不用改。
+         *
+         * fitMode 用 cover 而不是 blur：这条轨已经在 buildBackgroundTrack 里
+         * 归一化到目标画幅了，cover 在这里是恒等变换。用 blur 会白白多做一遍
+         * 高斯模糊叠底，纯浪费 CPU。
+         */
+        let clip: Clip
+        if (plan !== null) {
+          const trackPath = join(dir, 'bg-track.mp4')
+          await buildBackgroundTrack({
+            segments: plan.segments,
+            dataDir: libraryDataDir,
+            aspect, outPath: trackPath, workRoot: dir,
+            onProgress: (p) => onProgress(p * BG_TRACK_SHARE),
+          })
+          clip = { path: trackPath, fitMode: 'cover', cropOffsetX: 0.5, cropOffsetY: 0.5 }
+        } else if (uploaded !== undefined) {
+          clip = { path: uploaded.path, fitMode: 'blur', cropOffsetX: 0.5, cropOffsetY: 0.5 }
+        } else {
+          // 提交前的校验保证走不到这里；真到了就是逻辑漏洞，明着炸掉
+          throw new Error('既没有上传的背景视频，也没有可用的背景排布')
+        }
+
         const outPath = join(dir, 'export.mp4')
         await render({
-          clips: [{ path: videos[0]!.path, fitMode: 'blur', cropOffsetX: 0.5, cropOffsetY: 0.5 }],
-          voicePath: voices[0]!.path,
-          bgmPath: bgms[0]?.path,
+          clips: [clip],
+          voicePath: voice.path,
+          // 素材库里选的 BGM 优先；没选才回落到项目自己上传的那一首
+          bgmPath: libraryBgmPath ?? bgms[0]?.path,
           bgmVolume: project.bgmVolume,
           assPath, aspect, durationMs, outPath,
-        }, onProgress)
+        }, plan === null
+          ? onProgress
+          // 背景轨已经吃掉前 BG_TRACK_SHARE，烧录只推进剩下那一段
+          : (p) => onProgress(BG_TRACK_SHARE * 100 + p * (1 - BG_TRACK_SHARE)))
 
         withUserDb(name, (db) => {
           for (const a of db.listAssets(req.params.id, 'export')) db.deleteAsset(a.id)

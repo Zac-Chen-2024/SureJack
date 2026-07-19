@@ -1,14 +1,28 @@
 import { describe, it, expect, afterEach } from 'vitest'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { buildServer } from '../../src/server.js'
 import type { FastifyInstance } from 'fastify'
 
 let app: FastifyInstance
-afterEach(async () => { await app?.close() })
+let dataDir = ''
+afterEach(async () => {
+  await app?.close()
+  if (dataDir) await rm(dataDir, { recursive: true, force: true })
+  dataDir = ''
+})
 
 const LIST = ['测试导出甲']
 
+// ⚠️ 素材库指向【临时目录】：导出走公式模式时会查素材库，
+// 绝不能碰真实的 data/library/（8.5GB，地铁跑酷单文件 1GB）。
 async function makeApp () {
-  const a = buildServer({ authDbPath: ':memory:', whitelist: LIST, cookieSecret: 'test-secret-32-chars-long-abcdefg' })
+  dataDir = await mkdtemp(join(tmpdir(), 'sj-export-'))
+  const a = buildServer({
+    authDbPath: ':memory:', whitelist: LIST,
+    cookieSecret: 'test-secret-32-chars-long-abcdefg', libraryDataDir: dataDir,
+  })
   await a.ready()
   return a
 }
@@ -25,13 +39,19 @@ describe('导出接口 —— 提交前校验（早失败）', () => {
     expect(res.statusCode).toBe(401)
   })
 
-  it('没有背景视频时拒绝，提示先传素材', async () => {
+  /*
+   * 原来这条断言的是「没有背景视频 → 提示先传素材」。
+   * 公式模式落地后【没上传背景视频不再是错误】——背景由素材库现拼。
+   * 这条路径上真正缺的第一样东西是配音（背景长度由它决定），
+   * 所以断言随之改成配音。公式模式自己的校验见 export-formula.test.ts。
+   */
+  it('既没上传背景视频也没配音时，先要配音', async () => {
     app = await makeApp()
     const cookie = await loginAs(app, '测试导出甲')
     const p = (await app.inject({ method: 'POST', url: '/api/projects', payload: { name: '无素材' }, cookies: { sj_session: cookie } })).json()
     const res = await app.inject({ method: 'POST', url: `/api/projects/${p.id}/export`, cookies: { sj_session: cookie } })
     expect(res.statusCode).toBe(400)
-    expect(res.json().error).toContain('背景视频')
+    expect(res.json().error).toContain('配音')
   })
 
   it('没有配音时拒绝，提示先生成配音', async () => {

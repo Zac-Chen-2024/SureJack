@@ -44,6 +44,13 @@ export interface Project {
   wordTimingsJson: string | null
   /** BGM 相对配音的混音音量（0..1） */
   bgmVolume: number
+  /**
+   * 选中的素材库 BGM 的 id（library_items.id）。null = 不混 BGM。
+   *
+   * 【只存 id，绝不复制文件】——素材库是全局公用的，导出时按 id 查出
+   * 桶名+文件名再拼路径。
+   */
+  bgmLibraryId: string | null
   subtitleMode: 'line' | 'karaoke'
   createdAt: string
   updatedAt: string
@@ -59,6 +66,7 @@ export interface UserDb {
     name?: string; scriptText?: string; aspectRatio?: string
     ttsState?: TtsState; ttsDurationMs?: number | null; wordTimingsJson?: string | null
     bgmVolume?: number; subtitleMode?: 'line' | 'karaoke'
+    bgmLibraryId?: string | null
   }): Project | null
   deleteProject (id: string): boolean
   addAsset (input: {
@@ -79,7 +87,7 @@ export interface UserDb {
 interface Row {
   id: string; name: string; script_text: string; aspect_ratio: string
   tts_state: string; tts_duration_ms: number | null; word_timings_json: string | null
-  bgm_volume: number; subtitle_mode: string
+  bgm_volume: number; subtitle_mode: string; bgm_library_id: string | null
   created_at: string; updated_at: string
 }
 const toProject = (r: Row): Project => ({
@@ -88,6 +96,7 @@ const toProject = (r: Row): Project => ({
   ttsDurationMs: r.tts_duration_ms,
   wordTimingsJson: r.word_timings_json,
   bgmVolume: r.bgm_volume ?? 0.1,
+  bgmLibraryId: r.bgm_library_id ?? null,
   subtitleMode: (r.subtitle_mode ?? 'karaoke') as 'line' | 'karaoke',
   createdAt: r.created_at, updatedAt: r.updated_at,
 })
@@ -131,6 +140,7 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
       word_timings_json TEXT,
       bgm_volume REAL NOT NULL DEFAULT 0.1,
       subtitle_mode TEXT NOT NULL DEFAULT 'karaoke',
+      bgm_library_id TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -167,6 +177,10 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
   addCol('word_timings_json', 'word_timings_json TEXT')
   addCol('bgm_volume', 'bgm_volume REAL NOT NULL DEFAULT 0.1')
   addCol('subtitle_mode', "subtitle_mode TEXT NOT NULL DEFAULT 'karaoke'")
+  // 素材库驱动的 BGM 选择。【必须走这条增量迁移】：上面的
+  // CREATE TABLE IF NOT EXISTS 对已存在的 projects 表一行都不改，
+  // 真实用户的库里这一列只能靠 ALTER TABLE 补上。
+  addCol('bgm_library_id', 'bgm_library_id TEXT')
 
   return {
     raw: db,
@@ -188,16 +202,17 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
         id: randomUUID(), name: projectName, scriptText: '',
         aspectRatio: '9:16', ttsState: 'none', ttsDurationMs: null,
         wordTimingsJson: null, bgmVolume: 0.1, subtitleMode: 'karaoke',
+        bgmLibraryId: null,
         createdAt: now, updatedAt: now,
       }
       db.prepare(
         `INSERT INTO projects
-          (id, name, script_text, aspect_ratio, tts_state, tts_duration_ms, word_timings_json, bgm_volume, subtitle_mode, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          (id, name, script_text, aspect_ratio, tts_state, tts_duration_ms, word_timings_json, bgm_volume, subtitle_mode, bgm_library_id, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         project.id, project.name, project.scriptText, project.aspectRatio,
         project.ttsState, project.ttsDurationMs, project.wordTimingsJson,
-        project.bgmVolume, project.subtitleMode, now, now,
+        project.bgmVolume, project.subtitleMode, project.bgmLibraryId, now, now,
       )
       return project
     },
@@ -211,7 +226,7 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
         `UPDATE projects SET
           name = ?, script_text = ?, aspect_ratio = ?,
           tts_state = ?, tts_duration_ms = ?, word_timings_json = ?,
-          bgm_volume = ?, subtitle_mode = ?, updated_at = ?
+          bgm_volume = ?, subtitle_mode = ?, bgm_library_id = ?, updated_at = ?
           WHERE id = ?`
       ).run(
         patch.name ?? row.name,
@@ -222,6 +237,9 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
         patch.wordTimingsJson !== undefined ? patch.wordTimingsJson : row.word_timings_json,
         patch.bgmVolume ?? row.bgm_volume,
         patch.subtitleMode ?? row.subtitle_mode,
+        // 【必须用 !== undefined 判断】：null 是有意义的值（清空 BGM 选择），
+        // 用 ?? 的话永远清不掉
+        patch.bgmLibraryId !== undefined ? patch.bgmLibraryId : row.bgm_library_id,
         now, id,
       )
       const updated = db.prepare('SELECT * FROM projects WHERE id = ?').get(id) as Row

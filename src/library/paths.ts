@@ -32,3 +32,15 @@ export function bucketDir (dataDir: string, bucket: string): string {
   if (!isBucket(bucket)) throw new Error(`未知的素材桶：${bucket}`)
   return join(libraryRoot(dataDir), bucket)
 }
+
+/**
+ * 某条素材在磁盘上的绝对路径。
+ *
+ * 【经 bucketDir 走白名单】——bucket 是库里存的字符串，不是常量；
+ * 索引可能是旧版本写的、也可能被手工改过，不该被当成可信输入。
+ */
+export function libraryItemPath (
+  dataDir: string, item: { bucket: string; filename: string },
+): string {
+  return join(bucketDir(dataDir, item.bucket), item.filename)
+}

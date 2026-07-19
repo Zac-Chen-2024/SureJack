@@ -49,12 +49,23 @@ export function registerProjectRoutes (app: FastifyInstance, deps: Deps): void {
     return project
   })
 
-  app.patch<{ Params: { id: string }; Body: { name?: unknown; scriptText?: unknown; aspectRatio?: unknown } }>(
+  app.patch<{ Params: { id: string }; Body: {
+    name?: unknown; scriptText?: unknown; aspectRatio?: unknown; bgmLibraryId?: unknown
+  } }>(
     '/api/projects/:id', { preHandler: requireAuth }, async (req, reply) => {
-      const patch: { name?: string; scriptText?: string; aspectRatio?: string } = {}
+      const patch: {
+        name?: string; scriptText?: string; aspectRatio?: string; bgmLibraryId?: string | null
+      } = {}
       if (typeof req.body?.name === 'string') patch.name = req.body.name
       if (typeof req.body?.scriptText === 'string') patch.scriptText = req.body.scriptText
       if (typeof req.body?.aspectRatio === 'string') patch.aspectRatio = req.body.aspectRatio
+      /*
+       * bgmLibraryId 的 null 是【有意义的值】——"不要 BGM"。所以不能像上面
+       * 几个字段那样只认字符串就完事：null 必须原样传下去清库，而其余类型
+       * （数字、对象……）一律忽略，不让脏值落库。
+       */
+      const bgm = req.body?.bgmLibraryId
+      if (typeof bgm === 'string' || bgm === null) patch.bgmLibraryId = bgm
 
       const name = getSession(req)!
       const updated = withUserDb(name, (db) => db.updateProject(req.params.id, patch))

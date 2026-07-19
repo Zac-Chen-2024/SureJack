@@ -173,7 +173,7 @@ export function buildServer (opts: BuildOpts = {}): FastifyInstance {
     await scope.register(multipart, { limits: { fileSize: 500 * 1024 * 1024 } })
     registerAssetRoutes(scope, { whitelist })
     registerTtsRoutes(scope, { whitelist, synthesizeLong: opts.synthesizeLong })
-    registerExportRoutes(scope, { whitelist, queue })
+    registerExportRoutes(scope, { whitelist, queue, libraryDataDir })
   })
 
   app.addHook('onClose', async () => authDb.close())

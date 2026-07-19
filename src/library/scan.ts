@@ -86,6 +86,12 @@ export function listBucket (db: LibraryDb, bucket: string): LibraryItem[] {
   return rows.map(toLibraryItem)
 }
 
+/** 按 id 取一条素材。项目只存 id，导出时靠这个还原出桶名+文件名。 */
+export function getLibraryItem (db: LibraryDb, id: string): LibraryItem | null {
+  const row = db.raw.prepare('SELECT * FROM library_items WHERE id = ?').get(id)
+  return row ? toLibraryItem(row as Record<string, unknown>) : null
+}
+
 function countBucket (db: LibraryDb, bucket: string): number {
   const row = db.raw.prepare(
     'SELECT COUNT(*) AS n FROM library_items WHERE bucket = ?'
