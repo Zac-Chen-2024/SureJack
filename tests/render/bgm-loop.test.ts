@@ -6,6 +6,7 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { buildArgs } from '../../src/render/ffmpeg.js'
 import type { RenderJob } from '../../src/types.js'
+import { ASPECT_PRESETS } from '../../src/config.js'
 
 const run = promisify(execFile)
 
@@ -76,7 +77,8 @@ function makeJob (outPath: string): RenderJob {
     bgmPath: bgm,
     bgmVolume: 0.5,
     assPath: ass,
-    aspect: { width: 1080, height: 1920 },
+    // 用现成的常量而不是手抄 { width, height } —— 手抄会漏字段（第一版就漏了 name）
+    aspect: ASPECT_PRESETS['9:16']!,
     durationMs: 10_000,
     outPath,
   }
