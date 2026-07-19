@@ -69,6 +69,55 @@ export function isAllowedUpload (mime: string, originalName: string, kind: Asset
   return false   // voice/export 是系统生成的，不接受上传
 }
 
+/**
+ * 按扩展名给出回放用的 Content-Type。
+ *
+ * ⚠️ 用的是【落盘时的扩展名】，不是上传者声称的 MIME——上传那一关
+ * （isAllowedUpload）已经把两者都校验过并锁死成一小撮已知扩展名，
+ * 这里再信一次外部输入没有意义。认不出来的一律 application/octet-stream：
+ * 浏览器不会拿它当媒体播，比猜错一个 MIME 更安全。
+ */
+export function playbackMimeFor (filePath: string): string {
+  const ext = extname(filePath).toLowerCase()
+  const map: Record<string, string> = {
+    '.mp4': 'video/mp4', '.m4v': 'video/mp4', '.mov': 'video/quicktime',
+    '.mkv': 'video/x-matroska', '.webm': 'video/webm',
+    '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.aac': 'audio/aac',
+    '.m4a': 'audio/mp4', '.flac': 'audio/flac',
+  }
+  return map[ext] ?? 'application/octet-stream'
+}
+
+/**
+ * 解析 Range 请求头，返回闭区间 [start, end]（字节）。
+ *
+ * 只支持单区间的 `bytes=a-b` / `bytes=a-` / `bytes=-n`——多区间要回
+ * multipart/byteranges，媒体元素从不用它。解析不出来返回 null，调用方
+ * 退回整文件 200（这是规范允许的：Range 是建议，不是命令）。
+ * 越界返回 'invalid'，调用方要回 416，不能悄悄夹逼成一个错误的区间。
+ */
+export function parseRange (header: string | undefined, size: number): { start: number; end: number } | null | 'invalid' {
+  if (!header) return null
+  const m = /^bytes=(\d*)-(\d*)$/.exec(header.trim())
+  if (!m) return null
+  const [, rawStart, rawEnd] = m
+  if (rawStart === '' && rawEnd === '') return null
+
+  let start: number, end: number
+  if (rawStart === '') {
+    // bytes=-n：最后 n 个字节
+    const n = Number(rawEnd)
+    if (n <= 0) return 'invalid'
+    start = Math.max(0, size - n)
+    end = size - 1
+  } else {
+    start = Number(rawStart)
+    end = rawEnd === '' ? size - 1 : Number(rawEnd)
+  }
+  if (start >= size || start > end) return 'invalid'
+  return { start, end: Math.min(end, size - 1) }
+}
+
 /** 把上传流落盘。返回实际路径与字节数。 */
 export async function saveAsset (opts: {
   userName: string; whitelist: string[]; projectId: string

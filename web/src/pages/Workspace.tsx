@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { useSession } from '../store/session'
 import { useProjects } from '../store/projects'
 import { usePipeline } from '../store/pipeline'
+import { useSubtitles } from '../store/subtitles'
 import { ProjectList } from '../components/ProjectList'
 import { ScriptEditor } from '../components/ScriptEditor'
 import { SubtitleList } from '../components/SubtitleList'
@@ -61,6 +62,22 @@ export function Workspace () {
   useEffect(() => {
     if (project?.id) { resetPipeline(); void loadAssets(project.id) }
   }, [project?.id, loadAssets, resetPipeline])
+
+  /*
+   * 字幕是【派生】数据：后端每次从项目存下的词时间轴现推，不入库。
+   * 所以除了切项目要重取，配音状态一变（none → ready）也必须重取——
+   * 否则用户刚生成完配音，字幕列表还是空的，看着像功能坏了。
+   * 这就是把 ttsState 放进依赖数组的原因。
+   */
+  const loadSubtitles = useSubtitles((s) => s.load)
+  const resetSubtitles = useSubtitles((s) => s.reset)
+  const setCurrentMs = useSubtitles((s) => s.setCurrentMs)
+  const currentMs = useSubtitles((s) => s.currentMs)
+  const seekNonce = useSubtitles((s) => s.seekNonce)
+  useEffect(() => {
+    if (!project?.id) { resetSubtitles(); return }
+    void loadSubtitles(project.id)
+  }, [project?.id, project?.ttsState, loadSubtitles, resetSubtitles])
 
   // 初值直接问 matchMedia，避免"先展开再抽搐着收起"的首帧闪烁
   const [collapsed, setCollapsed] = useState(() => window.matchMedia(NARROW).matches)
@@ -182,7 +199,19 @@ export function Workspace () {
         <ColumnHeader icon={<IconPlay className="size-4 text-ink-400" />}>预览</ColumnHeader>
         {project ? (
           <>
-            <Preview />
+            {/*
+              预览和字幕列表的联动是【单向】的：音频是唯一时间源，只能由
+              Preview 往 store 推 currentMs。绝不能反过来让 store 的 currentMs
+              驱动音频——那会成环，进度条自己抖。
+
+              反方向的「用户点字幕某一行要跳过去」走 seekNonce：只有序号变化
+              才真跳转。否则播放中每帧 currentMs 都在变，会被误当成跳转指令，
+              播放头被反复重置；而且连点同一行也仍然生效。
+            */}
+            <Preview
+              onTimeChange={setCurrentMs}
+              seek={seekNonce > 0 ? { ms: currentMs, nonce: seekNonce } : null}
+            />
             {/* 导出常驻底部，不参与上面预览框的高度竞争——它是这一栏的落点 */}
             <div className="shrink-0 border-t border-line p-4"><ExportPanel /></div>
           </>

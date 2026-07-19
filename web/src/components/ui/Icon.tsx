@@ -192,3 +192,22 @@ export function IconVolume (props: IconProps) {
     </Svg>
   )
 }
+
+/** 暂停 */
+export function IconPause (props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M9 5v14M15 5v14" />
+    </Svg>
+  )
+}
+
+/** 预览——取景框的意象，和 IconFilm（素材）区分开 */
+export function IconPreview (props: IconProps) {
+  return (
+    <Svg {...props}>
+      <rect x="6" y="3" width="12" height="18" rx="2" />
+      <path d="M10 17.5h4" />
+    </Svg>
+  )
+}
