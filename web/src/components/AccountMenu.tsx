@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useSession } from '../store/session'
 import { Avatar } from './ui/Avatar'
 import { IconLogOut } from './ui/Icon'
+import { PALETTES, PALETTE_LABELS, currentPalette, setPalette, type Palette } from '../palette'
 
 /**
  * 账户菜单：一个头像，点开才有登出。
@@ -13,6 +14,8 @@ import { IconLogOut } from './ui/Icon'
 export function AccountMenu () {
   const { name, logout } = useSession()
   const [open, setOpen] = useState(false)
+  // 以 <html> 上的属性为准：那是页面真正在用的那一套（见 palette.ts）
+  const [palette, setPaletteState] = useState<Palette>(() => currentPalette())
   const boxRef = useRef<HTMLDivElement>(null)
 
   /*
@@ -57,6 +60,30 @@ export function AccountMenu () {
          */
         <div className="absolute bottom-full left-0 z-30 mb-1 min-w-36 overflow-hidden rounded-lg border border-line bg-ink-850 py-1 shadow-2xl shadow-black/60">
           <div className="truncate border-b border-line px-3 pb-1.5 pt-1 text-xs text-ink-400">{name}</div>
+
+          {/*
+            配色切换。做成一排小胶囊而不是下拉：只有两个选项，
+            下拉要点两次才能换，胶囊一次就够，而且当前是哪套一眼可见。
+          */}
+          <div className="border-b border-line px-3 py-2">
+            <div className="mb-1.5 text-[11px] text-ink-400">配色</div>
+            <div className="flex gap-1">
+              {PALETTES.map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => { setPalette(p); setPaletteState(p) }}
+                  className={`flex-1 rounded-md px-2 py-1 text-xs transition-colors ${
+                    palette === p
+                      ? 'bg-accent text-ink-950'
+                      : 'border border-line text-ink-300 hover:text-ink-50'
+                  }`}
+                >
+                  {PALETTE_LABELS[p]}
+                </button>
+              ))}
+            </div>
+          </div>
           <button
             type="button"
             onClick={() => { setOpen(false); logout() }}

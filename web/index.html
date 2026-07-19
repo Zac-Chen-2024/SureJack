@@ -3,9 +3,24 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#0a0a0b" />
+    <meta name="theme-color" content="#161a1e" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>SureJack</title>
+    <!--
+      配色必须在【首屏画出来之前】定下来。React 挂载要等模块下载执行完，
+      那之前页面已经按默认配色画过一帧了——用户会看到一次明显的闪色。
+      所以这段是同步内联的，放在 <head> 里，先于任何渲染。
+
+      ⚠️ 故意不 import palette.ts：那是个 ES module，会被推迟到解析完
+      才执行，正好错过要抢的这个时机。代价是 'surejack:palette'
+      这个键名在两处各写了一遍，改的时候两边都要动。
+    -->
+    <script>
+      try {
+        var p = localStorage.getItem('surejack:palette')
+        if (p === 'warm' || p === 'precise') document.documentElement.dataset.palette = p
+      } catch (e) { /* 隐私模式读不了 storage，用默认配色就是了 */ }
+    </script>
   </head>
   <body>
     <div id="root"></div>
