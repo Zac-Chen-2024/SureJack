@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><title>proto v2 — 配色</title>
+<style>
+/* ══════════════════════════════════════════════════════════════
+   SureJack 工作台原型 v2 —— 专门用来试配色。
+   URL 参数：
+     ?p=current | A | B | C | final     调色板
+     &fx=0                              关掉光源/描边/琥珀三项处理（只看灰阶本身）
+   控制台：__setPalette('final')、__setFx(true/false)
+   ══════════════════════════════════════════════════════════════ */
+
+/* ── 候选灰阶。每个值由 OKLCH 按目标 CIE L* 反解生成，见方案「配色系统」一节 ── */
+[data-p="current"]{ /* 现状：相邻表面 ΔL* 仅 1.48，肉眼不可辨 */
+  --ink-950:#08080a;--ink-900:#0d0d10;--ink-850:#121216;--ink-800:#17171c;--ink-700:#212128;
+  --ink-600:#2e2e37;--ink-400:#6b6b78;--ink-300:#9c9caa;--ink-100:#dcdce4;--ink-50:#f4f4f8}
+[data-p="A"]{ /* 冷调 H=265，表面步长 4 L* —— 推荐 */
+  --ink-950:#12151b;--ink-900:#191d23;--ink-850:#21252c;--ink-800:#2a2e35;--ink-700:#363942;
+  --ink-600:#454951;--ink-400:#83868e;--ink-300:#a3a5ab;--ink-100:#dbdce0;--ink-50:#f6f4f2}
+[data-p="B"]{ /* 冷调 H=265，表面步长 3 L* —— 更暗但 950/900 一对仍偏弱 */
+  --ink-950:#101318;--ink-900:#15181f;--ink-850:#1b1e26;--ink-800:#21242c;--ink-700:#2c3037;
+  --ink-600:#3a3e45;--ink-400:#83868e;--ink-300:#a3a5ab;--ink-100:#dbdce0;--ink-50:#f6f4f2}
+[data-p="C"]{ /* 暖调 H=70，步长同 A —— 对照组，用来证否 */
+  --ink-950:#18140e;--ink-900:#211b16;--ink-850:#29241d;--ink-800:#322c25;--ink-700:#3e3831;
+  --ink-600:#4f4841;--ink-400:#817c75;--ink-300:#a9a5a0;--ink-100:#dfddda;--ink-50:#f6f5f3}
+[data-p="final"]{ /* = A + 三项处理（光源 / 描边 / 琥珀层级） */
+  --ink-950:#12151b;--ink-900:#191d23;--ink-850:#21252c;--ink-800:#2a2e35;--ink-700:#363942;
+  --ink-600:#454951;--ink-400:#83868e;--ink-300:#a3a5ab;--ink-100:#dbdce0;--ink-50:#f6f4f2}
+
+:root{
+  --line:rgba(255,255,255,.06); --line-strong:rgba(255,255,255,.10);
+  --accent:#f0b429; --accent-dim:#d99a1a;
+  --accent-wash:rgba(240,180,41,.10);   /* 选中态底纹：琥珀而非中性灰 */
+  --topglow:none;                        /* fx 开启时注入 */
+  --sheen:none;
+}
+/* fx：极轻的光源暗示。上缘 1px 内高光 = 光从上方来 */
+[data-fx="1"]{
+  --topglow:inset 0 1px 0 rgba(255,255,255,.045);
+  --sheen:linear-gradient(180deg, rgba(255,255,255,.022) 0%, rgba(255,255,255,0) 220px);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{background:var(--ink-950);color:var(--ink-100);
+  font-family:-apple-system,"PingFang SC","Noto Sans CJK SC",system-ui,sans-serif;
+  -webkit-font-smoothing:antialiased;display:flex;justify-content:center;position:relative}
+
+#backdrop{position:absolute;inset:0;pointer-events:none;overflow:hidden;z-index:0}
+
+.grid{position:relative;z-index:1;height:100%;width:100%;max-width:1440px;
+  display:grid;grid-template-columns:minmax(0,1fr) 280px minmax(300px,340px) 280px;
+  border-left:1px solid var(--line);border-right:1px solid var(--line);background:var(--ink-950)}
+
+.col{display:flex;flex-direction:column;min-width:0;min-height:0;border-right:1px solid var(--line);position:relative}
+.col:last-child{border-right:0}
+.bg900{background:var(--ink-900);box-shadow:var(--topglow)}
+.bg950{background:var(--ink-950)}
+/* 工具区（③④）顶部一层几乎察觉不到的顺光，避免 280px×整屏的死平面 */
+.bg900::before{content:"";position:absolute;inset:0;background:var(--sheen);pointer-events:none}
+.bg900>*{position:relative;z-index:1}
+
+.hd{height:56px;flex-shrink:0;display:flex;align-items:center;gap:6px;
+  border-bottom:1px solid var(--line);padding:0 16px;font-size:14px;font-weight:500;color:var(--ink-100)}
+.hd .lbl{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-400);font-weight:500}
+.spacer{flex:1}
+
+.projbtn{display:flex;align-items:center;gap:7px;border:1px solid transparent;border-radius:8px;
+  padding:5px 9px;margin-left:-9px;background:transparent;color:var(--ink-50);
+  font:inherit;font-size:15px;font-weight:600;letter-spacing:-.01em;cursor:pointer}
+.projbtn:hover{background:var(--ink-850);border-color:var(--line)}
+.projbtn svg{width:14px;height:14px;color:var(--ink-400)}
+.wordmark{font-size:12px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-600);margin-right:14px}
+
+.script{flex:1;min-height:0;display:flex;flex-direction:column;padding:16px 28px 20px}
+.metarow{display:flex;justify-content:space-between;align-items:baseline;font-size:12px;color:var(--ink-400);padding-bottom:14px}
+.script textarea{flex:1;width:100%;resize:none;border:0;background:transparent;outline:none;
+  font:inherit;font-size:15px;line-height:1.9;color:var(--ink-100)}
+
+.sec{display:flex;align-items:center;gap:6px;font-size:11px;text-transform:uppercase;
+  letter-spacing:.08em;color:var(--ink-400);margin-bottom:6px}
+.sec .tr{margin-left:auto;text-transform:none;font-variant-numeric:tabular-nums}
+
+.voice{border-bottom:1px solid var(--line);padding:12px 14px}
+.voicerow{display:flex;align-items:center;gap:8px}
+/* fx 开：重新生成降级为次级按钮（它不是终点动作），把实心琥珀让给导出 */
+.btnPrimary{background:var(--accent);color:#1a1204;border:1px solid transparent;border-radius:8px;padding:7px 14px;
+  font:inherit;font-size:13px;font-weight:600;cursor:pointer}
+[data-fx="1"] .btnPrimary{background:transparent;color:var(--accent);border-color:rgba(240,180,41,.35)}
+.hint{font-size:11px;line-height:1.6;color:var(--ink-400);margin-top:9px}
+.sublist{flex:1;min-height:0;overflow-y:auto;padding-bottom:8px}
+.subrow{display:flex;align-items:baseline;gap:10px;width:100%;text-align:left;
+  border:0;border-left:2px solid transparent;background:transparent;padding:4px 12px 4px 10px;
+  font:inherit;cursor:pointer;color:inherit}
+.subrow:hover{background:var(--ink-850)}
+.subrow.on{border-left-color:var(--accent);background:var(--ink-700)}
+[data-fx="1"] .subrow.on{background:var(--accent-wash)}
+[data-fx="1"] .subrow.on .x{color:var(--ink-50)}
+[data-fx="1"] .subrow.on .t{color:var(--accent)}
+.subrow .t{width:46px;flex-shrink:0;text-align:right;font-size:11px;
+  font-variant-numeric:tabular-nums;color:var(--ink-400)}
+.subrow .x{min-width:0;font-size:13.5px;line-height:1.65;color:var(--ink-100);word-break:break-word}
+
+.previewWrap{flex:1;min-height:0;overflow-y:auto;padding:16px;display:flex;justify-content:center}
+.phone{width:100%;max-width:min(100%,26vh);aspect-ratio:9/16;background:var(--ink-800);
+  border:1px solid var(--line);border-radius:12px;display:flex;align-items:center;
+  justify-content:center;font-size:12px;color:var(--ink-400);box-shadow:var(--topglow)}
+.foot{flex-shrink:0;border-top:1px solid var(--line);padding:16px}
+.btnExport{width:100%;background:var(--ink-800);border:1px solid var(--line-strong);border-radius:9px;
+  color:var(--ink-100);padding:9px;font:inherit;font-size:13px;font-weight:500;cursor:pointer}
+/* fx 开：导出是整条流水线的终点，给它实心琥珀 */
+[data-fx="1"] .btnExport{background:var(--accent);border-color:var(--accent);color:#1a1204;font-weight:600}
+/* 对照：琥珀"淡底"版导出按钮（?exp=soft）——被否决，见方案 */
+[data-exp="soft"] .btnExport{background:rgba(240,180,41,.13);border-color:rgba(240,180,41,.38);
+  color:var(--accent);font-weight:600}
+
+.setbody{flex:1;min-height:0;overflow-y:auto;padding:16px}
+.setgroup{margin-bottom:18px;padding-bottom:18px;border-bottom:1px solid var(--line)}
+.setgroup:last-child{border-bottom:0}
+input[type=range]{width:100%;height:4px;appearance:none;background:var(--ink-700);
+  border-radius:2px;accent-color:var(--accent)}
+.strip{display:flex;height:6px;gap:2px}
+.strip i{display:block}
+.opt{display:flex;align-items:baseline;gap:8px;width:100%;text-align:left;border:0;
+  border-left:2px solid transparent;background:transparent;padding:4px 8px;font:inherit;cursor:pointer;color:inherit}
+.opt:hover{background:var(--ink-850)}
+.opt.on{border-left-color:var(--accent);background:var(--ink-700)}
+[data-fx="1"] .opt.on{background:var(--accent-wash)}
+[data-fx="1"] .opt.on .n{color:var(--ink-50)}
+.opt .n{font-size:12.5px;color:var(--ink-100)}
+.opt .g{font-size:11px;color:var(--ink-400);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.opt .d{margin-left:auto;font-size:11px;color:var(--ink-400);font-variant-numeric:tabular-nums}
+.scrollbox{max-height:210px;overflow-y:auto}
+.userfoot{flex-shrink:0;border-top:1px solid var(--line);padding:10px 12px;display:flex;align-items:center;gap:9px}
+.avatar{width:26px;height:26px;border-radius:999px;background:rgba(240,180,41,.14);color:var(--accent);
+  display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;flex-shrink:0}
+.uname{font-size:13px;color:var(--ink-100);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.iconbtn{border:0;background:transparent;color:var(--ink-400);cursor:pointer;padding:5px;border-radius:7px;display:flex}
+.iconbtn:hover{background:var(--ink-800);color:var(--ink-100)}
+.ver{font-size:10px;color:var(--ink-600);padding:0 12px 8px;font-variant-numeric:tabular-nums}
+
+.pop{position:absolute;top:calc(100% + 8px);left:-9px;width:300px;z-index:30;
+  background:var(--ink-850);border:1px solid var(--line-strong);border-radius:12px;
+  box-shadow:0 16px 48px rgba(0,0,0,.6), 0 2px 8px rgba(0,0,0,.4), var(--topglow);padding:6px;overflow:hidden}
+.popnew{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;
+  font-size:13px;color:var(--ink-100);cursor:pointer}
+.popnew:hover{background:var(--ink-800)}
+.poplist{margin-top:4px;border-top:1px solid var(--line);padding-top:4px;max-height:340px;overflow-y:auto}
+.prow{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;cursor:pointer;
+  border-left:2px solid transparent}
+.prow:hover{background:var(--ink-800)}
+.prow.on{background:var(--ink-700);border-left-color:var(--accent)}
+.prow .pn{font-size:13px;color:var(--ink-100);flex:1;min-width:0;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.prow.on .pn{color:var(--ink-50);font-weight:500}
+.prow .pc{font-size:11px;color:var(--ink-400);font-variant-numeric:tabular-nums;flex-shrink:0}
+::-webkit-scrollbar{width:9px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--ink-700);border-radius:5px}
+
+/* 角标：截图时标明用的哪套 */
+#tag{position:fixed;left:8px;bottom:8px;z-index:99;font:11px/1 ui-monospace,monospace;
+  color:var(--ink-400);background:var(--ink-850);border:1px solid var(--line);
+  padding:5px 8px;border-radius:6px;letter-spacing:.04em}
+</style></head>
+<body data-p="final" data-fx="1">
+<div id="backdrop"></div>
+<div id="tag"></div>
+
+<div class="grid">
+  <!-- ① 文案 -->
+  <section class="col bg950">
+    <div class="hd">
+      <span class="wordmark">SureJack</span>
+      <div style="position:relative">
+        <button class="projbtn" id="pbtn">自律的真相
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+        </button>
+        <div class="pop" id="pop" hidden>
+          <div class="popnew">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+            新建项目
+          </div>
+          <div class="poplist" id="poplist"></div>
+        </div>
+      </div>
+    </div>
+    <div class="script">
+      <div class="metarow"><span>215 字 · 约 42 秒配音</span><span>已保存</span></div>
+      <textarea>你有没有发现，那些看起来很自律的人，其实并不是靠意志力硬撑的。
+他们只是把选择的成本降到了最低——运动服前一晚就摆在门口，书翻开到昨天读到的那一页。
+意志力是有限的资源，环境才是无限的。当你需要"下定决心"才能开始一件事的时候，说明这件事的门槛还太高了。真正的自律，是让正确的选择变成最省力的那一个。
+所以别再责怪自己不够坚持了。先去改造你的环境，让好习惯躺在手边，让坏习惯多走两步路。
+你会发现，坚持这件事，突然就没那么难了。</textarea>
+    </div>
+  </section>
+
+  <!-- ② 配音 + 字幕。zone=22 时和①共用 ink-950（方案 §2 的 2+2 分区） -->
+  <section class="col bg900" id="col2">
+    <div class="hd"><span class="lbl">配音 · 字幕</span><span class="spacer"></span><span class="lbl" style="text-transform:none">18 行</span></div>
+    <div class="voice">
+      <div class="voicerow">
+        <span style="font-size:12px;color:var(--ink-400)">配音 已生成 · 0:42</span>
+        <span class="spacer"></span>
+        <button class="btnPrimary">重新生成</button>
+      </div>
+      <p class="hint">已经配好音了？把音频和 .srt 拖到这块区域，跳过生成。</p>
+    </div>
+    <div class="sublist" id="subs"></div>
+  </section>
+
+  <!-- ③ 预览 -->
+  <section class="col bg900">
+    <div class="hd"><span class="lbl">预览</span></div>
+    <div class="previewWrap"><div class="phone">9 : 16</div></div>
+    <div class="foot"><button class="btnExport">导出成片</button></div>
+  </section>
+
+  <!-- ④ 设置 -->
+  <section class="col bg900">
+    <div class="hd"><span class="lbl">设置</span></div>
+    <div class="setbody">
+      <div class="setgroup">
+        <div class="sec">字幕高度<span class="tr">偏下</span></div>
+        <input type="range" value="62">
+        <p class="hint">字幕在画面里的高低。背景里的人脸位置不一样，往上挪一点常常更好看。</p>
+      </div>
+      <div class="setgroup">
+        <div class="sec">背景 · 自动<span class="tr">0:42</span></div>
+        <div class="strip">
+          <i style="width:22%;background:var(--accent);border-radius:3px 0 0 3px"></i>
+          <i style="width:53%;background:rgba(240,180,41,.6)"></i>
+          <i style="width:25%;background:rgba(240,180,41,.3);border-radius:0 3px 3px 0"></i>
+        </div>
+        <p class="hint">开头 9s · 常规 22s · 地铁跑酷 11s</p>
+      </div>
+      <div class="setgroup">
+        <div class="sec">背景音乐</div>
+        <div class="scrollbox" id="bgm"></div>
+      </div>
+      <div class="setgroup">
+        <div class="sec">音量平衡<span class="tr">15%</span></div>
+        <input type="range" value="15">
+        <p class="hint">背景音乐相对配音的音量，配音始终是满音量。</p>
+      </div>
+    </div>
+    <div class="userfoot">
+      <span class="avatar">测</span><span class="uname">测试甲</span>
+      <button class="iconbtn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg></button>
+    </div>
+    <div class="ver">design · 07-19 v2</div>
+  </section>
+</div>
+
+<script>
+const SUBS=[["0:00","你有没有发现"],["0:01","那些看起来很自律的人"],["0:04","其实并不是靠意志力硬撑的"],
+["0:07","他们只是把选择的成本降到了最低"],["0:10","运动服前一晚就摆在门口"],["0:13","书翻开到昨天读到的那一页"],
+["0:16","意志力是有限的资源"],["0:18","环境才是无限的"],["0:20","当你需要下定决心才能开始一件事的时候"],
+["0:24","说明这件事的门槛还太高了"],["0:27","真正的自律"],["0:29","是让正确的选择变成最省力的那一个"],
+["0:33","所以别再责怪自己不够坚持了"],["0:36","先去改造你的环境"],["0:38","让好习惯躺在手边"],
+["0:40","让坏习惯多走两步路"],["0:43","你会发现坚持这件事"],["0:45","突然就没那么难了"]];
+document.getElementById('subs').innerHTML=SUBS.map(([t,x],i)=>
+ `<button class="subrow${i===8?' on':''}"><span class="t">${t}</span><span class="x">${x}</span></button>`).join('');
+
+const BGM=[["不用背景音乐","",""],["一笑倾城","现言 甜文","7:33"],["傻女","现言","10:53"],["大女主","爽文","9:35"],
+["悬溺","现言","9:23"],["苏公堤","古言 甜文","10:35"],["若梦","古言 虐文","11:36"],["青花","古风","8:12"],["浮生","古言","9:48"]];
+document.getElementById('bgm').innerHTML=BGM.map(([n,g,d],i)=>
+ `<button class="opt${i===2?' on':''}"><span class="n">${n}</span><span class="g">${g}</span><span class="d">${d}</span></button>`).join('');
+
+const PROJ=[["自律的真相",215],["为什么你总是很累",70],["存钱的三个误区",100],["早起这件事",130],
+["如何读完一本书",160],["朋友圈的社交成本",88]];
+document.getElementById('poplist').innerHTML=PROJ.map(([n,c],i)=>
+ `<div class="prow${i===0?' on':''}"><span class="pn">${n}</span><span class="pc">${c} 字</span></div>`).join('');
+document.getElementById('pbtn').onclick=()=>{const p=document.getElementById('pop');p.hidden=!p.hidden};
+
+/* ── 斜向平铺问候语纹理（与 v1 相同，仅跟随新灰阶） ── */
+function greeting(){const h=new Date().getHours();return h>=6&&h<18?'Good Noon And Good Work':'Good Night And Good Dream'}
+function tile({text,size=15,tracking=.3,rowGap=2.6,angle=-24,alpha=.045,offset=.5}){
+  const ls=size*tracking;
+  const runW=Math.round((text.length)*(size*0.58+ls));
+  const rowH=Math.round(size*rowGap);
+  const svg=
+   `<svg xmlns="http://www.w3.org/2000/svg" width="${runW}" height="${rowH*2}">`+
+   `<g font-family="Helvetica,Arial,sans-serif" font-size="${size}" letter-spacing="${ls.toFixed(2)}" `+
+   `fill="rgb(255,255,255)" fill-opacity="${alpha}" font-weight="500">`+
+   `<text x="0" y="${Math.round(rowH*0.72)}">${text}</text>`+
+   `<text x="${Math.round(runW*offset)}" y="${Math.round(rowH*1.72)}">${text}</text>`+
+   `<text x="${Math.round(runW*offset)-runW}" y="${Math.round(rowH*1.72)}">${text}</text>`+
+   `</g></svg>`;
+  return {url:`url("data:image/svg+xml,${encodeURIComponent(svg)}")`,angle};
+}
+function paint(opts){
+  opts=opts||{};
+  const t=tile({text:greeting().toUpperCase()+'   ',...opts});
+  const bd=document.getElementById('backdrop');
+  bd.innerHTML='<div></div>';
+  const el=bd.firstElementChild;
+  el.style.position='absolute'; el.style.inset='-60%';
+  el.style.transform=`rotate(${t.angle}deg)`;
+  el.style.backgroundImage=t.url;   // 必须 property 赋值，见方案「最容易做砸的地方」
+  const m = opts.mask===false ? '' :
+    'linear-gradient(90deg, rgba(0,0,0,1) 0%, rgba(0,0,0,.18) 50%, rgba(0,0,0,1) 100%)';
+  bd.style.webkitMaskImage=m; bd.style.maskImage=m;
+}
+paint({});
+window.__paint=paint;
+
+/* ── 调色板切换 ── */
+const q=new URLSearchParams(location.search);
+function setPalette(p){document.body.dataset.p=p;tag()}
+function setFx(on){document.body.dataset.fx=on?'1':'0';tag()}
+function tag(){
+  const b=document.body;
+  document.getElementById('tag').textContent=
+    `palette=${b.dataset.p}  fx=${b.dataset.fx}  bg=${getComputedStyle(b).backgroundColor}`;
+}
+if(q.get('p'))setPalette(q.get('p'));
+if(q.get('fx')!==null)setFx(q.get('fx')!=='0');
+if(q.get('exp'))document.body.dataset.exp=q.get('exp');
+/* 分区：22 = ①② 共用 ink-950（方案推荐）；13 = 只有 ① 用 ink-950 */
+if((q.get('zone')||'22')==='22'){
+  const c2=document.getElementById('col2'); c2.classList.remove('bg900'); c2.classList.add('bg950');
+}
+/* 纹理 alpha 随底色走：新灰阶底色更亮，同一 alpha 的白纹理反而更响 —— 见方案实测 */
+if(q.get('tex'))paint({alpha:parseFloat(q.get('tex'))});
+else if((q.get('p')||'final')!=='current')paint({alpha:.032});
+tag();
+window.__setPalette=setPalette; window.__setFx=setFx;
+</script>
+</body></html>

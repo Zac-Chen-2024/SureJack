@@ -4,7 +4,7 @@ import { api, ApiError } from '../api/client'
 export interface Asset {
   id: string
   projectId: string
-  kind: 'video' | 'bgm' | 'voice' | 'srt' | 'export'
+  kind: 'video' | 'bgm' | 'voice' | 'srt' | 'bgtrack' | 'export'
   path: string
   originalName: string
   size: number
@@ -94,6 +94,50 @@ export interface AdoptResult {
 }
 
 /**
+ * 背景轨的状态。字段与 GET /api/projects/:id/bg-track 一一对应
+ * （src/compose/prebuild.ts 的 BgTrackInfo）——前后端类型不同步是这个
+ * 项目踩过的坑。
+ */
+export interface BgTrack {
+  state: 'none' | 'building' | 'ready' | 'error'
+  /** ready 时才有。预览用 `/api/assets/<id>` 播它 */
+  assetId: string | null
+}
+
+/**
+ * 预览画框下面那句话。null = 不用说话（背景就在画面里）。
+ *
+ * ⚠️【error 那句必须把"导出不受影响"说出来】。预拼只是个优化，它失败了
+ * 后端会在导出时回退到即时生成（src/queue/routes.ts）。文案要是只说
+ * "背景生成失败"，用户会以为片子导不出来、于是不敢点导出——一个后台
+ * 优化把主流程吓停了，比不做这个优化还糟。
+ */
+export function bgTrackNotice (bg: BgTrack | null): string | null {
+  switch (bg?.state) {
+    case 'ready':
+      return null
+    case 'building':
+      return '背景生成中…拼好后这里会直接播成片用的那条背景。'
+    case 'error':
+      return '预览暂无背景，导出时会重新生成，成片不受影响。'
+    default:
+      // none，以及状态还没拉回来的那一瞬间。保守说法，且永远为真。
+      return '预览只放字幕和配音。背景在导出时按公式自动拼，成片里会有。'
+  }
+}
+
+/** 预览的 `<video>` 该指向哪儿。没拼好就【不给 src】，别去请求一个不存在的素材。 */
+export function bgTrackSrc (bg: BgTrack | null): string | null {
+  if (bg?.state !== 'ready' || bg.assetId === null) return null
+  return `/api/assets/${bg.assetId}`
+}
+
+/** 还要不要接着问。终态就停——两个用户的机器不该白跑一串请求。 */
+export function shouldPollBgTrack (bg: BgTrack | null): boolean {
+  return bg === null || bg.state === 'building'
+}
+
+/**
  * ⚠️ 这里的 upload 【只给配音和字幕用】，不是素材上传。
  *
  * 素材是 data/library/ 里那 210 个本地文件，用户只能选、不能传（见
@@ -103,6 +147,8 @@ export interface AdoptResult {
  */
 interface PipelineState {
   assets: Asset[]
+  /** 背景轨预拼状态。null = 本次会话还没问过 */
+  bgTrack: BgTrack | null
   job: JobState | null
   voiceBusy: boolean
   /** 最近一次生成配音分了几段。null 表示本次会话还没生成过。 */
@@ -117,6 +163,8 @@ interface PipelineState {
   /** 最近一次派生有没有回填文案。null = 本次会话还没派生过 */
   byoScriptFilled: boolean | null
   loadAssets: (projectId: string) => Promise<void>
+  /** 问一次背景轨状态。**永远不抛、永远不置 error** */
+  loadBgTrack: (projectId: string) => Promise<void>
   generateVoice: (projectId: string) => Promise<void>
   /** 拖进来的文件 → 上传 → 齐了就派生。返回是否真的派生了 */
   adoptFiles: (projectId: string, files: File[]) => Promise<boolean>
@@ -125,14 +173,14 @@ interface PipelineState {
 }
 
 export const usePipeline = create<PipelineState>((set, get) => ({
-  assets: [], job: null, voiceBusy: false,
+  assets: [], bgTrack: null, job: null, voiceBusy: false,
   voiceSegmentCount: null, error: null,
   byoBusy: false, byoHint: null, byoWarning: null, byoScriptFilled: null,
 
   // 切换项目时清掉：这些都是「本次操作」的结果，跟着项目走会误导
   reset () {
     set({
-      assets: [], job: null, voiceSegmentCount: null, error: null,
+      assets: [], bgTrack: null, job: null, voiceSegmentCount: null, error: null,
       byoBusy: false, byoHint: null, byoWarning: null, byoScriptFilled: null,
     })
   },
@@ -142,12 +190,27 @@ export const usePipeline = create<PipelineState>((set, get) => ({
     set({ assets })
   },
 
+  /*
+   * 【失败就当"还没到时候"】。500 或者断网时我们根本不知道背景轨怎么样，
+   * 说 error 是在编造一个自己没看见的失败；而占用那条红色 error 更糟——
+   * 那是给导出/配音失败留的，一次拉状态失败不该长得像片子出问题了。
+   */
+  async loadBgTrack (projectId) {
+    try {
+      set({ bgTrack: await api.get<BgTrack>(`/api/projects/${projectId}/bg-track`) })
+    } catch {
+      set({ bgTrack: { state: 'none', assetId: null } })
+    }
+  },
+
   async generateVoice (projectId) {
     set({ voiceBusy: true, voiceSegmentCount: null, error: null })
     try {
       const r = await api.post<VoiceResult>(`/api/projects/${projectId}/voice`)
       set({ voiceSegmentCount: r.segmentCount })
       await get().loadAssets(projectId)
+      // 后端这时刚把背景轨排进队列，问一次好让预览立刻显示「背景生成中」
+      await get().loadBgTrack(projectId)
     } catch (e) {
       set({ error: e instanceof ApiError ? e.message : '配音失败' })
     } finally {
@@ -192,6 +255,8 @@ export const usePipeline = create<PipelineState>((set, get) => ({
 
       const r = await api.post<AdoptResult>(`/api/projects/${projectId}/adopt-srt`)
       set({ byoWarning: r.warning, byoScriptFilled: r.scriptFilled, byoHint: null })
+      // 自备配音这条路同样触发预拼，预览要跟上
+      await get().loadBgTrack(projectId)
       return true
     } catch (e) {
       set({ error: e instanceof ApiError ? e.message : '导入配音和字幕失败' })

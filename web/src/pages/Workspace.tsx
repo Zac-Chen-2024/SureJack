@@ -126,7 +126,7 @@ export function Workspace () {
    * ⚠️ 栅格按 DOM 顺序排列，所以下面两个 section 的书写顺序也必须
    * 跟着换：预览那节在前、文案那节在后。
    */
-  const cols = 'grid-cols-[240px_minmax(320px,400px)_minmax(0,1fr)]'
+  const cols = 'grid-cols-[20%_minmax(0,1fr)_20%]'
 
   return (
     /*
@@ -144,6 +144,17 @@ export function Workspace () {
      */
     <div className="relative flex h-full justify-center bg-ink-950">
       <AmbientBackdrop />
+      {/*
+        版本角标固定在【屏幕】右下角，不在任何一栏里。
+        它是排查用的锚点、不属于任何功能区；挂在栏内会被误读成
+        那一栏的一部分。fixed + 极低对比，需要时找得到、平时不占注意力。
+      */}
+      <div
+        className="pointer-events-none fixed bottom-2 right-3 z-30 text-[10px] tabular-nums text-ink-600"
+        title={`构建版本 ${BUILD_SHA}\n构建时间 ${buildTimeLocal()}`}
+      >
+        {BUILD_SHA} · {buildTimeLocal()}
+      </div>
       <div className={`relative grid h-full w-full max-w-[1200px] border-x border-line bg-ink-950 ${cols}`}>
 
       {/*
@@ -176,12 +187,6 @@ export function Workspace () {
           <Button className="w-full justify-start" onClick={logout}>
             <IconLogOut className="size-4" /> 登出
           </Button>
-          <div
-            className="mt-2 px-1.5 text-[10px] tabular-nums text-ink-600"
-            title={`构建版本 ${BUILD_SHA}\n构建时间 ${buildTimeLocal()}`}
-          >
-            {BUILD_SHA} · {buildTimeLocal()}
-          </div>
         </div>
       </section>
 
@@ -205,11 +210,12 @@ export function Workspace () {
                 818px 高，下面的背景音乐选择就整个被顶到屏幕外——而那是这一栏里
                 唯一要人动手的东西，看不见等于没有。
 
-                所以按【视口高度】限宽：26vh 宽 ≈ 46vh 高，1000px 高的窗口上
-                预览下面还留得出背景条和几行选曲。用 vh 而不是写死像素，
-                笔记本和大屏上都成立。
+                所以按【视口高度】限宽。设置项已经搬到独立一栏，这一栏只剩
+                预览和导出，可以给画面更多空间：38vh 宽 ≈ 68vh 高，
+                加上列头 56 + 播放条 40 + 导出区 90，1000px 高的窗口仍装得下。
+                用 vh 而不是写死像素，笔记本和大屏上都成立。
               */}
-              <div className="mx-auto w-full max-w-[min(100%,26vh)]">
+              <div className="mx-auto w-full max-w-[min(100%,38vh)]">
                 <Preview
                   onTimeChange={setCurrentMs}
                   seek={seekNonce > 0 ? { ms: currentMs, nonce: seekNonce } : null}

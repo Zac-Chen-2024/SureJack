@@ -8,7 +8,7 @@ import jassubWorkerUrl from 'jassub/dist/worker/worker.js?worker&url'
 import jassubWasmUrl from 'jassub/dist/wasm/jassub-worker.wasm?url'
 import jassubModernWasmUrl from 'jassub/dist/wasm/jassub-worker-modern.wasm?url'
 import { useProjects } from '../store/projects'
-import { usePipeline } from '../store/pipeline'
+import { usePipeline, bgTrackNotice, bgTrackSrc, shouldPollBgTrack } from '../store/pipeline'
 import { IconPlay, IconPause, IconPreview } from './ui/Icon'
 import { DEFAULT_BGM_VOLUME } from '../constants'
 
@@ -77,6 +77,8 @@ interface Props {
 export function Preview ({ onTimeChange, seek }: Props) {
   const project = useProjects((s) => s.current())
   const assets = usePipeline((s) => s.assets)
+  const bgTrack = usePipeline((s) => s.bgTrack)
+  const loadBgTrack = usePipeline((s) => s.loadBgTrack)
 
   const audioRef = useRef<HTMLAudioElement>(null)
   const bgmRef = useRef<HTMLAudioElement>(null)
@@ -113,6 +115,31 @@ export function Preview ({ onTimeChange, seek }: Props) {
       .catch((e: Error) => { if (!cancelled) { setAss(null); setAssError(e.message) } })
     return () => { cancelled = true }
   }, [projectId, project?.updatedAt, project?.ttsState])
+
+  /*
+   * ── 背景轨状态 ───────────────────────────────────────────────────
+   * 配音一就绪，后端就在后台把背景轨拼好了（src/compose/prebuild.ts），
+   * 预览直接播那一整条——**不用在浏览器里按排布逐段拼**，"画面跟随音频、
+   * 漂出阈值才校正"那套逻辑一行都不用改。
+   *
+   * 还在拼的时候才轮询，拼好/拼不出来就停：终态还接着问，等于让两个
+   * 用户的机器白跑一串请求。依赖里带 ttsState，因为重新生成配音会让
+   * 排布变、后端重拼，那时要重新开始问。
+   */
+  useEffect(() => {
+    if (!projectId) return
+    let cancelled = false
+    void loadBgTrack(projectId)
+    const timer = setInterval(() => {
+      if (cancelled) return
+      if (!shouldPollBgTrack(usePipeline.getState().bgTrack)) {
+        clearInterval(timer)
+        return
+      }
+      void loadBgTrack(projectId)
+    }, 2000)
+    return () => { cancelled = true; clearInterval(timer) }
+  }, [projectId, project?.ttsState, project?.ttsDurationMs, loadBgTrack])
 
   // ── 起 JASSUB ────────────────────────────────────────────────────
   useEffect(() => {
@@ -280,7 +307,11 @@ export function Preview ({ onTimeChange, seek }: Props) {
   const voiceSrc = voice ? `/api/assets/${voice.id}` : null
   // BGM 来自【素材库】不是项目素材，所以走 library 接口
   const bgmSrc = project?.bgmLibraryId ? `/api/library/items/${project.bgmLibraryId}` : null
-  const videoSrc = video ? `/api/assets/${video.id}` : null
+  /*
+   * 上传过背景视频的老项目仍旧播它自己那一条——那条路径一个字都没改。
+   * 没上传的（新前端的唯一形态）播后台拼好的背景轨，和成片是同一个文件。
+   */
+  const videoSrc = video ? `/api/assets/${video.id}` : bgTrackSrc(bgTrack)
   const ready = Boolean(voiceSrc && ass)
 
   return (
@@ -397,14 +428,15 @@ export function Preview ({ onTimeChange, seek }: Props) {
         背景缺席的说明放在画框【外面】。原来它浮在画面底部，正好压住字幕——
         而用户点开预览恰恰是来看字幕版式的，提示不该盖住它所提示的对象。
 
-        说法也换了口径：背景现在是导出时按三段式公式自动拼的，预览阶段
-        那条轨还不存在。所以不是「你还没传背景」（用户什么都不用传），
-        而是「预览里看不到，成片里会有」。
+        文案现在按背景轨的真实状态分岔（见 store 的 bgTrackNotice）：
+        拼好了这里【一句话都不说】，因为背景就在上面的画框里；还在拼说
+        「生成中」；拼不出来要说清【导出时会重新生成】——预拼只是个优化，
+        它失败了后端会回退到即时生成，别让预览的失败看着像导出会失败。
       */}
-      {!videoSrc && ready && (
+      {!videoSrc && ready && bgTrackNotice(bgTrack) !== null && (
         <p className="mt-2 flex items-start gap-1.5 text-[11px] leading-relaxed text-ink-400">
           <IconPreview className="mt-px size-3 shrink-0 text-ink-600" />
-          <span>预览只放字幕和配音。背景在导出时按公式自动拼，成片里会有。</span>
+          <span>{bgTrackNotice(bgTrack)}</span>
         </p>
       )}
     </div>
