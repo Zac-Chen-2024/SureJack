@@ -89,7 +89,7 @@ export function FilmPlayer ({ onTimeChange, seek }: Props) {
      */
     <div className="flex h-full min-h-0 flex-col">
       <div
-        className="relative mx-auto w-full max-w-full overflow-hidden rounded-xl border border-line bg-black"
+        className="relative mx-auto w-full max-w-full overflow-hidden rounded-xl border border-line bg-black [container-type:inline-size]"
         style={{ aspectRatio: '9 / 16' }}
       >
         <video
@@ -108,6 +108,7 @@ export function FilmPlayer ({ onTimeChange, seek }: Props) {
           onPause={() => setPlaying(false)}
           onPlay={() => setPlaying(true)}
         />
+        <SubtitleGuide />
       </div>
 
       {/*
@@ -168,6 +169,55 @@ export function FilmPlayer ({ onTimeChange, seek }: Props) {
 
         <FilmMenu onRecompose={() => void recomposeFilm(project.id)} />
       </div>
+    </div>
+  )
+}
+
+/**
+ * 拖字幕高度时，在画面上画出那条字幕【将会】落在的位置。
+ *
+ * 存在的理由：改字幕高度要重烧十几分钟，所以不能"改完看效果"——
+ * 得先看效果再决定改不改。而用户此刻要判断的只有一件事：会不会压到
+ * 人脸。那纯粹是纵向位置的问题，用一条线加一行示意文字就够了，
+ * 不需要真去渲染一遍字幕。
+ *
+ * 【坐标怎么换算】MarginV 是 ASS 里以 PlayRes 高度（1920）为基准的
+ * 底边距。画面是等比缩放到这个框里的，所以同一个比例 marginV/1920
+ * 直接就是距底部的百分比。
+ *
+ * 没有草稿值时什么都不画——它只在"正在调"的那几十秒里出现。
+ */
+function SubtitleGuide () {
+  const project = useProjects((s) => s.current())
+  const draftMargin = useProjects((s) => s.draftMarginV)
+  const draftSize = useProjects((s) => s.draftFontSize)
+  if (draftMargin === null && draftSize === null) return null
+
+  const PLAY_RES_X = 1080
+  const PLAY_RES_Y = 1920
+  const margin = draftMargin ?? project?.subtitleMarginV ?? 300
+  const size = draftSize ?? project?.subtitleFontSize ?? 64
+
+  return (
+    <div
+      className="pointer-events-none absolute inset-x-0 z-10 flex flex-col items-center"
+      style={{ bottom: `${(margin / PLAY_RES_Y) * 100}%` }}
+    >
+      {/*
+        字号也按 PlayRes 等比换算：ASS 里的 64 号字在 1080 宽的画面上
+        占 64/1080 的高度，用 cqw 换算到当前画框宽度就是同一个视觉大小。
+        （画框已经声明了 container-type:inline-size）
+      */}
+      <span
+        className="whitespace-nowrap font-bold text-accent"
+        style={{
+          fontSize: `${(size / PLAY_RES_X) * 100}cqw`,
+          textShadow: '0 2px 8px rgba(0,0,0,0.9)',
+        }}
+      >
+        字幕大概长这样
+      </span>
+      <div className="mt-1 h-px w-full bg-accent/70" />
     </div>
   )
 }

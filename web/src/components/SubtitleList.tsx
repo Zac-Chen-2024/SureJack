@@ -16,6 +16,12 @@ import { VoicePanel } from './VoicePanel'
  * 空字幕的原因（还没配音）和解决它的按钮必须在同一个视野里。
  * 配音曾经在另一栏，用户得左右对照才想明白字幕为什么是空的。
  */
+/**
+ * 当前行停在视野从上往下的这个比例处。
+ * 0.25 = 上面 1/4 是念过的（保留方位感），下面 3/4 是接下来的内容。
+ */
+const ANCHOR_RATIO = 0.25
+
 export function SubtitleList () {
   const lines = useSubtitles((s) => s.lines)
   const currentMs = useSubtitles((s) => s.currentMs)
@@ -25,12 +31,31 @@ export function SubtitleList () {
 
   const currentIndex = findCurrentLineIndex(lines, currentMs)
   const activeRef = useRef<HTMLButtonElement | null>(null)
+  // 滚动容器要显式拿 ref。靠 parentElement 往上爬的话，DOM 结构一改
+  // 就会悄悄失效——没有报错，只是不再滚了，很难发现
+  const boxRef = useRef<HTMLDivElement | null>(null)
 
-  // 当前行变化时把它滚进视野。block: 'nearest' 而不是 'center'——
-  // center 会在每次高亮前移时把列表重新居中，播放时列表一直在动，看着晕。
-  // nearest 只在当前行真的滚出视野时才动，安静得多。
+  /*
+   * 当前行【尽量停在靠上的位置】。
+   *
+   * 用 'nearest' 时，当前行会一路走到视野底部才把列表往上顶一屏——
+   * 于是大部分时间正在念的那句都贴在最下面，而下面已经没有内容了，
+   * 上面全是念过的。看字幕的人想看的是"接下来说什么"，那部分应该在
+   * 视野里占大头。
+   *
+   * 所以把当前行钉在从顶部往下约 1/4 的地方：它上面留一点已念的做
+   * 上下文，下面整整 3/4 都是接下来的内容。
+   *
+   * 【手动算 scrollTop 而不是 scrollIntoView】：scrollIntoView 只有
+   * start/center/end/nearest 四挡，给不出"1/4 处"。而 'start' 会把
+   * 当前行顶到最上面，一点已念的上下文都不留，跳转时容易失去方位感。
+   */
   useEffect(() => {
-    activeRef.current?.scrollIntoView({ block: 'nearest' })
+    const el = activeRef.current
+    const box = boxRef.current
+    if (!el || !box) return
+    const target = el.offsetTop - box.clientHeight * ANCHOR_RATIO
+    box.scrollTo({ top: Math.max(0, target), behavior: 'smooth' })
   }, [currentIndex])
 
   return (
@@ -50,7 +75,7 @@ export function SubtitleList () {
         : lines.length === 0
           ? (loading ? null : <Notice text="先生成配音，字幕会自动出现" />)
           : (
-            <div className="min-h-0 flex-1 overflow-y-auto pb-2">
+            <div ref={boxRef} className="min-h-0 flex-1 overflow-y-auto pb-2">
               {lines.map((line, i) => {
                 const active = i === currentIndex
                 return (

@@ -26,6 +26,8 @@ export interface BuildAssOptions {
    * 调用方（路由层）负责钳位——这里不再夹一次，免得两处规则各说各话。
    */
   subtitleMarginV?: number
+  /** 正文字幕字号，ASS 单位（PlayRes 坐标系）。缺省 DEFAULT_SUBTITLE_FONT_SIZE */
+  subtitleFontSize?: number
 }
 
 /**
@@ -101,9 +103,27 @@ export function buildKaraoke (line: SubtitleLine): string {
  * 颜色格式是 &HAABBGGRR —— BGR 顺序，不是 RGB。经典陷阱。
  * PrimaryColour = 已唱色，SecondaryColour = 未唱色（不是字面意思上的"主/次"）。
  */
+/**
+ * 正文字幕的默认字号，ASS 单位（PlayResY=1920 的坐标系里）。
+ *
+ * 64 是这个项目一路用下来的值——所有已有项目的成片都是按它烧的，
+ * 所以【默认值不能动】：改了会让每一条已有成片的指纹失效，
+ * 全部重烧一遍十几分钟。
+ */
+export const DEFAULT_SUBTITLE_FONT_SIZE = 64
+
+/**
+ * 字号的上下限。
+ *
+ * 下限 36：再小在手机上就得眯着眼看，而这类视频本来就是手机上刷的。
+ * 上限 120：竖屏 1080 宽，120 号字一行只放得下 8 个汉字，
+ * 再大就会让几乎每句话都折行，字幕反而占掉半个画面。
+ */
+
 export function buildAss (opts: BuildAssOptions): string {
   const { lines, overlays, aspect, durationMs, mode } = opts
   const marginV = opts.subtitleMarginV ?? DEFAULT_SUBTITLE_MARGIN_V
+  const fontSize = opts.subtitleFontSize ?? DEFAULT_SUBTITLE_FONT_SIZE
 
   const dialogues = lines.map((line) => {
     const text = mode === 'karaoke'
@@ -128,7 +148,7 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Sub,${FONT_FAMILY},64,&H0000E5FF,&H00FFFFFF,&H00000000,&H00000000,1,0,0,0,100,100,0,0,1,4,0,2,60,60,${marginV},1
+Style: Sub,${FONT_FAMILY},${fontSize},&H0000E5FF,&H00FFFFFF,&H00000000,&H00000000,1,0,0,0,100,100,0,0,1,4,0,2,60,60,${marginV},1
 Style: Title,${FONT_FAMILY},96,&H00FFFFFF,&H00FFFFFF,&H00202020,&H00000000,1,0,0,0,100,100,0,0,1,6,0,8,60,60,120,1
 Style: Disclaimer,${FONT_FAMILY},32,&H00B4B4B4,&H00FFFFFF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,2,60,60,90,1
 

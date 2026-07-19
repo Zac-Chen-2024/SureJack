@@ -3,7 +3,7 @@ import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { userDbDir } from '../auth/whitelist.js'
-import { DEFAULT_SUBTITLE_MARGIN_V } from '../subtitles/ass.js'
+import { DEFAULT_SUBTITLE_MARGIN_V, DEFAULT_SUBTITLE_FONT_SIZE } from '../subtitles/ass.js'
 
 /**
  * 素材种类。
@@ -82,6 +82,8 @@ export interface Project {
    * **钳位在路由层做**（0..画面高度的一半），库里存的是已经钳好的值。
    */
   subtitleMarginV: number
+  /** 正文字幕字号，ASS 单位 */
+  subtitleFontSize: number
   createdAt: string
   updatedAt: string
 }
@@ -98,6 +100,7 @@ export interface UserDb {
     bgmVolume?: number; subtitleMode?: 'line' | 'karaoke'
     bgmLibraryId?: string | null
     subtitleMarginV?: number
+    subtitleFontSize?: number
   }): Project | null
   deleteProject (id: string): boolean
   addAsset (input: {
@@ -120,6 +123,7 @@ interface Row {
   tts_state: string; tts_duration_ms: number | null; word_timings_json: string | null
   bgm_volume: number; subtitle_mode: string; bgm_library_id: string | null
   subtitle_margin_v: number | null
+  subtitle_font_size: number | null
   created_at: string; updated_at: string
 }
 const toProject = (r: Row): Project => ({
@@ -131,6 +135,7 @@ const toProject = (r: Row): Project => ({
   bgmLibraryId: r.bgm_library_id ?? null,
   subtitleMode: (r.subtitle_mode ?? 'karaoke') as 'line' | 'karaoke',
   subtitleMarginV: r.subtitle_margin_v ?? DEFAULT_SUBTITLE_MARGIN_V,
+  subtitleFontSize: r.subtitle_font_size ?? DEFAULT_SUBTITLE_FONT_SIZE,
   createdAt: r.created_at, updatedAt: r.updated_at,
 })
 
@@ -175,6 +180,7 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
       subtitle_mode TEXT NOT NULL DEFAULT 'karaoke',
       bgm_library_id TEXT,
       subtitle_margin_v INTEGER NOT NULL DEFAULT ${DEFAULT_SUBTITLE_MARGIN_V},
+      subtitle_font_size INTEGER NOT NULL DEFAULT ${DEFAULT_SUBTITLE_FONT_SIZE},
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -220,6 +226,7 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
   // NOT NULL DEFAULT 会把默认值回填进所有既有行，而这个默认值正是原来
   // 写死在 Sub 样式行里的那个数，所以老项目的观感一动不动。
   addCol('subtitle_margin_v', `subtitle_margin_v INTEGER NOT NULL DEFAULT ${DEFAULT_SUBTITLE_MARGIN_V}`)
+  addCol('subtitle_font_size', `subtitle_font_size INTEGER NOT NULL DEFAULT ${DEFAULT_SUBTITLE_FONT_SIZE}`)
 
   return {
     raw: db,
@@ -242,17 +249,18 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
         aspectRatio: '9:16', ttsState: 'none', ttsDurationMs: null,
         wordTimingsJson: null, bgmVolume: DEFAULT_BGM_VOLUME, subtitleMode: 'karaoke',
         bgmLibraryId: null, subtitleMarginV: DEFAULT_SUBTITLE_MARGIN_V,
+        subtitleFontSize: DEFAULT_SUBTITLE_FONT_SIZE,
         createdAt: now, updatedAt: now,
       }
       db.prepare(
         `INSERT INTO projects
-          (id, name, script_text, aspect_ratio, tts_state, tts_duration_ms, word_timings_json, bgm_volume, subtitle_mode, bgm_library_id, subtitle_margin_v, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          (id, name, script_text, aspect_ratio, tts_state, tts_duration_ms, word_timings_json, bgm_volume, subtitle_mode, bgm_library_id, subtitle_margin_v, subtitle_font_size, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         project.id, project.name, project.scriptText, project.aspectRatio,
         project.ttsState, project.ttsDurationMs, project.wordTimingsJson,
         project.bgmVolume, project.subtitleMode, project.bgmLibraryId,
-        project.subtitleMarginV, now, now,
+        project.subtitleMarginV, project.subtitleFontSize, now, now,
       )
       return project
     },
@@ -267,7 +275,7 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
           name = ?, script_text = ?, aspect_ratio = ?,
           tts_state = ?, tts_duration_ms = ?, word_timings_json = ?,
           bgm_volume = ?, subtitle_mode = ?, bgm_library_id = ?,
-          subtitle_margin_v = ?, updated_at = ?
+          subtitle_margin_v = ?, subtitle_font_size = ?, updated_at = ?
           WHERE id = ?`
       ).run(
         patch.name ?? row.name,
@@ -286,6 +294,9 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
         patch.subtitleMarginV !== undefined
           ? patch.subtitleMarginV
           : row.subtitle_margin_v ?? DEFAULT_SUBTITLE_MARGIN_V,
+        patch.subtitleFontSize !== undefined
+          ? patch.subtitleFontSize
+          : row.subtitle_font_size ?? DEFAULT_SUBTITLE_FONT_SIZE,
         now, id,
       )
       const updated = db.prepare('SELECT * FROM projects WHERE id = ?').get(id) as Row

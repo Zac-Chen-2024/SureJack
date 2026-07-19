@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { readFile, rm } from 'node:fs/promises'
 import { openUserDb } from '../db/user-db.js'
 import { adoptSrtText, overrunWarning, scriptFromSrtWords } from '../subtitles/from-srt.js'
-import { clampSubtitleMarginV } from '../subtitles/project-ass.js'
+import { clampSubtitleFontSize, clampSubtitleMarginV } from '../subtitles/project-ass.js'
 import { probeDurationMs } from '../render/probe.js'
 import { getSession, requireAuth } from '../auth/session.js'
 import { assetDir } from '../assets/storage.js'
@@ -54,12 +54,12 @@ export function registerProjectRoutes (app: FastifyInstance, deps: Deps): void {
 
   app.patch<{ Params: { id: string }; Body: {
     name?: unknown; scriptText?: unknown; aspectRatio?: unknown
-    bgmLibraryId?: unknown; bgmVolume?: unknown; subtitleMarginV?: unknown
+    bgmLibraryId?: unknown; bgmVolume?: unknown; subtitleMarginV?: unknown; subtitleFontSize?: unknown
   } }>(
     '/api/projects/:id', { preHandler: requireAuth }, async (req, reply) => {
       const patch: {
         name?: string; scriptText?: string; aspectRatio?: string
-        bgmLibraryId?: string | null; bgmVolume?: number; subtitleMarginV?: number
+        bgmLibraryId?: string | null; bgmVolume?: number; subtitleMarginV?: number; subtitleFontSize?: number
       } = {}
       if (typeof req.body?.name === 'string') patch.name = req.body.name
       if (typeof req.body?.scriptText === 'string') patch.scriptText = req.body.scriptText
@@ -108,6 +108,20 @@ export function registerProjectRoutes (app: FastifyInstance, deps: Deps): void {
            * 字幕不该凭空消失，所以顺手把它重新钳进新范围。
            */
           patch.subtitleMarginV = clampSubtitleMarginV(before.subtitleMarginV, aspect)
+  }
+
+  /*
+   * 字号和 marginV 同样【必须钳】：滑块给不出越界值，但接口是公共入口，
+   * 一个 5000 号字会让每句话折成十几行，字幕糊满整个画面。
+   */
+  {
+    const raw = req.body?.subtitleFontSize
+    if (raw !== undefined) {
+      if (typeof raw !== 'number' || !Number.isFinite(raw)) {
+        return reply.code(400).send({ error: '字幕字号格式错误' })
+      }
+      patch.subtitleFontSize = clampSubtitleFontSize(raw)
+    }
         }
 
         return db.updateProject(req.params.id, patch)

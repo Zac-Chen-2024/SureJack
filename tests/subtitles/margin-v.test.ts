@@ -24,7 +24,7 @@ function makeProject (patch: Partial<Project> = {}): Project {
       { text: '包子', offsetMs: 0, durationMs: 500, isPunctuation: false },
     ]),
     bgmVolume: 0.1, bgmLibraryId: null, subtitleMode: 'karaoke',
-    subtitleMarginV: DEFAULT_SUBTITLE_MARGIN_V,
+    subtitleFontSize: 64, subtitleMarginV: DEFAULT_SUBTITLE_MARGIN_V,
     createdAt: '2026-07-19T00:00:00.000Z', updatedAt: '2026-07-19T00:00:00.000Z',
     ...patch,
   }

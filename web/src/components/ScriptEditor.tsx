@@ -91,7 +91,7 @@ export function ScriptEditor () {
       <textarea
         value={text}
         onChange={(e) => onChange(e.target.value)}
-        placeholder="把文案粘贴或写在这里…"
+        placeholder="粘贴文案到这里（Ctrl+V），或者直接开始写…"
         className="w-full flex-1 resize-none border-0 bg-transparent text-[15px] leading-[1.9] text-ink-100 outline-none placeholder:text-ink-400 focus:outline-none focus:ring-0"
       />
     </div>

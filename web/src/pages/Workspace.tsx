@@ -7,6 +7,7 @@ import { ProjectSwitcher } from '../components/ProjectSwitcher'
 import { ScriptEditor } from '../components/ScriptEditor'
 import { SubtitleList } from '../components/SubtitleList'
 import { AssetPanel } from '../components/AssetPanel'
+import { SubtitleHeight } from '../components/SubtitleHeight'
 import { Preview } from '../components/Preview'
 import { FilmPlayer } from '../components/FilmPlayer'
 import { useFilmStatus } from '../hooks/useFilmStatus'
@@ -104,6 +105,18 @@ export function Workspace () {
   const [scriptOpen, setScriptOpen] = useState(false)
 
   /*
+   * 【新项目自动展开文案】。刚建好的项目里一个字都没有，而这一步是
+   * 整条流程的起点——收起来等于让人对着一行标题猜下一步该干嘛。
+   * 有文案的项目仍然默认折叠：那时候常看的是字幕列表。
+   *
+   * 只在切项目时判一次，不跟着文案长度变——否则用户把文案全选删掉的
+   * 那一瞬间，面板会自己弹开。
+   */
+  useEffect(() => {
+    if (project?.id) setScriptOpen((project.scriptText ?? '').trim().length === 0)
+  }, [project?.id])
+
+  /*
    * 成片合好了没有。ExportPanel 已经在轮询这个状态，这里只是读同一份
    * store——不要另起一轮轮询，两轮问同一个接口会互相看到对方排的活。
    */
@@ -178,19 +191,10 @@ export function Workspace () {
         <ProjectSwitcher />
         {project ? (
           <div className="min-h-0 flex-1 overflow-y-auto p-4">
-            {/*
-              ⚠️【字幕高度暂时下线】。
-
-              拖一下它就会改掉项目，让已经合好的成片作废、后台立刻重合一遍
-              十几分钟——而在那十几分钟里，用户手上那条本来好好的片子会先被
-              覆盖成半成品。线上真出过：拖了一下滑块，465MB 的成片当场变成
-              35MB 的残片，播不了也下不了，只能从别处拷一份回来。
-
-              要重新打开它，得先解决那个问题：合成必须写到临时文件、
-              成了再原子替换，绝不能就地覆盖唯一那份能用的成片。
-              在那之前藏起来，比让人踩一次坑强。
-            */}
-            <AssetPanel />
+            <SubtitleHeight />
+            <div className="mt-4 border-t border-line pt-4">
+              <AssetPanel />
+            </div>
           </div>
         ) : <div className="min-h-0 flex-1"><NeedProject /></div>}
         {/*

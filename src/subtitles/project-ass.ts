@@ -1,6 +1,7 @@
 import { ASPECT_PRESETS } from '../config.js'
 import { segmentLines } from './segment.js'
-import { buildAss } from './ass.js'
+import { buildAss, DEFAULT_SUBTITLE_FONT_SIZE } from './ass.js'
+export { DEFAULT_SUBTITLE_FONT_SIZE }
 import type { Project } from '../db/user-db.js'
 import type { WordTiming, SubtitleLine, TextOverlay, AspectPreset } from '../types.js'
 
@@ -53,6 +54,15 @@ export function maxSubtitleMarginV (aspectRatio: string): number {
  * 扫一眼就跳过。让它随字幕浮动，反而会让人以为那是内容的一部分。
  */
 export const MIN_SUBTITLE_MARGIN_V = 160
+
+
+export const MIN_SUBTITLE_FONT_SIZE = 36
+export const MAX_SUBTITLE_FONT_SIZE = 120
+
+export function clampSubtitleFontSize (value: number): number {
+  if (!Number.isFinite(value)) return DEFAULT_SUBTITLE_FONT_SIZE
+  return Math.min(MAX_SUBTITLE_FONT_SIZE, Math.max(MIN_SUBTITLE_FONT_SIZE, Math.round(value)))
+}
 
 /**
  * 把用户给的值钳进合法范围并取整（像素）。
@@ -120,5 +130,6 @@ export function buildAssForProject (project: Project): string {
     mode: project.subtitleMode,
     // 只抬字幕。免责声明那一行是固定的合规标记不是内容，留在原地。
     subtitleMarginV: project.subtitleMarginV,
+    subtitleFontSize: clampSubtitleFontSize(project.subtitleFontSize),
   })
 }

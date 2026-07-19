@@ -29,7 +29,7 @@ function makeProject (patch: Partial<Project> = {}): Project {
     id: 'p1', name: '测试项目', scriptText: '', aspectRatio: '9:16',
     ttsState: 'ready', ttsDurationMs: 8000, wordTimingsJson: null,
     bgmVolume: 0.1, bgmLibraryId: null, subtitleMode: 'karaoke',
-    subtitleMarginV: DEFAULT_SUBTITLE_MARGIN_V,
+    subtitleFontSize: 64, subtitleMarginV: DEFAULT_SUBTITLE_MARGIN_V,
     createdAt: '2026-07-19T00:00:00.000Z', updatedAt: '2026-07-19T00:00:00.000Z',
     ...patch,
   }
