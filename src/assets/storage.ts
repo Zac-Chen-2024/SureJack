@@ -43,15 +43,29 @@ const AUDIO_MIME = ['audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/x-wav', 'audi
 const AUDIO_EXT = ['.mp3', '.wav', '.aac', '.m4a', '.flac']
 
 /**
+ * 只看扩展名的格式白名单。
+ *
+ * 扫描磁盘目录时【没有 MIME】可看——MIME 是 HTTP 上传才带的头部，
+ * 素材库扫描面对的是已经躺在盘上的文件。所以把扩展名这一半单独抽出来，
+ * 让上传校验和目录扫描共用同一份扩展名清单，不会各自漂移。
+ */
+export function isAllowedExt (originalName: string, kind: AssetKind): boolean {
+  const ext = extname(originalName).toLowerCase()
+  if (kind === 'video') return VIDEO_EXT.includes(ext)
+  if (kind === 'bgm') return AUDIO_EXT.includes(ext)
+  return false   // voice/export 是系统生成的，不接受上传
+}
+
+/**
  * 上传格式白名单。早失败：不支持的格式在上传时就拒绝，
  * 不要等到渲染时 ffmpeg 报一句看不懂的错（设计文档第 13 节）。
  *
  * MIME 和扩展名都要对——单看 MIME 可被伪造，单看扩展名同理。
  */
 export function isAllowedUpload (mime: string, originalName: string, kind: AssetKind): boolean {
-  const ext = extname(originalName).toLowerCase()
-  if (kind === 'video') return VIDEO_MIME.includes(mime) && VIDEO_EXT.includes(ext)
-  if (kind === 'bgm') return AUDIO_MIME.includes(mime) && AUDIO_EXT.includes(ext)
+  if (!isAllowedExt(originalName, kind)) return false
+  if (kind === 'video') return VIDEO_MIME.includes(mime)
+  if (kind === 'bgm') return AUDIO_MIME.includes(mime)
   return false   // voice/export 是系统生成的，不接受上传
 }
 
