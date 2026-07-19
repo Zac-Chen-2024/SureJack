@@ -75,7 +75,45 @@ interface BgSegment {
 
 把 `planBackground()`（`src/compose/plan.ts`，已测透）接上真实素材库：读三个视频桶的 `listBucket()`，用项目的 `ttsDurationMs` 当总长，算出排布，补上 `filename`/`bucket` 供前端显示。
 
-**排布必须是确定性的**——同一个项目每次算出来一样，否则用户每刷新一次预览条就变，而导出时又是另一个结果。若 `planBackground` 内部有随机性，用项目 id 做种子。
+**每个项目要用不同的素材组合，但同一项目必须永远一致。**
+
+开头桶 68 个、常规桶 124 个片段，公式没规定选哪些。若按桶内固定顺序取，
+**每条视频的开头都会是同一批片子**——做营销号显然不要这个效果。
+
+做法：**调 `planBackground()` 之前，先用种子打乱桶内顺序**。
+
+```typescript
+/** 32 位整数哈希：把项目 id 揉成一个种子 */
+function seedFrom (s: string): number {
+  let h = 2166136261
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i)
+    h = Math.imul(h, 16777619)
+  }
+  return h >>> 0
+}
+
+/** mulberry32：小、快、够随机。【不要用 Math.random】——它不可复现 */
+function rng (seed: number): () => number {
+  return () => {
+    seed = (seed + 0x6D2B79F5) | 0
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed)
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+}
+
+/** Fisher-Yates，返回新数组，不改入参 */
+function shuffled<T> (items: T[], rand: () => number): T[] { … }
+```
+
+这样 `planBackground()` 一行都不用改——它已经有 22 个测试且做过变异测试，随机性完全隔离在它上面一层。
+
+**测试必须覆盖：**
+- 同一项目 id 调 100 次，排布**完全一致**（确定性）
+- 不同项目 id 的排布**不同**（真的有随机）
+- 打乱不丢素材、不重复（Fisher-Yates 正确性）
+- 素材库新增文件后，老项目的排布**会变**——这是已知取舍，要在测试里写明，不要假装它不会变
 
 ---
 
