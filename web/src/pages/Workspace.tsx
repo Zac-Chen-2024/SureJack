@@ -101,10 +101,13 @@ export function Workspace () {
   const [collapsed, setCollapsed] = useState(() => window.matchMedia(NARROW).matches)
 
   /*
-   * 文案区展开/收起。默认展开——新项目第一件事就是写文案，
-   * 一进来就收着会让人以为没有这个功能。
+   * 文案区展开/收起，**默认折叠**。
+   *
+   * 文案通常写一次就不动了；打开工作台之后大部分时间是在核对字幕、
+   * 调设置、看预览。默认收起让字幕吃满整栏，要改文案时点一下即可。
+   * 收起态的那行会显示字数，所以"里面有没有东西"仍然一眼可见。
    */
-  const [scriptOpen, setScriptOpen] = useState(true)
+  const [scriptOpen, setScriptOpen] = useState(false)
 
   /*
    * 用户一旦亲手点过这个按钮，窗口再怎么变宽变窄都不再自动收放。

@@ -1,18 +1,18 @@
 import { useEffect, useState } from 'react'
 
 /**
- * 工作台两侧留白的氛围背景：细斜纹 + 随时间变化的问候语。
+ * 工作台两侧留白的氛围背景：**用问候语本身平铺成斜向纹理**。
  *
- * ── 为什么斜纹要这么淡 ──────────────────────────────────────────────
- * 这是留白，不是内容区。纹理的作用是让空白"有质地"而不是一片死黑，
- * 一旦看得清就成了干扰——眼睛会被拉过去，而右边那栏还在写字。
- * 所以线宽 1px、间距 8px、亮度 2.5%：扫一眼觉得"这里有东西"，
- * 盯着看才分辨得出是斜纹。
+ * ── 纹理是文字，不是线条 ────────────────────────────────────────────
+ * 第一版画的是真的斜线 + 两行竖排字，那是两件东西拼在一起。
+ * 现在整片纹理就是同一句话反复排开——远看是有肌理的斜纹，
+ * 凑近才看清写的是什么。这种"读得出但不打扰"的分寸正是留白该有的。
  *
- * ── 为什么问候语是竖排的 ────────────────────────────────────────────
- * 留白是两条窄长条（1920 屏上每边约 360px 宽、整屏高）。横排文字在这种
- * 比例里要么被截断要么小得像噪点；竖排顺着长边走，字距拉开之后
- * 读起来像装帧上的书脊，正好是"留白但不空"的分寸。
+ * ── 为什么要压到几乎看不见 ──────────────────────────────────────────
+ * 这是背景不是内容。右边那栏正在写字，任何在余光里跳动的东西都是干扰。
+ * 所以亮度只有 3.5%：扫过去觉得"这块有质地"，盯着看才分辨出是字。
+ * 字距拉到 0.35em 也是同一个目的——拉散之后单词不成团，
+ * 更像织物的纹路而不是一句要读的话。
  */
 
 /** 6:00–18:00 算白天。这个界线不必精确——它只决定一句问候语。 */
@@ -21,6 +21,15 @@ function greetingFor (hour: number): string {
     ? 'Good Noon And Good Work'
     : 'Good Night And Good Dream'
 }
+
+/** 斜纹倾角。-24° 比 45° 更斜、更"织物"，正 45° 容易读成装饰边框 */
+const ANGLE = -24
+
+/** 铺多少行。旋转后要盖住整个视口的对角线，行数要给足 */
+const ROWS = 40
+
+/** 每行重复多少遍。同样是宁多勿少，多出来的部分被 overflow 裁掉 */
+const REPEATS = 12
 
 export function AmbientBackdrop () {
   const [greeting, setGreeting] = useState(() => greetingFor(new Date().getHours()))
@@ -35,38 +44,39 @@ export function AmbientBackdrop () {
     return () => clearInterval(t)
   }, [])
 
+  // 单行内容：重复若干遍，中间用间隔符断开，避免读成一长串
+  const line = Array.from({ length: REPEATS }, () => greeting).join('   ·   ')
+
   return (
     <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden">
-      {/* 细斜纹。用 repeating-linear-gradient 而不是贴图：零请求、任意分辨率都清晰 */}
+      {/*
+        旋转容器开到 200% 并往左上各偏 50%：旋转之后四个角会露出来，
+        不开大就会在角落看到纹理的边界，那一下就露馅了。
+      */}
       <div
-        className="absolute inset-0"
+        className="absolute"
         style={{
-          backgroundImage:
-            'repeating-linear-gradient(45deg,' +
-            'rgba(255,255,255,0.025) 0px, rgba(255,255,255,0.025) 1px,' +
-            'transparent 1px, transparent 8px)',
+          top: '-50%', left: '-50%', width: '200%', height: '200%',
+          transform: `rotate(${ANGLE}deg)`,
         }}
-      />
-      {/* 两侧各一行竖排问候语，贴着工作台外缘 */}
-      {(['left', 'right'] as const).map((side) => (
-        <div
-          key={side}
-          className="absolute inset-y-0 flex items-center"
-          style={{ [side]: '2.5rem' } as React.CSSProperties}
-        >
-          <span
-            className="select-none whitespace-nowrap text-[11px] uppercase text-ink-600/70"
+      >
+        {Array.from({ length: ROWS }, (_, i) => (
+          <div
+            key={i}
+            className="select-none whitespace-nowrap font-medium uppercase"
             style={{
-              writingMode: 'vertical-rl',
-              // 左侧那行转 180°，让两边的字都朝向画面中心，读起来是对称的
-              transform: side === 'left' ? 'rotate(180deg)' : undefined,
-              letterSpacing: '0.42em',
+              fontSize: '13px',
+              lineHeight: '2.6',
+              letterSpacing: '0.35em',
+              color: 'rgba(255,255,255,0.035)',
+              // 每隔一行错开半个身位，避免所有行的起点连成一条竖线
+              paddingLeft: i % 2 === 0 ? 0 : '7rem',
             }}
           >
-            {greeting}
-          </span>
-        </div>
-      ))}
+            {line}
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
