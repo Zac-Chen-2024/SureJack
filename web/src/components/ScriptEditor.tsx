@@ -44,16 +44,23 @@ export function ScriptEditor () {
           {saving ? '保存中…' : '已保存'}
         </div>
       </div>
-      {/* "纸面"处理：比周围主区亮一档 + 细描边 + 轻微内阴影，让编辑区读作
-          一张可以写字的纸，而不是又一块和主区同色的平面。
-          聚焦态刻意不用全局的琥珀光环——那是给按钮/输入框这类小面积元素的，
-          套在整块编辑区上会读作报错状态。这里只留极淡的琥珀提示 + 保留纸感阴影，
-          视觉重量和元素面积成反比。 */}
+      {/*
+        【不做成一个框】。这里曾经是「纸面」处理：亮一档的底色 + 细描边 + 内阴影，
+        让编辑区读作一张可以写字的纸。看着精致，但它在一个本来就是深色面板的
+        栏里又画了一个盒子——框中框。文案是这一栏的全部内容，不是栏里摆着的
+        某个控件，给它加边界反而把它降格成了一个组件。
+
+        所以：不要底色、不要描边、不要阴影。文字直接落在栏面上，
+        这一栏本身就是稿纸。留白和行距负责可读性，边框不参与。
+
+        聚焦态也不给光环——没有边界的东西套光环会凭空冒出一圈方框。
+        光标在闪就足够说明焦点在哪了。
+      */}
       <textarea
         value={text}
         onChange={(e) => onChange(e.target.value)}
         placeholder="把文案粘贴或写在这里…"
-        className="surface-focus-soft w-full max-w-[720px] flex-1 resize-none rounded-2xl border border-line bg-ink-800 p-6 text-[15px] leading-[1.9] text-ink-100 shadow-[inset_0_1px_3px_rgba(0,0,0,0.3)] outline-none placeholder:text-ink-400"
+        className="w-full max-w-[720px] flex-1 resize-none border-0 bg-transparent px-1 text-[15px] leading-[1.9] text-ink-100 outline-none placeholder:text-ink-400 focus:outline-none focus:ring-0"
       />
     </div>
   )
