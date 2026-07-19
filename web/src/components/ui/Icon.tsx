@@ -153,6 +153,35 @@ export function IconMusic (props: IconProps) {
   )
 }
 
+/** 字幕列表——一个字幕框，内含两行长短不一的文字 */
+export function IconSubtitles (props: IconProps) {
+  return (
+    <Svg {...props}>
+      <rect x="3" y="5" width="18" height="14" rx="2" />
+      <path d="M7 11h4M14 11h3M7 15h3M13 15h4" />
+    </Svg>
+  )
+}
+
+/** 播放——预览区的意象。三角形用和其它图标一样的圆角线头，不做实心填充 */
+export function IconPlay (props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M8 5.6v12.8L18.6 12 8 5.6Z" />
+    </Svg>
+  )
+}
+
+/** 音量 / 混音平衡 */
+export function IconVolume (props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M11 5 6.5 9H3v6h3.5L11 19V5Z" />
+      <path d="M15.5 9.5a3.5 3.5 0 0 1 0 5M18.5 7a7 7 0 0 1 0 10" />
+    </Svg>
+  )
+}
+
 /** 下载成片 */
 export function IconDownload (props: IconProps) {
   return (
