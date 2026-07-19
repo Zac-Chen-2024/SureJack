@@ -33,7 +33,7 @@
  */
 
 import { createHash } from 'node:crypto'
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, writeFile, rename } from 'node:fs/promises'
 import { join } from 'node:path'
 import { openUserDb, type Project } from '../db/user-db.js'
 import { assetDir } from '../assets/storage.js'
@@ -44,6 +44,7 @@ import { hasVideoMaterials, planProjectBackground, type BackgroundPlan } from '.
 import { buildAssForProject, aspectOf } from '../subtitles/project-ass.js'
 import { render } from '../render/index.js'
 import { buildBackgroundTrack } from './build.js'
+import { mixBgm } from './mix.js'
 import {
   BG_TRACK_FILE, enqueueBgTrack, planFingerprint, reusableBgTrack,
   writeStamp as writeBgStamp, type PrebuildDeps,
@@ -58,6 +59,21 @@ export const FILM_FILE = 'export.mp4'
 export const FILM_STAMP_FILE = 'export.json'
 
 /**
+ * 【母带】：背景视频 + 烧录字幕 + 配音，**不含背景音乐**。
+ *
+ * 拆出这一层是因为两者的代价差了两个数量级：烧录一条 10 分钟的片子要
+ * 12 分钟，而把 BGM 混进已经烧好的母带只要 9 秒（视频流 -c:v copy，
+ * 只重编码音频）。绑在一起的话，换一首背景音乐要付整条重烧的代价。
+ *
+ * 于是指纹也跟着拆成两个：母带指纹（画幅、时长、背景排布、ASS、配音）
+ * 和成片指纹（母带指纹 + BGM + 音量）。换 BGM 只让后者失效。
+ */
+export const FILM_MASTER_FILE = 'master.mp4'
+
+/** 母带的指纹旁挂文件 */
+export const MASTER_STAMP_FILE = 'master.json'
+
+/**
  * 背景轨生成在整条合成进度里占的比重。
  *
  * 拍脑袋定的 30%：一条 13 分钟的成片要截十几段再拼，几分钟起步，
@@ -65,6 +81,15 @@ export const FILM_STAMP_FILE = 'export.json'
  * 精确的比重取决于素材和机器，也没必要精确：进度条要的是"在动"。
  */
 const BG_TRACK_SHARE = 0.3
+
+/**
+ * 母带（背景轨 + 烧录）在整条进度里占的比重。
+ *
+ * 混音实测只要 9 秒，而母带是十几分钟——真实比例远超 95%。给 0.95
+ * 而不是 0.99，是为了让最后那一下混音在进度条上【看得见】：
+ * 一个从 99% 直接跳到 100% 的动作，用户会以为是卡了一下。
+ */
+const MASTER_SHARE = 0.95
 
 /** 依赖和预拼完全一样——两者本来就是同一条流水线的两截 */
 export type FilmDeps = PrebuildDeps
@@ -82,7 +107,7 @@ export interface FilmFingerprintInput {
 }
 
 /**
- * 成片指纹。
+ * 指纹的两条通用规矩（母带和成片都适用）。
  *
  * 【为什么直接哈希 ASS 全文而不是挨个列字段】：ASS 是从项目派生出来的
  * （project-ass.ts），文案、时间轴、字幕高度、整句/逐字模式、画幅全都
@@ -94,11 +119,27 @@ export interface FilmFingerprintInput {
  * 一条陈旧的成片，而且没有任何症状能让人想到是指纹撞了。JSON 的数组
  * 编码是无歧义的。
  */
-export function filmFingerprint (i: FilmFingerprintInput): string {
+/**
+ * 【母带指纹】：决定要不要重烧视频的那些输入。**不含 BGM**。
+ * 换背景音乐不该让它变——那正是拆两层的全部意义。
+ */
+export function masterFingerprint (
+  i: Omit<FilmFingerprintInput, 'bgmPath' | 'bgmVolume'>,
+): string {
   return createHash('sha256').update(JSON.stringify([
     i.aspect.width, i.aspect.height, i.durationMs, i.bgKey,
     createHash('sha256').update(i.ass).digest('hex'),
-    i.voicePath, i.bgmPath, i.bgmVolume,
+    i.voicePath,
+  ])).digest('hex')
+}
+
+/**
+ * 【成片指纹】= 母带指纹 + 背景音乐。
+ * 只有它变、母带指纹没变时，重做一次只要几秒的混音就够了。
+ */
+export function filmFingerprint (i: FilmFingerprintInput): string {
+  return createHash('sha256').update(JSON.stringify([
+    masterFingerprint(i), i.bgmPath, i.bgmVolume,
   ])).digest('hex')
 }
 
@@ -113,8 +154,11 @@ export interface FilmPlan {
   ass: string
   aspect: AspectPreset
   durationMs: number
+  /** 成片指纹 = 母带指纹 + BGM。它变了不一定要重烧，可能只要重混一次音 */
   fingerprint: string
-  /** 这个项目的素材目录。成片、背景轨、字幕、指纹都落在这儿 */
+  /** 母带指纹。只有它变了才值得付十几分钟重烧视频的代价 */
+  masterFingerprint: string
+  /** 这个项目的素材目录。成片、母带、背景轨、字幕、指纹都落在这儿 */
   dir: string
 }
 
@@ -241,16 +285,18 @@ export function resolveFilm (
   }
 
   const bgmPath = libraryBgmPath ?? snap.bgms[0]?.path ?? null
-  const fingerprint = filmFingerprint({
+  const fpInput = {
     aspect, durationMs, bgKey, ass,
     voicePath: voice.path, bgmPath, bgmVolume: project.bgmVolume,
-  })
+  }
 
   return {
     ok: true,
     film: {
       project, clip, plan, voicePath: voice.path, bgmPath, ass,
-      aspect, durationMs, fingerprint, dir,
+      aspect, durationMs, dir,
+      fingerprint: filmFingerprint(fpInput),
+      masterFingerprint: masterFingerprint(fpInput),
     },
   }
 }
@@ -329,24 +375,64 @@ async function buildFilm (
     }
   }
 
-  await render({
-    clips: [f.clip],
-    voicePath: f.voicePath,
-    bgmPath: f.bgmPath ?? undefined,
-    bgmVolume: f.project.bgmVolume,
-    assPath, aspect: f.aspect, durationMs: f.durationMs, outPath,
-  }, f.plan === null
-    ? onProgress
-    // 背景轨已经吃掉前 BG_TRACK_SHARE，烧录只推进剩下那一段
-    : (p) => onProgress(BG_TRACK_SHARE * 100 + p * (1 - BG_TRACK_SHARE)))
+  /*
+   * ── 第一段：母带（贵）──────────────────────────────────────────────
+   * 背景视频 + 烧录字幕 + 配音，【不混 BGM】。十几分钟就花在这儿。
+   * 母带指纹对得上就整段跳过——换一首背景音乐正是走这条路，
+   * 于是"换 BGM"从 12 分钟变成 9 秒。
+   */
+  const masterPath = join(f.dir, FILM_MASTER_FILE)
+  const masterReuse = await reusableOutput(
+    f.dir, MASTER_STAMP_FILE, FILM_MASTER_FILE, f.masterFingerprint,
+  )
+  if (masterReuse === null) {
+    /*
+     * 【写临时文件再 rename】。直接写 masterPath 的话，重烧期间它是半截的，
+     * 而下面的混音、以及"上一版成片"都还指着它。rename 在同一文件系统上
+     * 是原子的：旧母带在新的完全就绪之前一直有效。
+     */
+    const partial = `${masterPath}.partial.mp4`
+    await render({
+      clips: [f.clip],
+      voicePath: f.voicePath,
+      // ⚠️ 母带不含 BGM。混音是第二段的事，混进来就等于把两层又焊死了
+      bgmVolume: f.project.bgmVolume,
+      assPath, aspect: f.aspect, durationMs: f.durationMs, outPath: partial,
+    }, f.plan === null
+      ? (p) => onProgress(p * MASTER_SHARE)
+      // 背景轨已经吃掉前 BG_TRACK_SHARE，烧录只推进剩下那一段
+      : (p) => onProgress((BG_TRACK_SHARE * 100 + p * (1 - BG_TRACK_SHARE)) * MASTER_SHARE))
+    await rename(partial, masterPath)
+    await writeStamp(f.dir, MASTER_STAMP_FILE, { fingerprint: f.masterFingerprint, status: 'done', jobId })
+  } else {
+    // 母带现成的：进度直接推到混音那一段的起点，别让进度条从 0 重来
+    onProgress(MASTER_SHARE * 100)
+  }
+
+  /*
+   * ── 第二段：混 BGM（便宜）─────────────────────────────────────────
+   * 视频流 -c:v copy，只重编码音频。实测 10 分钟的片子 9 秒。
+   *
+   * 【没有 BGM 时不复制一份】：直接把母带当成片。复制 500MB 只为得到
+   * 一个字节相同的文件，纯浪费磁盘和时间。下载/播放那两个接口会问
+   * downloadableFilm 要路径，它知道该给哪一个。
+   */
+  if (f.bgmPath !== null) {
+    await mixBgm({
+      masterPath, bgmPath: f.bgmPath,
+      bgmVolume: f.project.bgmVolume, outPath,
+    })
+  }
+  onProgress(100)
 
   /*
    * 【先有完整文件，再写 done】。反过来的话，合到一半被杀会留下
    * "指纹对得上但文件是半个"的状态，而那正是最难发现的一类坏数据。
    */
   await writeStamp(f.dir, FILM_STAMP_FILE, { fingerprint: f.fingerprint, status: 'done', jobId })
-  registerFilmAsset(deps, userName, projectId, outPath, f.durationMs, `${f.project.name}.mp4`)
-  return outPath
+  const final = f.bgmPath !== null ? outPath : masterPath
+  registerFilmAsset(deps, userName, projectId, final, f.durationMs, `${f.project.name}.mp4`)
+  return final
 }
 
 /** 合 + 把失败原因写进指纹文件。失败照旧往上抛，队列要据此置 error。 */
@@ -617,5 +703,20 @@ export async function downloadableFilm (
    * 负责"有完整文件就给"。
    */
   if (stamp.status !== undefined && stamp.status !== 'done') return null
-  return reusableOutput(dir, FILM_STAMP_FILE, FILM_FILE, stamp.fingerprint)
+
+  const mixed = await reusableOutput(dir, FILM_STAMP_FILE, FILM_FILE, stamp.fingerprint)
+  if (mixed !== null) return mixed
+
+  /*
+   * 【没选背景音乐时，成片就是母带】。那种情况下 buildFilm 不会去复制
+   * 一份字节完全相同的 export.mp4——500MB 的无谓拷贝。所以这里退一步
+   * 去问母带：只要母带的戳是 done，那份文件就是用户该拿到的成片。
+   *
+   * ⚠️ 顺序不能反：先问 export.mp4。有 BGM 的项目两个文件都在，
+   * 先问母带的话用户下到的是一条没有背景音乐的片子。
+   */
+  const masterStamp = await readStamp(dir, MASTER_STAMP_FILE)
+  if (masterStamp === null) return null
+  if (masterStamp.status !== undefined && masterStamp.status !== 'done') return null
+  return reusableOutput(dir, MASTER_STAMP_FILE, FILM_MASTER_FILE, masterStamp.fingerprint)
 }

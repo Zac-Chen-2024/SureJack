@@ -2,8 +2,13 @@ import type { FastifyInstance } from 'fastify'
 import type { AuthDb } from '../db/auth-db.js'
 import { isWhitelisted } from './whitelist.js'
 import { setSession, getSession, clearSession } from './session.js'
+import { whoseBirthday, type Birthday } from './birthday.js'
 
-interface Deps { authDb: AuthDb; whitelist: string[]; welcome: Record<string, string> }
+interface Deps {
+  authDb: AuthDb; whitelist: string[]; welcome: Record<string, string>
+  /** 姓名 → 生日。找回密码的唯一验证依据，见 birthday.ts 里的警告 */
+  birthdays: Record<string, Birthday>
+}
 
 /**
  * 挂载登录/登出/whoami。
@@ -90,6 +95,51 @@ export function registerAuthRoutes (app: FastifyInstance, deps: Deps): void {
     }
     return reply.code(401).send({ error: '密码错误' })
   })
+
+  /**
+   * 忘了密码：报出生日的月和日，对上了就地改密码。
+   *
+   * ⚠️【这条路由的安全性【全部】压在限流上】。月+日只有 366 种可能，
+   * 有效答案就名单里那两三个——不限流的话一个脚本几秒钟就能把所有人的
+   * 密码改掉。每小时 5 次意味着要试遍 366 种得花三天，这才勉强算个门槛。
+   * 【谁都不要把这里的 max 调大】。
+   *
+   * 【答错不解释】：说"这个生日不对"就等于提供了一个"某天是不是某人生日"
+   * 的查询接口，一天天问下去能把真实生日问出来。所以对错都只回同一句话。
+   *
+   * 【不自动登入】：改完让他自己去登录页用新密码登一次。省这一步的收益
+   * 很小，代价是猜中生日的人直接拿到会话。
+   */
+  app.post<{ Body: { month?: unknown; day?: unknown; newPassword?: unknown } }>(
+    '/api/forgot-password',
+    { config: { rateLimit: { max: 5, timeWindow: '1 hour' } } },
+    async (req, reply) => {
+      const { month, day, newPassword } = req.body ?? {}
+      // 和 /api/login 同样的理由：JSON 里什么类型都可能来，显式挡掉
+      if (typeof newPassword !== 'string') {
+        return reply.code(400).send({ error: '密码格式错误' })
+      }
+      if (newPassword.length < 4) {
+        return reply.code(400).send({ error: '密码至少4位' })
+      }
+
+      const m = typeof month === 'number' ? month : Number(month)
+      const d = typeof day === 'number' ? day : Number(day)
+      const who = whoseBirthday(deps.birthdays, whitelist, m, d)
+
+      /*
+       * 猜错了。别说是月份不对还是日子不对，也别说"没有人是这天生日"——
+       * 就这一句，问什么都是它。
+       */
+      if (who === null) {
+        req.log.warn({ ip: req.ip, month: m, day: d }, '找回密码：答案不对')
+        return reply.code(403).send({ error: '想混进来？' })
+      }
+
+      await authDb.setPassword(who, newPassword, req.ip)
+      req.log.warn({ ip: req.ip, name: who }, '找回密码：密码已重置')
+      return { ok: true, name: who }
+    })
 
   app.post('/api/logout', async (_req, reply) => {
     clearSession(reply)

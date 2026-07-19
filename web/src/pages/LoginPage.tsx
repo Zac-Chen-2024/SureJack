@@ -2,10 +2,12 @@ import { useState, type FormEvent } from 'react'
 import { useSession } from '../store/session'
 import { Button } from '../components/ui/Button'
 import { Input } from '../components/ui/Input'
+import { ForgotPassword } from '../components/ForgotPassword'
 
 export function LoginPage () {
   const [name, setName] = useState('')
   const [password, setPassword] = useState('')
+  const [forgot, setForgot] = useState(false)
   const { login, error, busy } = useSession()
 
   function onSubmit (e: FormEvent) {
@@ -42,7 +44,21 @@ export function LoginPage () {
         <div className="mt-4 text-xs leading-relaxed text-ink-400">
           第一次进来会把这个密码设为你的密码。
         </div>
+
+        {/*
+          忘了密码的入口做成一行小字，不做按钮：它一年用不上一次，
+          做成按钮会和"进入"抢视线，让登录这件事看起来有两条路。
+        */}
+        <button
+          type="button"
+          onClick={() => setForgot(true)}
+          className="mt-3 text-xs text-ink-400 underline underline-offset-2 transition-colors hover:text-ink-100"
+        >
+          忘了密码
+        </button>
       </form>
+
+      {forgot && <ForgotPassword onClose={() => setForgot(false)} />}
     </div>
   )
 }

@@ -10,7 +10,6 @@ import { AssetPanel } from '../components/AssetPanel'
 import { Preview } from '../components/Preview'
 import { FilmPlayer } from '../components/FilmPlayer'
 import { useFilmStatus } from '../hooks/useFilmStatus'
-import { SubtitleHeight } from '../components/SubtitleHeight'
 import { ExportPanel } from '../components/ExportPanel'
 import { AmbientBackdrop } from '../components/AmbientBackdrop'
 import { AccountMenu } from '../components/AccountMenu'
@@ -53,7 +52,7 @@ import {
 /** 各列共用的列头，高度对齐成一条横向的头部带 */
 function ColumnHeader ({ icon, children }: { icon?: ReactNode; children: ReactNode }) {
   return (
-    <div className="flex h-14 shrink-0 items-center gap-1.5 border-b border-line px-4 text-sm font-medium text-ink-100">
+    <div className="flex h-14 shrink-0 items-center gap-1.5 px-4 text-sm font-medium text-ink-100">
       {icon}{children}
     </div>
   )
@@ -179,10 +178,19 @@ export function Workspace () {
         <ProjectSwitcher />
         {project ? (
           <div className="min-h-0 flex-1 overflow-y-auto p-4">
-            <SubtitleHeight />
-            <div className="mt-4 border-t border-line pt-4">
-              <AssetPanel />
-            </div>
+            {/*
+              ⚠️【字幕高度暂时下线】。
+
+              拖一下它就会改掉项目，让已经合好的成片作废、后台立刻重合一遍
+              十几分钟——而在那十几分钟里，用户手上那条本来好好的片子会先被
+              覆盖成半成品。线上真出过：拖了一下滑块，465MB 的成片当场变成
+              35MB 的残片，播不了也下不了，只能从别处拷一份回来。
+
+              要重新打开它，得先解决那个问题：合成必须写到临时文件、
+              成了再原子替换，绝不能就地覆盖唯一那份能用的成片。
+              在那之前藏起来，比让人踩一次坑强。
+            */}
+            <AssetPanel />
           </div>
         ) : <div className="min-h-0 flex-1"><NeedProject /></div>}
         {/*
@@ -190,7 +198,7 @@ export function Workspace () {
           「你是谁 / 你在哪 / 你能调什么」——原来那一整栏项目列表
           干的就是前两件事，收进来之后省下 180px 给真正在用的地方。
         */}
-        <div className="flex shrink-0 items-center border-t border-line p-2">
+        <div className="flex shrink-0 items-center p-2">
           <AccountMenu />
         </div>
       </section>
@@ -200,7 +208,13 @@ export function Workspace () {
         <ColumnHeader icon={<IconPlay className="size-4 text-ink-400" />}>预览</ColumnHeader>
         {project ? (
           <>
-            <div className="min-h-0 flex-1 overflow-y-auto p-4">
+            {/*
+              【贴底】。justify-end 让画面和控制条沉到这一栏的下沿，
+              和左右两栏的底部对齐成一条线。顶上留白——上面本来就是列头，
+              而下面是控制条，重心压低之后整栏看起来是"立着"的，
+              内容从顶部堆起时反而像悬在半空。
+            */}
+            <div className="flex min-h-0 flex-1 flex-col justify-end overflow-y-auto p-4">
               {/*
                 预览和字幕列表的联动是【单向】的：音频是唯一时间源，只能由
                 Preview 往 store 推 currentMs。绝不能反过来让 store 的 currentMs
@@ -232,7 +246,7 @@ export function Workspace () {
                 将要下载的那个文件。现拼那条路只在【还没合完】时兜底，
                 让用户在等的时候不至于对着一块空白。
               */}
-              <div className="mx-auto w-full max-w-[min(100%,46vh)]">
+              <div className="mx-auto w-full max-w-[min(100%,49vh)]">
                 {filmReady ? (
                   <FilmPlayer
                     onTimeChange={setCurrentMs}

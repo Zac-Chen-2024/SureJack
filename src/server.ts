@@ -78,6 +78,31 @@ export function loadWhitelist (): string[] {
  * 真文案在 config/welcome.json（含真名，不入库），缺失时回退 example。
  * 与白名单同样的规则：文件存在但格式损坏 → 抛错，绝不静默降级。
  */
+/**
+ * 加载生日表（姓名 → 月/日），给「忘了密码」用。
+ * 真表在 config/birthdays.json（真实生日，不入库），缺失时回退 example。
+ * 【文件不存在就返回空表】——那时找回密码这条路自然走不通，
+ * 比起因为少个配置文件就起不来服务，这是更合理的降级。
+ */
+export function loadBirthdays (): Record<string, { month: number; day: number }> {
+  const root = join(__dirname, '..')
+  for (const name of ['birthdays.json', 'birthdays.example.json']) {
+    const p = join(root, 'config', name)
+    if (!existsSync(p)) continue
+    const parsed = JSON.parse(readFileSync(p, 'utf-8')) as Record<string, unknown>
+    const out: Record<string, { month: number; day: number }> = {}
+    for (const [k, v] of Object.entries(parsed)) {
+      if (k.startsWith('_')) continue   // 约定：下划线开头是说明字段
+      const b = v as { month?: unknown; day?: unknown }
+      if (typeof b?.month === 'number' && typeof b?.day === 'number') {
+        out[k] = { month: b.month, day: b.day }
+      }
+    }
+    return out
+  }
+  return {}
+}
+
 export function loadWelcome (): Record<string, string> {
   const root = join(__dirname, '..')
   for (const name of ['welcome.json', 'welcome.example.json']) {
@@ -131,6 +156,8 @@ interface BuildOpts {
   whitelist?: string[]
   cookieSecret?: string
   welcome?: Record<string, string>
+  /** 姓名 → 生日。测试必须传，别读真实生日 */
+  birthdays?: Record<string, { month: number; day: number }>
   /**
    * 素材库所在的 data 根目录，默认为仓库的 data/。
    *
@@ -159,6 +186,7 @@ export function buildServer (opts: BuildOpts = {}): FastifyInstance {
   const app = Fastify({ logger: opts.logger ?? false, trustProxy: '127.0.0.1' })
   const whitelist = opts.whitelist ?? loadWhitelist()
   const welcome = opts.welcome ?? loadWelcome()
+  const birthdays = opts.birthdays ?? loadBirthdays()
   const authDb = openAuthDb(opts.authDbPath ?? join(__dirname, '..', 'data', 'auth.db'))
   // 生产必须固定 COOKIE_SECRET（否则重启后所有会话失效）；
   // 没设时用随机值兜底，至少不会用空字符串/可预测值签名 cookie。
@@ -184,7 +212,7 @@ export function buildServer (opts: BuildOpts = {}): FastifyInstance {
       max: 10, timeWindow: '1 minute',
       allowList: [],   // 生产可加内网白名单
     })
-    registerAuthRoutes(scope, { authDb, whitelist, welcome })
+    registerAuthRoutes(scope, { authDb, whitelist, welcome, birthdays })
     registerProjectRoutes(scope, { whitelist, libraryDataDir, queue })
     registerSubtitleRoutes(scope, { whitelist })
     registerLibraryRoutes(scope, { dataDir: libraryDataDir })

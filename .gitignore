@@ -58,6 +58,9 @@ web/dist/
 # 真欢迎页文案（含真名），不入库
 config/welcome.json
 
+# 找回密码的验证答案。真实生日是个人信息，和白名单/欢迎语一样绝不入库
+config/birthdays.json
+
 # Material/ 是用户素材库：真实配音/字幕、4.1GB 视频包、凭据文件
 # 绝不入库（大文件会撑爆仓库，凭据会泄露）
 Material/

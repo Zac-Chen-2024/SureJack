@@ -111,47 +111,57 @@ export function FilmPlayer ({ onTimeChange, seek }: Props) {
       </div>
 
       {/*
-        【一整条搞定】：播放、进度、下载、更多。
-        以前这些分成"播放条"和"成片区"上下两块，中间还各带一行标题——
-        两块加起来吃掉一百多像素，而它们说的是同一件事：这条片子。
-        并成一行之后那些高度全还给了画面。
+        【一整条，内部分块】。
+        以前这些分成"播放条"和"成片区"上下两块，各带一行标题——
+        两块加起来吃掉一百多像素，说的却是同一件事：这条片子。
 
-        下载是这一栏的落点，所以给它唯一的强调色；重新合成一年用不上两次，
-        收进三个点里——摆在外面只会让人以为那是正常流程的一步。
+        不是几个各自独立的小控件排成一行，而是一根和画面同宽的横条，
+        用细分隔线切成几格：播放 | 进度 | 时间 | 下载 | 更多。
+        整条和画面左右对齐、共享一个圆角矩形，读起来是"这条片子的
+        操作台"，而不是几个碰巧挨着的按钮。
+
+        分隔用 divide-x 的一像素描边，不用间距——有间距就又散成
+        独立控件了，那正是要改掉的样子。
       */}
-      <div className="mt-2 flex items-center gap-2">
+      <div className="mt-2 flex h-11 shrink-0 items-stretch divide-x divide-line overflow-hidden rounded-xl border border-line bg-ink-850">
         <button
           type="button"
           onClick={toggle}
           aria-label={playing ? '暂停' : '播放'}
-          className="inline-flex size-8 shrink-0 items-center justify-center rounded-full border border-line text-ink-100 hover:border-accent hover:text-accent"
+          className="flex w-12 shrink-0 items-center justify-center text-ink-100 transition-colors hover:bg-ink-800 hover:text-accent"
         >
           {playing ? <IconPause className="size-4" /> : <IconPlay className="size-4" />}
         </button>
-        <input
-          type="range"
-          min={0}
-          max={Math.max(dur, 0.01)}
-          step={0.01}
-          value={cur}
-          onChange={(e) => {
-            const t = Number(e.target.value)
-            const v = videoRef.current
-            if (v) v.currentTime = t
-            setCur(t)
-          }}
-          className="min-w-0 flex-1 accent-accent"
-          aria-label="播放进度"
-        />
-        <span className="shrink-0 text-[11px] tabular-nums text-ink-400">
-          {fmt(cur)} / {fmt(dur)}
-        </span>
 
+        {/* 进度这一格吃掉所有余量——它是这条里唯一需要精细操作的地方 */}
+        <div className="flex min-w-0 flex-1 items-center px-3">
+          <input
+            type="range"
+            min={0}
+            max={Math.max(dur, 0.01)}
+            step={0.01}
+            value={cur}
+            onChange={(e) => {
+              const t = Number(e.target.value)
+              const v = videoRef.current
+              if (v) v.currentTime = t
+              setCur(t)
+            }}
+            className="min-w-0 flex-1 accent-accent"
+            aria-label="播放进度"
+          />
+        </div>
+
+        <div className="flex shrink-0 items-center px-3 text-[11px] tabular-nums text-ink-400">
+          {fmt(cur)} / {fmt(dur)}
+        </div>
+
+        {/* 下载是这一栏的落点，整格铺强调色——一眼就知道往哪儿去 */}
         <a
           href={`/api/projects/${project.id}/film/download`}
           title="下载视频"
           aria-label="下载视频"
-          className="inline-flex size-8 shrink-0 items-center justify-center rounded-lg bg-accent text-ink-950 transition-colors hover:bg-accent-dim"
+          className="flex w-12 shrink-0 items-center justify-center bg-accent text-ink-950 transition-colors hover:bg-accent-dim"
         >
           <IconDownload className="size-4" />
         </a>
@@ -182,13 +192,13 @@ function FilmMenu ({ onRecompose }: { onRecompose: () => void }) {
   }, [open])
 
   return (
-    <div ref={boxRef} className="relative shrink-0">
+    <div ref={boxRef} className="relative flex shrink-0">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-label="更多"
         title="更多"
-        className="inline-flex size-8 items-center justify-center rounded-lg text-ink-400 hover:bg-ink-850 hover:text-ink-100"
+        className="flex w-10 items-center justify-center text-ink-400 transition-colors hover:bg-ink-800 hover:text-ink-100"
       >
         <IconMore className="size-4" />
       </button>
