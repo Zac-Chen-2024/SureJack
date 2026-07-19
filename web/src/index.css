@@ -66,6 +66,27 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/*
+ * 【界面本身不可选中】。
+ *
+ * 这是个工具而不是文档：按钮上的字、列头、时间码、项目名——拖选它们
+ * 没有任何用处，只会在拖动滑块、点字幕行时留下一片蓝色高亮，看着像
+ * 出了错。桌面应用的原生控件从来不可选中，网页做的工具也该照做。
+ *
+ * ⚠️【但真正的文本必须留着】：输入框、文本域、以及标了 select-text 的
+ * 地方。文案是用户自己写的东西，复制粘贴是刚需——一刀切会把这个功能
+ * 一起砍掉，那是比蓝色高亮严重得多的问题。
+ */
+body {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+input, textarea, [contenteditable], .select-text, .select-text * {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
 /* 微交互：可交互元素统一过渡曲线，避免状态切换生硬跳变。
    .interactive 供非原生表单元素的可点击容器（如项目列表项）复用。 */
 button, input, textarea, a, [role="button"], .interactive {

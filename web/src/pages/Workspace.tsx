@@ -8,6 +8,8 @@ import { ScriptEditor } from '../components/ScriptEditor'
 import { SubtitleList } from '../components/SubtitleList'
 import { AssetPanel } from '../components/AssetPanel'
 import { Preview } from '../components/Preview'
+import { FilmPlayer } from '../components/FilmPlayer'
+import { useFilmStatus } from '../hooks/useFilmStatus'
 import { SubtitleHeight } from '../components/SubtitleHeight'
 import { ExportPanel } from '../components/ExportPanel'
 import { AmbientBackdrop } from '../components/AmbientBackdrop'
@@ -101,6 +103,18 @@ export function Workspace () {
    * 收起态的那行会显示字数，所以"里面有没有东西"仍然一眼可见。
    */
   const [scriptOpen, setScriptOpen] = useState(false)
+
+  /*
+   * 成片合好了没有。ExportPanel 已经在轮询这个状态，这里只是读同一份
+   * store——不要另起一轮轮询，两轮问同一个接口会互相看到对方排的活。
+   */
+  const filmReady = usePipeline((s) => s.film?.state === 'ready')
+  /*
+   * 轮询挂在【整栏都在的地方】，不能挂在下面那两个会互相顶替的组件里：
+   * 成片一好 ExportPanel 就整块不渲染了，轮询跟着断，之后用户改文案
+   * 让成片作废也不会有人去问一句"现在怎么样了"。
+   */
+  useFilmStatus(project ?? null)
 
 
 
@@ -206,23 +220,50 @@ export function Workspace () {
                 加上列头 56 + 播放条 40 + 导出区 90，1000px 高的窗口仍装得下。
                 用 vh 而不是写死像素，笔记本和大屏上都成立。
               */}
-              <div className="mx-auto w-full max-w-[min(100%,38vh)]">
-                <Preview
-                  onTimeChange={setCurrentMs}
-                  seek={seekNonce > 0 ? { ms: currentMs, nonce: seekNonce } : null}
-                />
+              {/*
+                【成片好了就播成片】。
+
+                Preview 是在前端现拼一个近似品（背景轨 + 配音 + BGM + JASSUB
+                字幕，四层叠着播）。那套东西存在的理由是当年成片要手动导出、
+                必须先有个东西给人看。现在成片是自动合的，盘上躺着真东西时
+                再拼近似品，只会制造"预览和成片哪个才对"这类查不清的差异。
+
+                所以 ready 之后一律换成 FilmPlayer——一个 <video>，播的就是
+                将要下载的那个文件。现拼那条路只在【还没合完】时兜底，
+                让用户在等的时候不至于对着一块空白。
+              */}
+              <div className="mx-auto w-full max-w-[min(100%,46vh)]">
+                {filmReady ? (
+                  <FilmPlayer
+                    onTimeChange={setCurrentMs}
+                    seek={seekNonce > 0 ? { ms: currentMs, nonce: seekNonce } : null}
+                  />
+                ) : (
+                  <Preview
+                    onTimeChange={setCurrentMs}
+                    seek={seekNonce > 0 ? { ms: currentMs, nonce: seekNonce } : null}
+                  />
+                )}
               </div>
 
             </div>
-            {/* 导出常驻底部，不参与上面的高度竞争——它是这一栏的落点 */}
-            <div className="shrink-0 border-t border-line p-4"><ExportPanel /></div>
+            {/*
+              【成片好了就没有这一块了】。下载、进度、重新合成全都并进了
+              播放器自己那条控制栏（见 FilmPlayer），这里再留一块就是
+              把同一件事说两遍，还白吃掉一百多像素的画面高度。
+
+              没合完时它才出现——那时候它说的是另一件事：还要等多久。
+            */}
+            {!filmReady && (
+              <div className="shrink-0 border-t border-line p-4"><ExportPanel /></div>
+            )}
           </>
         ) : <NeedProject />}
       </section>
       {/* ④ 说什么 —— 上半文案编辑，下半「配音 + 字幕」。
           这一列是三栏里唯一用 ink-950 的，最深的那块就是让人写字的地方。 */}
       <section className="flex min-h-0 min-w-0 flex-col bg-ink-950">
-        <ColumnHeader>{project?.name ?? '选一个项目开始'}</ColumnHeader>
+        <ColumnHeader>文本</ColumnHeader>
         {/*
           【字幕在上、文案在下】，且文案可收起。
 

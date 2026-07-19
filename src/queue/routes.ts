@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import { createReadStream } from 'node:fs'
+import { sendFileRange } from '../assets/storage.js'
 import { openUserDb, type Project } from '../db/user-db.js'
 import { getSession, requireAuth } from '../auth/session.js'
 import { downloadableFilm, enqueueFilm, filmInfo, resolveFilm, type FilmDeps } from '../compose/film.js'
@@ -69,6 +70,35 @@ export function registerExportRoutes (app: FastifyInstance, deps: Deps): void {
       reply.header('Content-Disposition',
         `attachment; filename*=UTF-8''${encodeURIComponent(`${project.name}.mp4`)}`)
       return reply.send(createReadStream(path))
+    })
+
+  /**
+   * 成片的【播放】流。和 /download 同一个文件，两点不同：
+   *
+   *   - 没有 Content-Disposition：带 attachment 的话 <video src> 在部分
+   *     浏览器上会变成下载而不是播放。
+   *   - 支持 Range：拖进度条发的是 206 请求，只回 200 的话浏览器要把
+   *     整条几百 MB 的片子拉完才能跳，等于拖不动。
+   *
+   * 预览播的就是这个——「前端只是一个播放器」的字面意思：所见即成片，
+   * 不存在预览和导出长得不一样的可能。
+   */
+  app.get<{ Params: { id: string } }>(
+    '/api/projects/:id/film/stream', { preHandler: requireAuth }, async (req, reply) => {
+      const name = getSession(req)!
+      const project = withUserDb(name, (db) => db.getProject(req.params.id))
+      if (!project) return reply.code(404).send({ error: '项目不存在' })
+
+      const path = await downloadableFilm(deps, name, req.params.id)
+      if (path === null) return reply.code(404).send({ error: '成片还没合好' })
+
+      /*
+       * 【不能缓存】。成片路径是固定的 export.mp4，改文案/字幕/BGM 之后
+       * 重合出来的还是这个 URL——让浏览器缓存就等于用户改完设置看到的
+       * 永远是旧片子。
+       */
+      reply.header('Cache-Control', 'no-store')
+      return sendFileRange(reply, path, req.headers.range, 'video/mp4')
     })
 
   /**

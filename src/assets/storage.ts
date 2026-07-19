@@ -1,5 +1,5 @@
-import { createWriteStream } from 'node:fs'
-import { mkdir } from 'node:fs/promises'
+import { createWriteStream, createReadStream } from 'node:fs'
+import { mkdir, stat } from 'node:fs/promises'
 import { basename, extname, join, resolve } from 'node:path'
 import { pipeline } from 'node:stream/promises'
 import type { Readable } from 'node:stream'
@@ -132,6 +132,47 @@ export function parseRange (header: string | undefined, size: number): { start: 
   }
   if (start >= size || start > end) return 'invalid'
   return { start, end: Math.min(end, size - 1) }
+}
+
+/**
+ * 按 Range 把一个本地文件发出去。
+ *
+ * 抽出来是因为这十几行已经在素材、素材库、成片三处各写了一遍，而它每一
+ * 处都必须完全一样才不出错：漏掉 Accept-Ranges 浏览器压根不会尝试 seek；
+ * 漏掉 416 会把越界请求悄悄夹成一段错误的字节；漏掉 Content-Length
+ * 会让进度条不知道总长。少一样都是"能播但拖不动"这类难查的毛病。
+ *
+ * ⚠️ 调用方要先确认文件存在并做完鉴权——这个函数只管发字节。
+ */
+export async function sendFileRange (
+  reply: {
+    header: (k: string, v: string | number) => unknown
+    code: (n: number) => unknown
+    send: (payload: unknown) => unknown
+  },
+  path: string,
+  rangeHeader: string | undefined,
+  contentType: string,
+): Promise<unknown> {
+  const size = (await stat(path)).size
+
+  reply.header('Content-Type', contentType)
+  reply.header('Accept-Ranges', 'bytes')
+
+  const range = parseRange(rangeHeader, size)
+  if (range === 'invalid') {
+    reply.header('Content-Range', `bytes */${size}`)
+    reply.code(416)
+    return reply.send({ error: '请求的字节区间超出文件范围' })
+  }
+  if (range !== null) {
+    reply.code(206)
+    reply.header('Content-Range', `bytes ${range.start}-${range.end}/${size}`)
+    reply.header('Content-Length', range.end - range.start + 1)
+    return reply.send(createReadStream(path, { start: range.start, end: range.end }))
+  }
+  reply.header('Content-Length', size)
+  return reply.send(createReadStream(path))
 }
 
 /** 把上传流落盘。返回实际路径与字节数。 */

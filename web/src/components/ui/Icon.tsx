@@ -203,6 +203,17 @@ export function IconVolume (props: IconProps) {
   )
 }
 
+/** 竖着的三个点。收纳次要动作的通用入口 */
+export function IconMore (props: IconProps) {
+  return (
+    <Svg {...props}>
+      <circle cx="12" cy="5" r="1.4" />
+      <circle cx="12" cy="12" r="1.4" />
+      <circle cx="12" cy="19" r="1.4" />
+    </Svg>
+  )
+}
+
 /** 暂停 */
 export function IconPause (props: IconProps) {
   return (

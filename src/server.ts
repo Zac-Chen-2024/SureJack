@@ -15,6 +15,7 @@ import { registerSubtitleRoutes } from './subtitles/routes.js'
 import { registerLibraryRoutes } from './library/routes.js'
 import { ExportQueue } from './queue/queue.js'
 import { registerExportRoutes } from './queue/routes.js'
+import { sweepFilms } from './compose/film.js'
 import { openAuthDb } from './db/auth-db.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -140,6 +141,14 @@ interface BuildOpts {
   libraryDataDir?: string
   /** 仅供测试注入假合成，生产不传——真调 Azure 会烧配额 */
   synthesizeLong?: Parameters<typeof registerTtsRoutes>[1]['synthesizeLong']
+  /**
+   * 启动后扫一遍，把"该有成片却没有"的项目补上队。
+   *
+   * 【默认关，只有生产入口打开】。测试里每建一个 server 都会触发的话，
+   * 那就是几百次真 ffmpeg —— 而且会去动真实用户的 data/ 目录。
+   * 这种东西必须显式 opt-in。
+   */
+  sweepFilmsOnStart?: boolean
 }
 
 export function buildServer (opts: BuildOpts = {}): FastifyInstance {
@@ -187,6 +196,27 @@ export function buildServer (opts: BuildOpts = {}): FastifyInstance {
     registerExportRoutes(scope, { whitelist, queue, libraryDataDir })
   })
 
+  /*
+   * 【补合扫描】挂在 onReady 上，而且【不 await】。
+   *
+   * 不 await 是故意的：扫描要为每个项目算一遍背景排布、读素材库，
+   * 慢的时候要几秒。await 它就等于让健康检查和所有请求陪着一起等，
+   * 而这件事晚几秒做完对谁都没影响。
+   *
+   * 排上的活本来就进 FIFO 队列串行跑，不会一口气开一堆 ffmpeg。
+   */
+  if (opts.sweepFilmsOnStart === true) {
+    app.addHook('onReady', async () => {
+      void sweepFilms({ whitelist, libraryDataDir, queue }, whitelist)
+        .then((r) => {
+          if (r.enqueued.length > 0) {
+            app.log.info({ enqueued: r.enqueued, skipped: r.skipped }, '开机补合：已排上队')
+          }
+        })
+        .catch((e) => app.log.warn({ err: e }, '开机补合扫描失败，不影响服务'))
+    })
+  }
+
   app.addHook('onClose', async () => authDb.close())
 
   // 托管前端构建产物（同域，cookie 自动生效、无 CORS）。
@@ -211,7 +241,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   if (!process.env.COOKIE_SECRET) {
     console.error('⚠️  生产必须设 COOKIE_SECRET 环境变量（否则重启后所有会话失效）')
   }
-  const app = buildServer({ logger: true })
+  const app = buildServer({ logger: true, sweepFilmsOnStart: true })
   const port = Number(process.env.PORT ?? 8809)   // 避开 plus 的 8808
   app.listen({ port, host: '127.0.0.1' })
     .then(() => console.log(`SureJack 后端监听 127.0.0.1:${port}`))

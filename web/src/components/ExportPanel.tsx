@@ -1,5 +1,4 @@
-import { useEffect } from 'react'
-import { usePipeline, filmButton, shouldPollFilm } from '../store/pipeline'
+import { usePipeline, filmButton } from '../store/pipeline'
 import { useProjects } from '../store/projects'
 import { Button } from './ui/Button'
 import { IconDownload } from './ui/Icon'
@@ -17,31 +16,7 @@ import { IconDownload } from './ui/Icon'
 export function ExportPanel () {
   const project = useProjects((s) => s.current())
   const film = usePipeline((s) => s.film)
-  const loadFilm = usePipeline((s) => s.loadFilm)
   const recomposeFilm = usePipeline((s) => s.recomposeFilm)
-  const projectId = project?.id ?? null
-
-  /*
-   * 【依赖里带 updatedAt】。换 BGM、调音量、拖字幕高度、改文案——每一样
-   * 都会刷新 updatedAt，也都会让成片作废（后端按指纹判，见 film.ts）。
-   * 带上它，用户一改设置这里就重新问一次，后端顺手把重合排上。
-   *
-   * 【只在 building 时才继续轮询】：终态还接着问是让两个用户的机器白跑。
-   */
-  useEffect(() => {
-    if (projectId === null) return
-    let cancelled = false
-    void loadFilm(projectId)
-    const timer = setInterval(() => {
-      if (cancelled) return
-      if (!shouldPollFilm(usePipeline.getState().film)) {
-        clearInterval(timer)
-        return
-      }
-      void loadFilm(projectId)
-    }, 2000)
-    return () => { cancelled = true; clearInterval(timer) }
-  }, [projectId, project?.updatedAt, project?.ttsState, project?.ttsDurationMs, loadFilm])
 
   if (!project) return null
 
@@ -51,8 +26,6 @@ export function ExportPanel () {
 
   return (
     <div>
-      <div className="mb-1.5 text-[11px] uppercase tracking-wider text-ink-400">成片</div>
-
       {building && (
         <div className="mb-1.5 rounded-lg border border-line bg-ink-850 px-2.5 py-2">
           <div className="mb-1.5 flex items-baseline justify-between">

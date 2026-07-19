@@ -471,20 +471,33 @@ export interface FilmInfo {
  * 占死，而用户看到的只是一个永远转圈的按钮。要重试就得他自己点，
  * 或者他改了某个输入让指纹变了——那说明失败的前提已经不成立了。
  */
-export async function filmInfo (
-  deps: FilmDeps, userName: string, projectId: string,
-): Promise<FilmInfo> {
-  const none = (reason: string | null): FilmInfo =>
-    ({ state: 'none', jobId: null, progress: 0, error: null, reason })
+/**
+ * 一个项目的成片【现在处于哪一档】，不含任何副作用。
+ *
+ * 抽出来是因为有两个调用方要用同一套判定：前端问状态的 filmInfo，
+ * 和启动时的补合扫描 sweepFilms。两边各写一遍的话迟早会漂——
+ * 尤其是"失败过的不自动重排"这条，漏在扫描里就会变成开机跑一堆
+ * 注定失败的 ffmpeg。
+ */
+type FilmVerdict =
+  | { kind: 'blocked'; reason: string }
+  | { kind: 'running'; jobId: string; progress: number }
+  | { kind: 'ready'; jobId: string | null }
+  | { kind: 'failed'; jobId: string | null; error: string }
+  /** 该有却没有 —— 唯一需要排活的一档 */
+  | { kind: 'missing' }
 
+async function judgeFilm (
+  deps: FilmDeps, userName: string, projectId: string,
+): Promise<FilmVerdict> {
   let r: FilmResolution
   try {
     r = resolveFilm(deps, userName, projectId)
   } catch {
     // 素材库读不出来之类：说"还不能合"，别把界面搞成红色报错
-    return none('暂时算不出成片需要的素材排布，稍后再试')
+    return { kind: 'blocked', reason: '暂时算不出成片需要的素材排布，稍后再试' }
   }
-  if (!r.ok) return none(r.error)
+  if (!r.ok) return { kind: 'blocked', reason: r.error }
 
   const { dir, fingerprint } = r.film
   const stamp = await readStamp(dir, FILM_STAMP_FILE)
@@ -496,24 +509,98 @@ export async function filmInfo (
    * 现算输入的（resolveFilm），大概率已经把新设置吃进去了；就算没有，
    * 它跑完之后下一次轮询会发现指纹不符，再排一条。硬要在这里插队重排
    * 只会让两条 ffmpeg 抢同一个输出文件。
+   *
+   * ⚠️ 判「在跑」认的是【队列里真有这条作业】，不是戳上写着 building。
+   * 进程被杀时戳会永远停在 building，只信戳的话那个项目就再也醒不过来了——
+   * 线上真出过：重启一次，成片卡在 11MB 再没动过。
    */
   if (snap?.status === 'queued' || snap?.status === 'running') {
-    return { state: 'building', jobId, progress: snap.progress, error: null, reason: null }
+    return { kind: 'running', jobId: jobId!, progress: snap.progress }
   }
 
   if (await reusableOutput(dir, FILM_STAMP_FILE, FILM_FILE, fingerprint) !== null) {
-    return { state: 'ready', jobId, progress: 100, error: null, reason: null }
+    return { kind: 'ready', jobId }
   }
 
   // 失败的正是【当前这份输入】→ 停在这儿等用户重试
   if (stamp?.status === 'error' && stamp.fingerprint === fingerprint) {
-    return { state: 'error', jobId, progress: 0, error: stamp.error ?? '合成失败', reason: null }
+    return { kind: 'failed', jobId, error: stamp.error ?? '合成失败' }
   }
 
-  // 该有却没有 → 现在排一条
-  const newJobId = await enqueueFilm(deps, userName, projectId)
-  if (newJobId === null) return none('暂时还不能合成成片')
-  return { state: 'building', jobId: newJobId, progress: 0, error: null, reason: null }
+  return { kind: 'missing' }
+}
+
+export async function filmInfo (
+  deps: FilmDeps, userName: string, projectId: string,
+): Promise<FilmInfo> {
+  const v = await judgeFilm(deps, userName, projectId)
+  switch (v.kind) {
+    case 'blocked':
+      return { state: 'none', jobId: null, progress: 0, error: null, reason: v.reason }
+    case 'running':
+      return { state: 'building', jobId: v.jobId, progress: v.progress, error: null, reason: null }
+    case 'ready':
+      return { state: 'ready', jobId: v.jobId, progress: 100, error: null, reason: null }
+    case 'failed':
+      return { state: 'error', jobId: v.jobId, progress: 0, error: v.error, reason: null }
+    case 'missing': {
+      // 该有却没有 → 现在排一条
+      const newJobId = await enqueueFilm(deps, userName, projectId)
+      if (newJobId === null) {
+        return { state: 'none', jobId: null, progress: 0, error: null, reason: '暂时还不能合成成片' }
+      }
+      return { state: 'building', jobId: newJobId, progress: 0, error: null, reason: null }
+    }
+  }
+}
+
+/** sweepFilms 的战果，给日志用 */
+export interface SweepResult {
+  /** 排上了活的 项目名 */
+  enqueued: string[]
+  /** 看过但不需要动的项目数 */
+  skipped: number
+}
+
+/**
+ * 【开机补合】：把"该有成片却没有"的项目排上队。
+ *
+ * 为什么必须有这么个东西：合成是在【配音就绪那一刻】触发的，队列又活在
+ * 进程内存里。于是进程一重启，正在跑的作业凭空消失，而没有任何事件会
+ * 再次发生——那个项目就永远停在半成品上。在补上这一扫之前，它只能靠
+ * 用户碰巧打开页面、前端轮询 /film 顺手补合来救。「自动合成」不该
+ * 取决于有没有人在看。
+ *
+ * 【只补 missing 那一档】。ready 不重做，failed 不自动重试（那条规则在
+ * judgeFilm 里，和界面共用一份），blocked 本来就还没到时候。所以开机
+ * 最多只会跑真正缺的那几条。
+ *
+ * 【绝不抛】。这是启动路径上的旁支，某个用户的库坏了不该让整个服务起不来。
+ */
+export async function sweepFilms (
+  deps: FilmDeps, userNames: string[],
+): Promise<SweepResult> {
+  const out: SweepResult = { enqueued: [], skipped: 0 }
+
+  for (const userName of userNames) {
+    let projects: { id: string; name: string }[]
+    try {
+      const db = openUserDb(userName, deps.whitelist)
+      // 没建过项目的用户会在这里开出一个空库，正常
+      try { projects = db.listProjects().map((p) => ({ id: p.id, name: p.name })) } finally { db.close() }
+    } catch { continue }
+
+    for (const p of projects) {
+      try {
+        const v = await judgeFilm(deps, userName, p.id)
+        if (v.kind !== 'missing') { out.skipped += 1; continue }
+        const jobId = await enqueueFilm(deps, userName, p.id)
+        if (jobId === null) out.skipped += 1
+        else out.enqueued.push(p.name)
+      } catch { out.skipped += 1 }
+    }
+  }
+  return out
 }
 
 /** 成片文件现在能不能下载。能就给路径。⚠️ 永远不抛。 */
