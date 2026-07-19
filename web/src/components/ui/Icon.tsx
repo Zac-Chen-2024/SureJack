@@ -153,12 +153,23 @@ export function IconMusic (props: IconProps) {
   )
 }
 
-/** 字幕列表——一个字幕框，内含两行长短不一的文字 */
+/** 字幕——取「画面下方两行字」的意象，与 IconFilm 的矩形语汇同源 */
 export function IconSubtitles (props: IconProps) {
   return (
     <Svg {...props}>
       <rect x="3" y="5" width="18" height="14" rx="2" />
-      <path d="M7 11h4M14 11h3M7 15h3M13 15h4" />
+      <path d="M7 12h5M15 12h2M7 15.5h2M12 15.5h5" />
+    </Svg>
+  )
+}
+
+/** 下载成片 */
+export function IconDownload (props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <path d="m7 10 5 5 5-5" />
+      <path d="M12 15V3" />
     </Svg>
   )
 }
@@ -178,17 +189,6 @@ export function IconVolume (props: IconProps) {
     <Svg {...props}>
       <path d="M11 5 6.5 9H3v6h3.5L11 19V5Z" />
       <path d="M15.5 9.5a3.5 3.5 0 0 1 0 5M18.5 7a7 7 0 0 1 0 10" />
-    </Svg>
-  )
-}
-
-/** 下载成片 */
-export function IconDownload (props: IconProps) {
-  return (
-    <Svg {...props}>
-      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-      <path d="m7 10 5 5 5-5" />
-      <path d="M12 15V3" />
     </Svg>
   )
 }
