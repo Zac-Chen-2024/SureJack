@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, rm, readdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { execFile } from 'node:child_process'
@@ -57,5 +57,24 @@ describe('concatAudio', () => {
 
   it('输入为空时抛出可读的错误', async () => {
     await expect(concatAudio([], '/tmp/x.mp3')).rejects.toThrow(/输入为空/)
+  })
+
+  /*
+   * outPath 位于用户的素材目录，是要展示给用户看的。concat 清单若写在
+   * 那里，进程被 SIGKILL 时 finally 来不及执行，就会留下孤儿 .txt。
+   * 所以清单必须落在系统临时目录——这条测试卡住这个约束。
+   */
+  it('产物目录里只有成片，不留任何中间文件', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'concat-clean-'))
+    try {
+      const a = join(dir, 'a.mp3'), b = join(dir, 'b.mp3')
+      await silence(a, 1); await silence(b, 1)
+
+      const outDir = await mkdtemp(join(tmpdir(), 'concat-out-'))
+      await concatAudio([a, b], join(outDir, 'out.mp3'))
+
+      expect(await readdir(outDir)).toEqual(['out.mp3'])
+      await rm(outDir, { recursive: true, force: true })
+    } finally { await rm(dir, { recursive: true, force: true }) }
   })
 })
