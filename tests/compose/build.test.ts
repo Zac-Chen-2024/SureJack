@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   buildBackgroundTrack, segmentArgs, concatListContent,
-  copySegmentArgs, copyTakeMs, canCopySegment, KEYFRAME_MS,
+  copySegmentArgs, copyTakeMs, canCopySegment, KEYFRAME_MS, encodeTakeMs,
 } from '../../src/compose/build.js'
 import { bucketDir } from '../../src/library/paths.js'
 import { normalizeBucket, normalizedPath, TARGET } from '../../src/library/normalize.js'
@@ -56,10 +56,27 @@ describe('segmentArgs —— 单段归一化', () => {
     expect(ss).toBeLessThan(i)
   })
 
-  it('startMs / takeMs 换算成秒写进 -ss 和 -t', () => {
+  it('startMs 原样换算成秒写进 -ss', () => {
     const args = segmentArgs('/lib/a.mp4', seg, ASPECT, '/tmp/out.mp4')
     expect(args[args.indexOf('-ss') + 1]).toBe('90.000')
-    expect(args[args.indexOf('-t') + 1]).toBe('12.500')
+  })
+
+  it('-t 补了一帧——重编码同样会丢不足一帧的零头', () => {
+    /*
+     * 【实测】一条 4.000 秒的三段排布只拼出 3.968 秒。每段丢的零头
+     * 不足一帧、看着可以忽略，但排布是十几段，加起来就是实打实的缺口，
+     * 而缺口会让烧录时的 -stream_loop -1 把画面跳回开头。
+     */
+    const args = segmentArgs('/lib/a.mp4', seg, ASPECT, '/tmp/out.mp4')
+    expect(Number(args[args.indexOf('-t') + 1])).toBeGreaterThan(12.5)
+    expect(encodeTakeMs(12_500)).toBe(12_534)
+  })
+
+  it('补的量不超过一帧——重编码的每一帧都要花 CPU', () => {
+    for (const ms of [1, 1000, 12_500, 60_000]) {
+      expect(encodeTakeMs(ms) - ms, `takeMs=${ms}`).toBeLessThanOrEqual(34)
+      expect(encodeTakeMs(ms), `takeMs=${ms}`).toBeGreaterThan(ms)
+    }
   })
 
   it('一律 -an 去掉音轨——背景静音是设计约束', () => {
@@ -130,9 +147,13 @@ describe('buildBackgroundTrack —— 真跑 ffmpeg', () => {
       onProgress: (p) => pcts.push(p),
     })
 
-    // 总长 4 秒（1+1+2），容差 0.3 秒
+    /*
+     * 总长 4 秒（1+1+2）。【下界是硬的：一秒都不能短】——短了烧录时
+     * 会从头循环，接缝处画面跳回开头。上界松一点，补帧带来的余量会被
+     * 烧录的 -t 精确截掉。
+     */
     const dur = Number(await probe(outPath, 'format=duration', 'v:0'))
-    expect(dur).toBeGreaterThan(3.7)
+    expect(dur).toBeGreaterThanOrEqual(4)
     expect(dur).toBeLessThan(4.3)
 
     // 三段来源分辨率各不相同，成片必须是统一的目标画幅

@@ -41,6 +41,24 @@ function sec (ms: number): string {
 }
 
 /**
+ * 重编码一段时实际要取多长。
+ *
+ * 【重编码路径同样会短】。`-t` 截在最后一个 PTS 小于它的帧上，所以每段
+ * 都会丢掉不足一帧的零头——单段最多 1/30 秒，看着可以忽略，但排布是
+ * 十几段，加起来就成了实打实的缺口。实测一条 4.000 秒的排布（三段）
+ * 只拼出 3.968 秒。
+ *
+ * 缺口的后果和拷贝路径一模一样：烧录那步对背景加了 `-stream_loop -1`，
+ * 轨比配音短就会从头循环，接缝处画面突然跳回开头。
+ *
+ * 补一帧就够——不足一帧的零头，补一个整帧必然盖住。比拷贝路径的
+ * 一个关键帧间隔（1 秒）省得多，而重编码的每一帧都是要花 CPU 的。
+ */
+export function encodeTakeMs (takeMs: number): number {
+  return takeMs + Math.ceil(1000 / FPS)
+}
+
+/**
  * 单段的 ffmpeg 参数。
  *
  * ⚠️【`-ss` 必须排在 `-i` 前面】。放在 `-i` 后面是输出选项，ffmpeg 会从文件头
@@ -70,7 +88,7 @@ export function segmentArgs (
     '-hide_banner', '-loglevel', 'error', '-y',
     '-ss', sec(seg.startMs),      // 【在 -i 之前】——输入端快速定位
     '-i', srcPath,
-    '-t', sec(seg.takeMs),
+    '-t', sec(encodeTakeMs(seg.takeMs)),   // 补一帧，宁长勿短（见 encodeTakeMs）
     '-an',                        // 背景一律静音
     '-vf', vf,
     '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20',
