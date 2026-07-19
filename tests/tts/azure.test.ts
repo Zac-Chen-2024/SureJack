@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { estimateAudioMs, toWordTiming, synthesize } from '../../src/tts/azure.js'
+import { estimateAudioMs, toWordTiming } from '../../src/tts/azure.js'
 
 describe('toWordTiming', () => {
   it('audioOffset 是 100 纳秒单位，除以 10000 得毫秒', () => {
@@ -32,16 +32,14 @@ describe('estimateAudioMs', () => {
   })
 })
 
-describe('synthesize 的拦截阈值', () => {
-  it('原始估算未超 10 分钟，但乘上保守系数后超过——应拒绝', () => {
-    // 3000 字：estimateAudioMs = 3000*196 = 588,000ms < 600,000ms（10 分钟）
-    // 但 588,000 * 1.15 = 676,200ms > 600,000ms —— 保守系数生效
-    const text = '字'.repeat(3000)
-    expect(estimateAudioMs(text.length)).toBeLessThan(10 * 60 * 1000)
-    // 拦截发生在 new Promise 之前的 throw，不会真的发起网络请求，
-    // 所以可以放心传假的 key/region。
-    expect(() => synthesize({
-      text, outPath: '/dev/null', key: 'fake-key', region: 'fake-region',
-    })).toThrow()
-  })
-})
+/*
+ * 原本这里有一组「synthesize 的拦截阈值」测试，断言超长文案会被
+ * synthesize 当场 throw。Task 4 把那道拦截移到了 synthesizeLong ——
+ * 超长文案现在由 splitScript 切开后逐段合成，不再拒绝，所以那组
+ * 测试连同 REJECTION_SAFETY_MARGIN 一起删除。
+ *
+ * 替代覆盖在 tests/tts/long.test.ts：长文案会被切成多段各自合成。
+ *
+ * 注意：拦截删掉后，那个测试传的 fake-key 不再被提前拦下，
+ * 会真的发起一次 Azure 请求——留着它不只是红，还会打网络。
+ */

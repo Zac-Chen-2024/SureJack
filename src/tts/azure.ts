@@ -2,26 +2,6 @@ import * as sdk from 'microsoft-cognitiveservices-speech-sdk'
 import { unescapeXml } from '../importers/sanitize.js'
 import type { WordTiming, TtsResult } from '../types.js'
 
-/** F0 免费层单次请求的音频上限是 10 分钟 */
-const MAX_AUDIO_MS = 10 * 60 * 1000
-
-/**
- * 拦截判断的保守系数。
- *
- * estimateAudioMs 只基于单一实测样本（单一音色、单一语速、纯中文），
- * 而且连那一个样本都低估了：937 字 × 196ms = 183,652ms，实测却是
- * 184,200ms。语速、停顿、标点密度都会让 196 这个系数继续波动。
- *
- * 这个估算的唯一用途是【提交前拦截超过 10 分钟的文案】，而高估和低估
- * 的代价完全不对等：
- *   - 高估 → 错误拒绝了本可用的文案，用户体验差，但零成本。
- *   - 低估 → 放行了实际会超时的文案，打到 Azure 才失败，白白烧掉一次
- *     限速 20 次/60 秒 的请求，且失败发生在流程末端，排查成本高。
- *
- * 所以拦截判断宁可错杀，不可放过：估算值再乘一个保守系数。
- */
-const REJECTION_SAFETY_MARGIN = 1.15
-
 /**
  * 实测：937 字 → 184.2 秒，约 196 ms/字。
  *
@@ -77,16 +57,12 @@ export interface SynthesizeOptions {
  * 就是 30 次请求，直接撞墙。单次最长可出 10 分钟音频，够用。
  *
  * 这是可替换接口：换 TTS 服务商只动这个模块。
+ *
+ * 【这里不再做长度拦截】：单次 10 分钟的上限由 synthesizeLong 负责——
+ * 它先用 splitScript 把超长文案切开，再逐段调用这里。本函数只管
+ * 合成拿到的这一段，多一道拦截反而会把已经切好的段误杀。
  */
 export function synthesize (opts: SynthesizeOptions): Promise<TtsResult> {
-  const est = estimateAudioMs(opts.text.length)
-  if (est * REJECTION_SAFETY_MARGIN > MAX_AUDIO_MS) {
-    throw new Error(
-      `文案太长（约 ${Math.round(est / 60000)} 分钟音频），` +
-      `超过免费层单次 10 分钟的上限。请拆成多个项目。`
-    )
-  }
-
   return new Promise((resolve, reject) => {
     const config = sdk.SpeechConfig.fromSubscription(opts.key, opts.region)
     config.speechSynthesisVoiceName = opts.voice ?? 'zh-CN-XiaoxiaoNeural'
