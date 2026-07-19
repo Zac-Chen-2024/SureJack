@@ -11,6 +11,7 @@ import { registerAuthRoutes } from './auth/routes.js'
 import { registerProjectRoutes } from './projects/routes.js'
 import { registerAssetRoutes } from './assets/routes.js'
 import { registerTtsRoutes } from './tts/routes.js'
+import { registerSubtitleRoutes } from './subtitles/routes.js'
 import { ExportQueue } from './queue/queue.js'
 import { registerExportRoutes } from './queue/routes.js'
 import { openAuthDb } from './db/auth-db.js'
@@ -155,6 +156,7 @@ export function buildServer (opts: BuildOpts = {}): FastifyInstance {
     })
     registerAuthRoutes(scope, { authDb, whitelist, welcome })
     registerProjectRoutes(scope, { whitelist })
+    registerSubtitleRoutes(scope, { whitelist })
 
     // 背景视频可能很大；nginx 侧已放开到 500M
     await scope.register(multipart, { limits: { fileSize: 500 * 1024 * 1024 } })

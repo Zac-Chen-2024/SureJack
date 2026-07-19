@@ -5,16 +5,11 @@ import { join } from 'node:path'
 import { openUserDb, type Project } from '../db/user-db.js'
 import { getSession, requireAuth } from '../auth/session.js'
 import { assetDir } from '../assets/storage.js'
-import { ASPECT_PRESETS } from '../config.js'
-import { segmentLines, buildAss } from '../subtitles/index.js'
+import { buildAssForProject, aspectOf } from '../subtitles/project-ass.js'
 import { render } from '../render/index.js'
 import type { ExportQueue } from './queue.js'
-import type { WordTiming, TextOverlay } from '../types.js'
 
 interface Deps { whitelist: string[]; queue: ExportQueue }
-
-const SUBTITLE_MAX_CHARS = 14
-const DISCLAIMER = '小说内容纯属虚构，无不良引导'
 
 export function registerExportRoutes (app: FastifyInstance, deps: Deps): void {
   const { whitelist, queue } = deps
@@ -51,17 +46,12 @@ export function registerExportRoutes (app: FastifyInstance, deps: Deps): void {
         const dir = assetDir(name, whitelist, req.params.id)
         await mkdir(dir, { recursive: true })
 
-        // 字幕：从存下来的词级时间戳推导，不入库（设计文档第 4 节）
-        const words: WordTiming[] = JSON.parse(project.wordTimingsJson ?? '[]')
-        const lines = segmentLines(words, SUBTITLE_MAX_CHARS)
-        const aspect = ASPECT_PRESETS[project.aspectRatio] ?? ASPECT_PRESETS['9:16']!
+        // 字幕：从存下来的词级时间戳推导，不入库（设计文档第 4 节）。
+        // ⚠️ 必须走共用的 buildAssForProject——预览接口调的是同一个函数，
+        // 这是「预览即成片」的唯一保证。不要在这里另起一套构造逻辑。
+        const aspect = aspectOf(project)
         const durationMs = project.ttsDurationMs ?? 0
-
-        const overlays: TextOverlay[] = [
-          { content: DISCLAIMER, style: 'Disclaimer', startMs: null, endMs: null },
-          { content: project.name, style: 'Title', startMs: null, endMs: null },
-        ]
-        const ass = buildAss({ lines, overlays, aspect, durationMs, mode: project.subtitleMode })
+        const ass = buildAssForProject(project)
         const assPath = join(dir, 'subtitle.ass')
         await writeFile(assPath, ass, 'utf-8')
 
