@@ -12,6 +12,7 @@ import { registerProjectRoutes } from './projects/routes.js'
 import { registerAssetRoutes } from './assets/routes.js'
 import { registerTtsRoutes } from './tts/routes.js'
 import { registerSubtitleRoutes } from './subtitles/routes.js'
+import { registerLibraryRoutes } from './library/routes.js'
 import { ExportQueue } from './queue/queue.js'
 import { registerExportRoutes } from './queue/routes.js'
 import { openAuthDb } from './db/auth-db.js'
@@ -118,6 +119,14 @@ interface BuildOpts {
   whitelist?: string[]
   cookieSecret?: string
   welcome?: Record<string, string>
+  /**
+   * 素材库所在的 data 根目录，默认为仓库的 data/。
+   *
+   * 【测试必须传一个临时目录】：真实 data/library/ 是 8.5GB 素材，
+   * 扫一遍要跑几百次 ffprobe（其中不乏 1GB 的录屏），而且会往真实索引库
+   * data/library/library.db 写数据。测试不该有那种副作用，也等不起。
+   */
+  libraryDataDir?: string
   /** 仅供测试注入假合成，生产不传——真调 Azure 会烧配额 */
   synthesizeLong?: Parameters<typeof registerTtsRoutes>[1]['synthesizeLong']
 }
@@ -134,6 +143,7 @@ export function buildServer (opts: BuildOpts = {}): FastifyInstance {
   // 生产必须固定 COOKIE_SECRET（否则重启后所有会话失效）；
   // 没设时用随机值兜底，至少不会用空字符串/可预测值签名 cookie。
   const secret = opts.cookieSecret ?? process.env.COOKIE_SECRET ?? randomBytes(32).toString('hex')
+  const libraryDataDir = opts.libraryDataDir ?? join(__dirname, '..', 'data')
   const queue = new ExportQueue()
 
   attachErrorHandler(app)
@@ -157,6 +167,7 @@ export function buildServer (opts: BuildOpts = {}): FastifyInstance {
     registerAuthRoutes(scope, { authDb, whitelist, welcome })
     registerProjectRoutes(scope, { whitelist })
     registerSubtitleRoutes(scope, { whitelist })
+    registerLibraryRoutes(scope, { dataDir: libraryDataDir })
 
     // 背景视频可能很大；nginx 侧已放开到 500M
     await scope.register(multipart, { limits: { fileSize: 500 * 1024 * 1024 } })
