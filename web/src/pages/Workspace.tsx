@@ -16,7 +16,7 @@ import { Button } from '../components/ui/Button'
 import { Avatar } from '../components/ui/Avatar'
 import { BUILD_SHA, buildTimeLocal } from '../build-info'
 import {
-  IconChevronLeft, IconChevronRight, IconLogOut, IconPlay, IconSubtitles,
+  IconChevronLeft, IconChevronRight, IconChevronDown, IconLogOut, IconPlay, IconSubtitles,
 } from '../components/ui/Icon'
 
 /**
@@ -99,6 +99,12 @@ export function Workspace () {
 
   // 初值直接问 matchMedia，避免"先展开再抽搐着收起"的首帧闪烁
   const [collapsed, setCollapsed] = useState(() => window.matchMedia(NARROW).matches)
+
+  /*
+   * 文案区展开/收起。默认展开——新项目第一件事就是写文案，
+   * 一进来就收着会让人以为没有这个功能。
+   */
+  const [scriptOpen, setScriptOpen] = useState(true)
 
   /*
    * 用户一旦亲手点过这个按钮，窗口再怎么变宽变窄都不再自动收放。
@@ -272,11 +278,42 @@ export function Workspace () {
           这一列是三栏里唯一用 ink-950 的，最深的那块就是让人写字的地方。 */}
       <section className="flex min-h-0 min-w-0 flex-col bg-ink-950">
         <ColumnHeader>{project?.name ?? '选一个项目开始'}</ColumnHeader>
-        {/* 上下各占一半，中间一条 border-line。两行都写 minmax(0,1fr)：
-            不写 0 下限的话，子元素内容一多就会把行撑高，"一半"就名存实亡了 */}
-        <div className="grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)_minmax(0,1fr)]">
-          <div className="min-h-0 px-6 pb-4 pt-4"><ScriptEditor /></div>
-          <div className="min-h-0 border-t border-line"><SubtitleList /></div>
+        {/*
+          【字幕在上、文案在下】，且文案可收起。
+
+          文案通常写一次就不动了，之后大部分时间是在核对字幕和时间点——
+          让常看的那个占据视线自然落点（上半），把写完就搁置的收到下面。
+
+          文案收起时字幕吃满整栏：不写死高度，用 grid-rows 的 auto 让
+          收起后的文案条只占它自己那点高度，剩下全归字幕。
+        */}
+        <div
+          className="grid min-h-0 flex-1"
+          style={{
+            gridTemplateRows: scriptOpen
+              ? 'minmax(0,1fr) minmax(0,1fr)'
+              : 'minmax(0,1fr) auto',
+          }}
+        >
+          <div className="min-h-0"><SubtitleList /></div>
+          <div className="flex min-h-0 flex-col border-t border-line">
+            <button
+              type="button"
+              onClick={() => setScriptOpen((v) => !v)}
+              className="flex h-10 shrink-0 items-center gap-1.5 px-4 text-left text-xs text-ink-400 hover:text-ink-100"
+              title={scriptOpen ? '收起文案' : '展开文案'}
+            >
+              {scriptOpen
+                ? <IconChevronDown className="size-3.5" />
+                : <IconChevronRight className="size-3.5" />}
+              文案
+              {/* 收起时把字数带出来——收起了也该知道里面有没有东西 */}
+              {!scriptOpen && project?.scriptText
+                ? <span className="tabular-nums text-ink-600">{[...project.scriptText].length} 字</span>
+                : null}
+            </button>
+            {scriptOpen && <div className="min-h-0 flex-1 px-6 pb-4"><ScriptEditor /></div>}
+          </div>
         </div>
       </section>
 

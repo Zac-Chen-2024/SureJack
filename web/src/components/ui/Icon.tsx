@@ -58,6 +58,16 @@ export function IconChevronRight (props: IconProps) {
   )
 }
 
+/** 展开态的折叠箭头。和 IconChevronRight 同一支笔，只是转了 90°——
+    两个方向用同一套形状，展开/收起的动作才读得出是同一件事的两面 */
+export function IconChevronDown (props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M6 9l6 6 6-6" />
+    </Svg>
+  )
+}
+
 /** 删除项目——比 × 更明确地表达"删除"而不是"关闭" */
 export function IconTrash (props: IconProps) {
   return (
