@@ -30,6 +30,28 @@ export function aspectOf (project: Project): AspectPreset {
 }
 
 /**
+ * 字幕距底边的可选上界：**画面高度的一半**。
+ *
+ * 为什么要有上界：MarginV 直接进 ASS 样式行，libass 照单全收。给个负数
+ * 或者比画面还高的值，字幕就渲染到画外去了——用户看到的是"字幕没了"，
+ * 而不是"我拖过头了"，这种失败模式完全不可自证。取一半是因为再往上
+ * 就越过画面中线，字幕跑到上半屏，那已经不是"调高度"而是换版式了。
+ */
+export function maxSubtitleMarginV (aspectRatio: string): number {
+  return Math.floor((ASPECT_PRESETS[aspectRatio] ?? DEFAULT_ASPECT).height / 2)
+}
+
+/**
+ * 把用户给的值钳进合法范围并取整（像素）。
+ *
+ * ⚠️ **调用点在路由层，不要指望前端**：滑块的 min/max 只是体验，
+ * 接口是公开的，脏值不能靠界面挡。
+ */
+export function clampSubtitleMarginV (value: number, aspectRatio: string): number {
+  return Math.min(maxSubtitleMarginV(aspectRatio), Math.max(0, Math.round(value)))
+}
+
+/**
  * 从存下来的词时间轴推字幕行。还没生成配音时 wordTimingsJson 为 null，
  * 返回空数组——「没有字幕」是正常状态，不是错误。
  *
@@ -79,5 +101,7 @@ export function buildAssForProject (project: Project): string {
     aspect: aspectOf(project),
     durationMs: project.ttsDurationMs ?? 0,
     mode: project.subtitleMode,
+    // 只抬字幕。免责声明那一行是固定的合规标记不是内容，留在原地。
+    subtitleMarginV: project.subtitleMarginV,
   })
 }

@@ -3,6 +3,7 @@ import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { userDbDir } from '../auth/whitelist.js'
+import { DEFAULT_SUBTITLE_MARGIN_V } from '../subtitles/ass.js'
 
 /**
  * 素材种类。
@@ -61,6 +62,14 @@ export interface Project {
    */
   bgmLibraryId: string | null
   subtitleMode: 'line' | 'karaoke'
+  /**
+   * 字幕距底边的像素数（ASS 的 MarginV，配合 Alignment=2 底部居中）。
+   *
+   * 不同背景素材主体位置不同，字幕压在人脸上还是压在下方空白，观感差很多。
+   * 默认 DEFAULT_SUBTITLE_MARGIN_V = 原来写死在样式行里的值。
+   * **钳位在路由层做**（0..画面高度的一半），库里存的是已经钳好的值。
+   */
+  subtitleMarginV: number
   createdAt: string
   updatedAt: string
 }
@@ -76,6 +85,7 @@ export interface UserDb {
     ttsState?: TtsState; ttsDurationMs?: number | null; wordTimingsJson?: string | null
     bgmVolume?: number; subtitleMode?: 'line' | 'karaoke'
     bgmLibraryId?: string | null
+    subtitleMarginV?: number
   }): Project | null
   deleteProject (id: string): boolean
   addAsset (input: {
@@ -97,6 +107,7 @@ interface Row {
   id: string; name: string; script_text: string; aspect_ratio: string
   tts_state: string; tts_duration_ms: number | null; word_timings_json: string | null
   bgm_volume: number; subtitle_mode: string; bgm_library_id: string | null
+  subtitle_margin_v: number | null
   created_at: string; updated_at: string
 }
 const toProject = (r: Row): Project => ({
@@ -107,6 +118,7 @@ const toProject = (r: Row): Project => ({
   bgmVolume: r.bgm_volume ?? 0.1,
   bgmLibraryId: r.bgm_library_id ?? null,
   subtitleMode: (r.subtitle_mode ?? 'karaoke') as 'line' | 'karaoke',
+  subtitleMarginV: r.subtitle_margin_v ?? DEFAULT_SUBTITLE_MARGIN_V,
   createdAt: r.created_at, updatedAt: r.updated_at,
 })
 
@@ -150,6 +162,7 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
       bgm_volume REAL NOT NULL DEFAULT 0.1,
       subtitle_mode TEXT NOT NULL DEFAULT 'karaoke',
       bgm_library_id TEXT,
+      subtitle_margin_v INTEGER NOT NULL DEFAULT ${DEFAULT_SUBTITLE_MARGIN_V},
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -190,6 +203,11 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
   // CREATE TABLE IF NOT EXISTS 对已存在的 projects 表一行都不改，
   // 真实用户的库里这一列只能靠 ALTER TABLE 补上。
   addCol('bgm_library_id', 'bgm_library_id TEXT')
+  // 字幕纵向位置。同样【必须走这条增量迁移】——线上库里 projects 表早就
+  // 建好了，光改上面的 CREATE 语句，真实用户的库永远不会有这一列。
+  // NOT NULL DEFAULT 会把默认值回填进所有既有行，而这个默认值正是原来
+  // 写死在 Sub 样式行里的那个数，所以老项目的观感一动不动。
+  addCol('subtitle_margin_v', `subtitle_margin_v INTEGER NOT NULL DEFAULT ${DEFAULT_SUBTITLE_MARGIN_V}`)
 
   return {
     raw: db,
@@ -211,17 +229,18 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
         id: randomUUID(), name: projectName, scriptText: '',
         aspectRatio: '9:16', ttsState: 'none', ttsDurationMs: null,
         wordTimingsJson: null, bgmVolume: 0.1, subtitleMode: 'karaoke',
-        bgmLibraryId: null,
+        bgmLibraryId: null, subtitleMarginV: DEFAULT_SUBTITLE_MARGIN_V,
         createdAt: now, updatedAt: now,
       }
       db.prepare(
         `INSERT INTO projects
-          (id, name, script_text, aspect_ratio, tts_state, tts_duration_ms, word_timings_json, bgm_volume, subtitle_mode, bgm_library_id, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          (id, name, script_text, aspect_ratio, tts_state, tts_duration_ms, word_timings_json, bgm_volume, subtitle_mode, bgm_library_id, subtitle_margin_v, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         project.id, project.name, project.scriptText, project.aspectRatio,
         project.ttsState, project.ttsDurationMs, project.wordTimingsJson,
-        project.bgmVolume, project.subtitleMode, project.bgmLibraryId, now, now,
+        project.bgmVolume, project.subtitleMode, project.bgmLibraryId,
+        project.subtitleMarginV, now, now,
       )
       return project
     },
@@ -235,7 +254,8 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
         `UPDATE projects SET
           name = ?, script_text = ?, aspect_ratio = ?,
           tts_state = ?, tts_duration_ms = ?, word_timings_json = ?,
-          bgm_volume = ?, subtitle_mode = ?, bgm_library_id = ?, updated_at = ?
+          bgm_volume = ?, subtitle_mode = ?, bgm_library_id = ?,
+          subtitle_margin_v = ?, updated_at = ?
           WHERE id = ?`
       ).run(
         patch.name ?? row.name,
@@ -249,6 +269,11 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
         // 【必须用 !== undefined 判断】：null 是有意义的值（清空 BGM 选择），
         // 用 ?? 的话永远清不掉
         patch.bgmLibraryId !== undefined ? patch.bgmLibraryId : row.bgm_library_id,
+        // 0 是有意义的值（贴着底边），?? 会把它当成"没传"——必须判 undefined。
+        // 旧库刚迁移完这一列理论上不会是 null，仍兜一层默认，不让 NULL 落库。
+        patch.subtitleMarginV !== undefined
+          ? patch.subtitleMarginV
+          : row.subtitle_margin_v ?? DEFAULT_SUBTITLE_MARGIN_V,
         now, id,
       )
       const updated = db.prepare('SELECT * FROM projects WHERE id = ?').get(id) as Row

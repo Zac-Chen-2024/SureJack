@@ -1,12 +1,31 @@
 import { FONT_FAMILY } from '../config.js'
 import type { SubtitleLine, TextOverlay, AspectPreset } from '../types.js'
 
+/**
+ * 字幕距底边的默认像素数（Sub 样式的 MarginV）。
+ *
+ * ⚠️ **300 是历史值，不能随手改**：它原本写死在下面的 Sub 样式行里，
+ * 现在成了 projects.subtitle_margin_v 的列默认值。改这个数等于把所有
+ * 没动过滑块的老项目的字幕集体挪一下位置——线上已经有真实成片了。
+ */
+export const DEFAULT_SUBTITLE_MARGIN_V = 300
+
 export interface BuildAssOptions {
   lines: SubtitleLine[]
   overlays: TextOverlay[]
   aspect: AspectPreset
   durationMs: number
   mode: 'line' | 'karaoke'
+  /**
+   * 字幕距底边的像素数（配合 Alignment=2 底部居中）。缺省 = 历史值。
+   *
+   * 【只作用于 Sub】：免责声明也在底部，但它是固定的合规标记不是内容，
+   * 用户把字幕往上推是为了避开背景里的人脸，跟合规标记摆在哪儿无关。
+   * 见 tests/subtitles/margin-v.test.ts 里钉住这条的用例。
+   *
+   * 调用方（路由层）负责钳位——这里不再夹一次，免得两处规则各说各话。
+   */
+  subtitleMarginV?: number
 }
 
 /**
@@ -84,6 +103,7 @@ export function buildKaraoke (line: SubtitleLine): string {
  */
 export function buildAss (opts: BuildAssOptions): string {
   const { lines, overlays, aspect, durationMs, mode } = opts
+  const marginV = opts.subtitleMarginV ?? DEFAULT_SUBTITLE_MARGIN_V
 
   const dialogues = lines.map((line) => {
     const text = mode === 'karaoke'
@@ -108,7 +128,7 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Sub,${FONT_FAMILY},64,&H0000E5FF,&H00FFFFFF,&H00000000,&H00000000,1,0,0,0,100,100,0,0,1,4,0,2,60,60,300,1
+Style: Sub,${FONT_FAMILY},64,&H0000E5FF,&H00FFFFFF,&H00000000,&H00000000,1,0,0,0,100,100,0,0,1,4,0,2,60,60,${marginV},1
 Style: Title,${FONT_FAMILY},96,&H00FFFFFF,&H00FFFFFF,&H00202020,&H00000000,1,0,0,0,100,100,0,0,1,6,0,8,60,60,120,1
 Style: Disclaimer,${FONT_FAMILY},32,&H00B4B4B4,&H00FFFFFF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,2,60,60,90,1
 

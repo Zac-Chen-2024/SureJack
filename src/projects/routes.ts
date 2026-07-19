@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { readFile } from 'node:fs/promises'
 import { openUserDb } from '../db/user-db.js'
 import { adoptSrtText, overrunWarning, scriptFromSrtWords } from '../subtitles/from-srt.js'
+import { clampSubtitleMarginV } from '../subtitles/project-ass.js'
 import { probeDurationMs } from '../render/probe.js'
 import { getSession, requireAuth } from '../auth/session.js'
 import { openLibraryDb } from '../library/library-db.js'
@@ -54,12 +55,12 @@ export function registerProjectRoutes (app: FastifyInstance, deps: Deps): void {
 
   app.patch<{ Params: { id: string }; Body: {
     name?: unknown; scriptText?: unknown; aspectRatio?: unknown
-    bgmLibraryId?: unknown; bgmVolume?: unknown
+    bgmLibraryId?: unknown; bgmVolume?: unknown; subtitleMarginV?: unknown
   } }>(
     '/api/projects/:id', { preHandler: requireAuth }, async (req, reply) => {
       const patch: {
         name?: string; scriptText?: string; aspectRatio?: string
-        bgmLibraryId?: string | null; bgmVolume?: number
+        bgmLibraryId?: string | null; bgmVolume?: number; subtitleMarginV?: number
       } = {}
       if (typeof req.body?.name === 'string') patch.name = req.body.name
       if (typeof req.body?.scriptText === 'string') patch.scriptText = req.body.scriptText
@@ -83,7 +84,35 @@ export function registerProjectRoutes (app: FastifyInstance, deps: Deps): void {
       }
 
       const name = getSession(req)!
-      const updated = withUserDb(name, (db) => db.updateProject(req.params.id, patch))
+      const updated = withUserDb(name, (db) => {
+        const before = db.getProject(req.params.id)
+        if (!before) return null
+
+        /*
+         * subtitleMarginV：字幕距底边的像素数，直接进 ASS 样式行。
+         *
+         * 【必须钳到 0..画面高度的一半】——libass 对越界值照单全收，字幕会
+         * 渲染到画外，用户只看到"字幕没了"，完全不可自证。前端滑块的
+         * min/max 只是体验，接口是公开的，防线在这里。
+         *
+         * 上界跟着【这次请求之后】的画幅走：同一个 PATCH 里可以既换画幅
+         * 又调高度，按旧画幅钳会算错。
+         */
+        const aspect = patch.aspectRatio ?? before.aspectRatio
+        const raw = req.body?.subtitleMarginV
+        if (typeof raw === 'number' && Number.isFinite(raw)) {
+          patch.subtitleMarginV = clampSubtitleMarginV(raw, aspect)
+        } else if (patch.aspectRatio !== undefined) {
+          /*
+           * 只换画幅、没传高度：存着的旧值可能已经超过新画面的一半
+           * （9:16 的 900 放到 16:9 上就出画了）。用户只是换了个画幅，
+           * 字幕不该凭空消失，所以顺手把它重新钳进新范围。
+           */
+          patch.subtitleMarginV = clampSubtitleMarginV(before.subtitleMarginV, aspect)
+        }
+
+        return db.updateProject(req.params.id, patch)
+      })
       if (!updated) return reply.code(404).send({ error: '项目不存在' })
       return updated
     })
