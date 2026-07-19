@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react'
 import { useSession } from '../store/session'
 import { AmbientBackdrop } from '../components/AmbientBackdrop'
 
-/** 停留多久。够看清那句话，又不至于让人等 */
-const DWELL_MS = 1600
+/** 停留多久。够读完一句短问候就走——这一页没有信息要消化，久了就是在等 */
+const DWELL_MS = 700
 
 /**
  * 登录后的专属欢迎页。文案由后端按姓名给（config/welcome.json，不入库）。
@@ -15,7 +15,7 @@ const DWELL_MS = 1600
  * 淡出也做：直接切换会显得页面"跳"了一下，像出错。
  */
 export function WelcomePage ({ onEnter }: { onEnter: () => void }) {
-  const { welcome, name } = useSession()
+  const { welcome } = useSession()
   const [shown, setShown] = useState(false)
 
   useEffect(() => {
@@ -24,7 +24,7 @@ export function WelcomePage ({ onEnter }: { onEnter: () => void }) {
     // 停留后淡出
     const t2 = setTimeout(() => setShown(false), 60 + DWELL_MS)
     // 淡出动画走完再真的切页，否则会看到半透明状态被硬切掉
-    const t3 = setTimeout(onEnter, 60 + DWELL_MS + 500)
+    const t3 = setTimeout(onEnter, 60 + DWELL_MS + 300)
     return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3) }
   }, [onEnter])
 
@@ -33,14 +33,13 @@ export function WelcomePage ({ onEnter }: { onEnter: () => void }) {
       {/* 欢迎页也铺同一套斜纹——两个页面用同一块布，切换时才不会像换了个产品 */}
       <AmbientBackdrop />
       <div
-        className={`relative text-center transition-all duration-500 ${
+        className={`relative text-center transition-all duration-300 ${
           shown ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-2'
         }`}
       >
         <div className="text-[40px] font-semibold leading-tight tracking-[-0.02em] text-ink-50">
           {welcome ?? '欢迎回来'}
         </div>
-        <div className="mt-2 text-sm text-ink-400">{name}</div>
       </div>
     </div>
   )

@@ -1,5 +1,4 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { useSession } from '../store/session'
 import { useProjects } from '../store/projects'
 import { usePipeline } from '../store/pipeline'
 import { useSubtitles } from '../store/subtitles'
@@ -12,11 +11,10 @@ import { Preview } from '../components/Preview'
 import { SubtitleHeight } from '../components/SubtitleHeight'
 import { ExportPanel } from '../components/ExportPanel'
 import { AmbientBackdrop } from '../components/AmbientBackdrop'
-import { Button } from '../components/ui/Button'
-import { Avatar } from '../components/ui/Avatar'
+import { AccountMenu } from '../components/AccountMenu'
 import { BUILD_SHA, buildTimeLocal } from '../build-info'
 import {
-  IconChevronRight, IconChevronDown, IconLogOut, IconPlay,
+  IconChevronRight, IconChevronDown, IconPlay,
 } from '../components/ui/Icon'
 
 /**
@@ -65,7 +63,6 @@ function NeedProject () {
 }
 
 export function Workspace () {
-  const { name, logout } = useSession()
   const { load, current } = useProjects()
   useEffect(() => { load() }, [load])
   const project = current()
@@ -179,14 +176,8 @@ export function Workspace () {
           「你是谁 / 你在哪 / 你能调什么」——原来那一整栏项目列表
           干的就是前两件事，收进来之后省下 180px 给真正在用的地方。
         */}
-        <div className="shrink-0 border-t border-line p-2">
-          <div className="mb-2 flex items-center gap-2.5 px-1.5 py-1">
-            <Avatar name={name ?? ''} />
-            <span className="min-w-0 flex-1 truncate text-sm font-medium text-ink-100">{name}</span>
-          </div>
-          <Button className="w-full justify-start" onClick={logout}>
-            <IconLogOut className="size-4" /> 登出
-          </Button>
+        <div className="flex shrink-0 items-center border-t border-line p-2">
+          <AccountMenu />
         </div>
       </section>
 
