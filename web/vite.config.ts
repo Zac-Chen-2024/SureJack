@@ -1,9 +1,39 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
+import { execSync } from 'node:child_process'
+
+/**
+ * 构建时把版本戳进产物。
+ *
+ * 【为什么需要】：改完代码提交了，但忘了重新构建 + 重启服务，线上跑的
+ * 还是九小时前的版本——而界面上看不出任何差别，只有真去点那个新功能
+ * 才发现它不存在。这个坑刚踩过一次（BGM 预览播放"做完了"，线上却没有）。
+ *
+ * 有了这个戳，控制台和界面角标都能一眼看出线上到底是哪一版。
+ *
+ * git 信息取不到时（比如从 tar 包构建）退回 'unknown'，不能让构建失败——
+ * 版本号是给人看的辅助信息，不该成为发布的阻塞点。
+ */
+function buildStamp (): string {
+  try {
+    const sha = execSync('git rev-parse --short HEAD', { encoding: 'utf8' }).trim()
+    const dirty = execSync('git status --porcelain', { encoding: 'utf8' }).trim() !== ''
+    // 带 + 号表示构建时工作区还有未提交的改动——线上出现这个就说明
+    // 部署的不是任何一个提交，排查时值得警惕
+    return dirty ? `${sha}+` : sha
+  } catch {
+    return 'unknown'
+  }
+}
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+
+  define: {
+    __BUILD_SHA__: JSON.stringify(buildStamp()),
+    __BUILD_TIME__: JSON.stringify(new Date().toISOString()),
+  },
 
   // ── JASSUB（libass 的 wasm 版）的打包配置 ────────────────────────────
   // jassub 内部用 `new Worker(url, { type: 'module' })` 起 worker。Vite 默认

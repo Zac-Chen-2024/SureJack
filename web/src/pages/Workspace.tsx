@@ -9,9 +9,11 @@ import { ScriptEditor } from '../components/ScriptEditor'
 import { SubtitleList } from '../components/SubtitleList'
 import { AssetPanel } from '../components/AssetPanel'
 import { Preview } from '../components/Preview'
+import { SubtitleHeight } from '../components/SubtitleHeight'
 import { ExportPanel } from '../components/ExportPanel'
 import { Button } from '../components/ui/Button'
 import { Avatar } from '../components/ui/Avatar'
+import { BUILD_SHA, buildTimeLocal } from '../build-info'
 import {
   IconChevronLeft, IconChevronRight, IconLogOut, IconPlay,
 } from '../components/ui/Icon'
@@ -162,6 +164,23 @@ export function Workspace () {
               <Button className="w-full justify-start" onClick={logout}>
                 <IconLogOut className="size-4" /> 登出
               </Button>
+              {/*
+                版本角标。刻意做得极轻（ink-600 + 10px）——它不是功能，
+                是排查用的锚点：一眼确认线上跑的是哪一版。
+
+                【为什么要有】：改完提交了但忘记重新构建+重启，线上还是旧版，
+                而界面看不出任何差别，只有真去点那个新功能才发现它不存在。
+                这个坑刚踩过：BGM 预览播放本地做完了，线上九小时前的代码里没有。
+
+                sha 后面带 + 号表示构建时工作区有未提交改动——线上出现这个
+                就说明部署的不是任何一个提交，排查时值得警惕。
+              */}
+              <div
+                className="mt-2 px-1.5 text-[10px] tabular-nums text-ink-600"
+                title={`构建版本 ${BUILD_SHA}\n构建时间 ${buildTimeLocal()}`}
+              >
+                {BUILD_SHA} · {buildTimeLocal()}
+              </div>
             </>
           )}
         </div>
@@ -209,6 +228,13 @@ export function Workspace () {
                   seek={seekNonce > 0 ? { ms: currentMs, nonce: seekNonce } : null}
                 />
               </div>
+
+              {/*
+                字幕高度紧贴预览框下沿，且【在那条分隔描边之上】——它不是
+                "用了什么料"，而是"出来什么"的一部分。更要紧的是它得看着
+                画面调：眼睛不用离开预览就能拖，拖完字幕当场移动。
+              */}
+              <div className="mt-3"><SubtitleHeight /></div>
 
               {/* 一条描边把「出来什么」和「用了什么料」分开，但仍在同一栏内 */}
               <div className="mt-4 border-t border-line pt-4">
