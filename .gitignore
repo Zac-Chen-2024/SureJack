@@ -64,3 +64,6 @@ Material/
 
 # 全局公用素材库：8.4GB 视频素材，绝不入库
 data/library/
+
+# 子代理的临时 worktree，不入库
+.claude/worktrees/
