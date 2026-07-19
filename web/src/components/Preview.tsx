@@ -273,11 +273,12 @@ export function Preview ({ onTimeChange, seek }: Props) {
             className="absolute inset-0 size-full object-cover"
           />
         )}
-        {!videoSrc && ready && (
-          <div className="absolute inset-x-0 bottom-3 text-center text-[11px] text-ink-400">
-            还没有背景视频，先看字幕版式
-          </div>
-        )}
+        {/*
+          这里【曾经】浮着一句「还没有背景视频，先看字幕版式」，用的是
+          absolute bottom-3 —— 正好压在字幕的位置上。提示不该盖住它所提示的
+          对象：用户点开预览就是来看字幕版式的，结果被这句话挡了半行。
+          移到画框【外面】去了，见组件末尾的 tip。
+        */}
 
         {!ready && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-6 text-center">
@@ -336,6 +337,21 @@ export function Preview ({ onTimeChange, seek }: Props) {
           {fmt(currentMs)} / {fmt(durationMs)}
         </span>
       </div>
+
+      {/*
+        背景缺席的说明放在画框【外面】。原来它浮在画面底部，正好压住字幕——
+        而用户点开预览恰恰是来看字幕版式的，提示不该盖住它所提示的对象。
+
+        说法也换了口径：背景现在是导出时按三段式公式自动拼的，预览阶段
+        那条轨还不存在。所以不是「你还没传背景」（用户什么都不用传），
+        而是「预览里看不到，成片里会有」。
+      */}
+      {!videoSrc && ready && (
+        <p className="mt-2 flex items-start gap-1.5 text-[11px] leading-relaxed text-ink-400">
+          <IconPreview className="mt-px size-3 shrink-0 text-ink-600" />
+          <span>预览只放字幕和配音。背景在导出时按公式自动拼，成片里会有。</span>
+        </p>
+      )}
     </div>
   )
 }
