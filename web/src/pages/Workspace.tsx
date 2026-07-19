@@ -126,7 +126,7 @@ export function Workspace () {
    * ⚠️ 栅格按 DOM 顺序排列，所以下面两个 section 的书写顺序也必须
    * 跟着换：预览那节在前、文案那节在后。
    */
-  const cols = 'grid-cols-[20%_minmax(0,1fr)_20%]'
+  const cols = 'grid-cols-[25%_minmax(0,1fr)_25%]'
 
   return (
     /*
