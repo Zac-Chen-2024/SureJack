@@ -12,6 +12,9 @@ import { DEFAULT_SUBTITLE_MARGIN_V } from '../subtitles/ass.js'
  * - `voice`：配音音频。既可能是 Azure 生成的（src/tts/routes.ts），
  *   也可能是用户自己传上来的（自备配音）——下游一视同仁
  * - `srt`：用户自备的整句字幕文件。**不是媒体文件**，不要对它跑 ffprobe
+ * - `bgtrack`：系统按三段式公式提前拼好的无声背景轨（src/compose/prebuild.ts）。
+ *   **永不接受上传**，和 `export` 一样是产物。存成素材是为了让预览能通过
+ *   现成的 `/api/assets/<id>`（带 Range）播它，不必再开一条专用的流接口
  * - `export`：系统产出的成片，永不接受上传
  */
 /**
@@ -23,7 +26,7 @@ import { DEFAULT_SUBTITLE_MARGIN_V } from '../subtitles/ass.js'
  */
 export const DEFAULT_BGM_VOLUME = 0.15
 
-export type AssetKind = 'video' | 'bgm' | 'voice' | 'srt' | 'export'
+export type AssetKind = 'video' | 'bgm' | 'voice' | 'srt' | 'bgtrack' | 'export'
 export type JobStatus = 'queued' | 'running' | 'done' | 'error'
 export type TtsState = 'none' | 'generating' | 'ready' | 'stale' | 'error'
 

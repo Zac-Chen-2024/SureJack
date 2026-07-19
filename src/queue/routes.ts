@@ -12,6 +12,7 @@ import { getLibraryItem } from '../library/scan.js'
 import { libraryItemPath } from '../library/paths.js'
 import { hasVideoMaterials, planProjectBackground, type BackgroundPlan } from '../library/background.js'
 import { buildBackgroundTrack } from '../compose/build.js'
+import { BG_TRACK_FILE, planFingerprint, reusableBgTrack, writeStamp } from '../compose/prebuild.js'
 import type { Clip } from '../types.js'
 import type { ExportQueue } from './queue.js'
 
@@ -128,13 +129,30 @@ export function registerExportRoutes (app: FastifyInstance, deps: Deps): void {
          */
         let clip: Clip
         if (plan !== null) {
-          const trackPath = join(dir, 'bg-track.mp4')
-          await buildBackgroundTrack({
-            segments: plan.segments,
-            dataDir: libraryDataDir,
-            aspect, outPath: trackPath, workRoot: dir,
-            onProgress: (p) => onProgress(p * BG_TRACK_SHARE),
-          })
+          const trackPath = join(dir, BG_TRACK_FILE)
+          /*
+           * 【配音就绪时已经在后台拼过一条了】（src/compose/prebuild.ts）。
+           * 指纹对得上就直接用，这一整段耗时归零。
+           *
+           * ⚠️ reusableBgTrack 【永远不抛】：预拼没成功、指纹文件读不出来、
+           * 素材库被扫过导致排布变了——统统回 null，落到下面即时生成那条
+           * 老路上。用户绝不该因为一个后台优化没做成就导不出片子。
+           */
+          const fingerprint = planFingerprint(plan.segments, aspect)
+          const reuse = await reusableBgTrack(dir, fingerprint)
+          if (reuse === null) {
+            await buildBackgroundTrack({
+              segments: plan.segments,
+              dataDir: libraryDataDir,
+              aspect, outPath: trackPath, workRoot: dir,
+              onProgress: (p) => onProgress(p * BG_TRACK_SHARE),
+            })
+            // 这次现拼的也记上指纹，下次导出/预览就能直接用
+            await writeStamp(dir, fingerprint).catch(() => { /* 记不上顶多下次重拼 */ })
+          } else {
+            // 跳过了就把这一段进度直接补满，别让进度条从 30% 起跳看着像卡过
+            onProgress(BG_TRACK_SHARE * 100)
+          }
           clip = { path: trackPath, fitMode: 'cover', cropOffsetX: 0.5, cropOffsetY: 0.5 }
         } else if (uploaded !== undefined) {
           clip = { path: uploaded.path, fitMode: 'blur', cropOffsetX: 0.5, cropOffsetY: 0.5 }

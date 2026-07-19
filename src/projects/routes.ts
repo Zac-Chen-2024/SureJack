@@ -1,18 +1,16 @@
 import type { FastifyInstance } from 'fastify'
-import { readFile } from 'node:fs/promises'
+import { readFile, rm } from 'node:fs/promises'
 import { openUserDb } from '../db/user-db.js'
 import { adoptSrtText, overrunWarning, scriptFromSrtWords } from '../subtitles/from-srt.js'
 import { clampSubtitleMarginV } from '../subtitles/project-ass.js'
 import { probeDurationMs } from '../render/probe.js'
 import { getSession, requireAuth } from '../auth/session.js'
+import { assetDir } from '../assets/storage.js'
 import { openLibraryDb } from '../library/library-db.js'
 import { hasVideoMaterials, planProjectBackground } from '../library/background.js'
+import { bgTrackInfo, enqueueBgTrack, type PrebuildDeps } from '../compose/prebuild.js'
 
-interface Deps {
-  whitelist: string[]
-  /** 素材库所在的 data 根目录（全局公用，不经过 userDbDir） */
-  libraryDataDir: string
-}
+type Deps = PrebuildDeps
 
 /**
  * 项目 CRUD。
@@ -219,6 +217,16 @@ export function registerProjectRoutes (app: FastifyInstance, deps: Deps): void {
         ...(scriptText === undefined ? {} : { scriptText }),
       }))
 
+      /*
+       * 自备配音这条路和 Azure 那条一样，到这里就"配音就绪"了——
+       * 背景轨该开始拼了。不 await、失败不影响这次派生（见 tts/routes.ts）。
+       */
+      try {
+        enqueueBgTrack(deps, name, req.params.id)
+      } catch (e) {
+        req.log.warn({ err: e }, '背景轨预拼入队失败，导出时会即时生成')
+      }
+
       return {
         cueCount,
         durationMs,
@@ -229,10 +237,45 @@ export function registerProjectRoutes (app: FastifyInstance, deps: Deps): void {
       }
     })
 
+  /**
+   * 背景轨现在什么情况。**预览专用**。
+   *
+   * 四种状态各自对应界面上一句不同的话，别合并（见 web 的 bgTrackNotice）：
+   * ready 直接播；building 说"生成中"；error 要说清【导出时会重新生成】，
+   * 不能让预览的失败看起来像导出会失败——那是两回事，吓人还没必要。
+   *
+   * 这个接口【会顺手补拼】：老项目的配音是上线前生成的，没触发过预拼，
+   * 前端问一次状态就把它排上，用户不必知道内部规矩。
+   */
+  app.get<{ Params: { id: string } }>(
+    '/api/projects/:id/bg-track', { preHandler: requireAuth }, async (req, reply) => {
+      const name = getSession(req)!
+      const project = withUserDb(name, (db) => db.getProject(req.params.id))
+      if (!project) return reply.code(404).send({ error: '项目不存在' })
+      return bgTrackInfo(deps, name, req.params.id)
+    })
+
   app.delete<{ Params: { id: string } }>('/api/projects/:id', { preHandler: requireAuth }, async (req, reply) => {
     const name = getSession(req)!
     const ok = withUserDb(name, (db) => db.deleteProject(req.params.id))
     if (!ok) return reply.code(404).send({ error: '项目不存在' })
+
+    /*
+     * 【文件也要一起删】。DB 那边靠 ON DELETE CASCADE 干净了，盘上不会。
+     *
+     * 背景轨约 65MB/分钟——一条 11.5 分钟的片子光这一条轨就 750MB，
+     * 而它现在是【常驻】的（预览随时要播）。删项目不删文件的话，
+     * 磁盘只涨不落，当前可用空间大概撑三条。
+     *
+     * 目录由 assetDir 从会话身份拼出（先过白名单、projectId 只允许
+     * UUID 字符），不接受任何外部路径——删除是不可逆操作，这一点尤其
+     * 不能松。删失败只记日志：记录已经没了，那才是真相。
+     */
+    try {
+      await rm(assetDir(name, whitelist, req.params.id), { recursive: true, force: true })
+    } catch (e) {
+      req.log.warn({ err: e }, '项目文件目录没清干净，磁盘会留下残留')
+    }
     return { ok: true }
   })
 }

@@ -176,14 +176,14 @@ export function buildServer (opts: BuildOpts = {}): FastifyInstance {
       allowList: [],   // 生产可加内网白名单
     })
     registerAuthRoutes(scope, { authDb, whitelist, welcome })
-    registerProjectRoutes(scope, { whitelist, libraryDataDir })
+    registerProjectRoutes(scope, { whitelist, libraryDataDir, queue })
     registerSubtitleRoutes(scope, { whitelist })
     registerLibraryRoutes(scope, { dataDir: libraryDataDir })
 
     // 背景视频可能很大；nginx 侧已放开到 500M
     await scope.register(multipart, { limits: { fileSize: 500 * 1024 * 1024 } })
     registerAssetRoutes(scope, { whitelist })
-    registerTtsRoutes(scope, { whitelist, synthesizeLong: opts.synthesizeLong })
+    registerTtsRoutes(scope, { whitelist, libraryDataDir, queue, synthesizeLong: opts.synthesizeLong })
     registerExportRoutes(scope, { whitelist, queue, libraryDataDir })
   })
 
