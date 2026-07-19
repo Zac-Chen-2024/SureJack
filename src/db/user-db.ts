@@ -4,7 +4,16 @@ import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { userDbDir } from '../auth/whitelist.js'
 
-export type AssetKind = 'video' | 'bgm' | 'voice' | 'export'
+/**
+ * 素材种类。
+ *
+ * - `video` / `bgm`：老项目里用户传过的背景视频与背景音乐（新前端已不再产生）
+ * - `voice`：配音音频。既可能是 Azure 生成的（src/tts/routes.ts），
+ *   也可能是用户自己传上来的（自备配音）——下游一视同仁
+ * - `srt`：用户自备的整句字幕文件。**不是媒体文件**，不要对它跑 ffprobe
+ * - `export`：系统产出的成片，永不接受上传
+ */
+export type AssetKind = 'video' | 'bgm' | 'voice' | 'srt' | 'export'
 export type JobStatus = 'queued' | 'running' | 'done' | 'error'
 export type TtsState = 'none' | 'generating' | 'ready' | 'stale' | 'error'
 

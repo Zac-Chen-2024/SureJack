@@ -23,8 +23,10 @@ export function registerAssetRoutes (app: FastifyInstance, deps: Deps): void {
     '/api/projects/:id/assets', { preHandler: requireAuth }, async (req, reply) => {
       const name = getSession(req)!
       const kind = req.query.kind as AssetKind
-      if (kind !== 'video' && kind !== 'bgm') {
-        return reply.code(400).send({ error: '只能上传背景视频（kind=video）或背景音乐（kind=bgm）' })
+      if (kind !== 'video' && kind !== 'bgm' && kind !== 'voice' && kind !== 'srt') {
+        return reply.code(400).send({
+          error: '只能上传背景视频（video）、背景音乐（bgm）、配音（voice）或字幕（srt）',
+        })
       }
 
       // 早失败：项目必须存在且属于当前用户（库都是他自己的，查不到即不存在）
@@ -34,14 +36,18 @@ export function registerAssetRoutes (app: FastifyInstance, deps: Deps): void {
       const file = await req.file()
       if (!file) return reply.code(400).send({ error: '没有收到文件' })
 
+      const FORMAT_ERROR: Record<typeof kind, string> = {
+        video: '不支持的视频格式，请上传 mp4 / mov / mkv / webm',
+        bgm: '不支持的音频格式，请上传 mp3 / wav / aac / m4a / flac',
+        voice: '不支持的配音格式，请上传 mp3 / wav / m4a / aac',
+        srt: '字幕文件必须是 .srt（整句时间轴）',
+      }
       if (!isAllowedUpload(file.mimetype, file.filename, kind)) {
-        return reply.code(400).send({
-          error: kind === 'video'
-            ? '不支持的视频格式，请上传 mp4 / mov / mkv / webm'
-            : '不支持的音频格式，请上传 mp3 / wav / aac / m4a / flac',
-        })
+        return reply.code(400).send({ error: FORMAT_ERROR[kind] })
       }
 
+      // 被替换掉的旧文件路径，落库成功后再删（见下）
+      const staleFiles: string[] = []
       // 落盘用随机名 + 原扩展名，避免同名覆盖与奇怪字符
       const storedName = `${randomUUID()}${extname(file.filename).toLowerCase()}`
       const { path, size } = await saveAsset({
@@ -49,19 +55,41 @@ export function registerAssetRoutes (app: FastifyInstance, deps: Deps): void {
         fileName: storedName, stream: file.file,
       })
 
-      // 探测时长——顺便验证这是个能解码的媒体文件（坏文件当场发现，不拖到导出）
+      // 探测时长——顺便验证这是个能解码的媒体文件（坏文件当场发现，不拖到导出）。
+      // ⚠️ **srt 要跳过**：它是纯文本，不是媒体，ffprobe 一定失败，
+      // 探测的话每一个合法字幕文件都会被误判成「已损坏」。
       let durationMs: number | undefined
-      try {
-        durationMs = await probeDurationMs(path)
-      } catch {
-        await unlink(path).catch(() => {})
-        return reply.code(400).send({ error: '这个文件无法解码，可能已损坏或不是有效的媒体文件' })
+      if (kind !== 'srt') {
+        try {
+          durationMs = await probeDurationMs(path)
+        } catch {
+          await unlink(path).catch(() => {})
+          return reply.code(400).send({ error: '这个文件无法解码，可能已损坏或不是有效的媒体文件' })
+        }
       }
 
-      const asset = withUserDb(name, (db) => db.addAsset({
-        projectId: req.params.id, kind, path,
-        originalName: file.filename, size, durationMs,
-      }))
+      const asset = withUserDb(name, (db) => {
+        /*
+         * 配音和字幕【各只能有一份】，重复上传是替换而不是追加：下游
+         * （adopt-srt、导出）都是按 kind 取第一条，堆两份的话谁也说不清
+         * 用的是哪个。旧记录连同文件一起删。
+         *
+         * video / bgm 【故意不这么做】——一个项目挂多段背景素材是正常
+         * 用法，一起改成替换会把老项目的背景轨删到只剩一条。
+         */
+        if (kind === 'voice' || kind === 'srt') {
+          for (const old of db.listAssets(req.params.id, kind)) {
+            if (old.path !== path) staleFiles.push(old.path)
+            db.deleteAsset(old.id)
+          }
+        }
+        return db.addAsset({
+          projectId: req.params.id, kind, path,
+          originalName: file.filename, size, durationMs,
+        })
+      })
+      // 记录已经删了才动文件：删文件失败不该让接口报错（记录才是真相）
+      for (const stale of staleFiles) await unlink(stale).catch(() => {})
       return asset
     })
 

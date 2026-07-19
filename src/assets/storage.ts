@@ -41,6 +41,9 @@ const VIDEO_MIME = ['video/mp4', 'video/quicktime', 'video/x-matroska', 'video/w
 const VIDEO_EXT = ['.mp4', '.mov', '.mkv', '.webm', '.m4v']
 const AUDIO_MIME = ['audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/x-wav', 'audio/aac', 'audio/mp4', 'audio/flac']
 const AUDIO_EXT = ['.mp3', '.wav', '.aac', '.m4a', '.flac']
+/** 自备配音接受的扩展名。比 BGM 窄：不收 flac，配音没人用无损 */
+const VOICE_EXT = ['.mp3', '.wav', '.m4a', '.aac']
+const SRT_EXT = ['.srt']
 
 /**
  * 只看扩展名的格式白名单。
@@ -53,7 +56,9 @@ export function isAllowedExt (originalName: string, kind: AssetKind): boolean {
   const ext = extname(originalName).toLowerCase()
   if (kind === 'video') return VIDEO_EXT.includes(ext)
   if (kind === 'bgm') return AUDIO_EXT.includes(ext)
-  return false   // voice/export 是系统生成的，不接受上传
+  if (kind === 'voice') return VOICE_EXT.includes(ext)
+  if (kind === 'srt') return SRT_EXT.includes(ext)
+  return false   // export 是系统生成的，不接受上传
 }
 
 /**
@@ -61,12 +66,20 @@ export function isAllowedExt (originalName: string, kind: AssetKind): boolean {
  * 不要等到渲染时 ffmpeg 报一句看不懂的错（设计文档第 13 节）。
  *
  * MIME 和扩展名都要对——单看 MIME 可被伪造，单看扩展名同理。
+ *
+ * ⚠️ **srt 是例外，只校验扩展名**。`.srt` 没有被广泛实现的标准 MIME：
+ * Chrome 报 `application/x-subrip`，Firefox 报 `application/octet-stream`，
+ * 有些平台干脆是空串。列一份 MIME 白名单只会把正常用户挡在门外，
+ * 却挡不住任何真实威胁——文件落盘后【只被 parseSrt 当纯文本解析】，
+ * 从不执行、也不喂给 ffmpeg，MIME 声称是什么都不影响处理方式。
  */
 export function isAllowedUpload (mime: string, originalName: string, kind: AssetKind): boolean {
   if (!isAllowedExt(originalName, kind)) return false
   if (kind === 'video') return VIDEO_MIME.includes(mime)
   if (kind === 'bgm') return AUDIO_MIME.includes(mime)
-  return false   // voice/export 是系统生成的，不接受上传
+  if (kind === 'voice') return AUDIO_MIME.includes(mime)
+  if (kind === 'srt') return true   // 见上：扩展名已经把关，MIME 不可靠
+  return false   // export 是系统生成的，不接受上传
 }
 
 /**
@@ -84,6 +97,9 @@ export function playbackMimeFor (filePath: string): string {
     '.mkv': 'video/x-matroska', '.webm': 'video/webm',
     '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.aac': 'audio/aac',
     '.m4a': 'audio/mp4', '.flac': 'audio/flac',
+    // 自备字幕：用 text/plain 而不是 application/x-subrip，前端要能直接
+    // 读文本；text/plain 不会被浏览器当脚本执行，同域下也没有 XSS 面
+    '.srt': 'text/plain; charset=utf-8',
   }
   return map[ext] ?? 'application/octet-stream'
 }
