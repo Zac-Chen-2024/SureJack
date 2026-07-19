@@ -7,7 +7,9 @@
     "doc": "docs"
   },
   "scripts": {
-    "test": "vitest run",
+    "test": "npm run typecheck && vitest run",
+    "test:only": "vitest run",
+    "typecheck": "tsc --noEmit",
     "cli": "tsx src/cli.ts",
     "server": "tsx src/server.ts",
     "reset-password": "tsx src/cli/reset-password.ts"

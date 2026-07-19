@@ -16,17 +16,24 @@ describe('shiftWords', () => {
     expect(shiftWords([w('他', 120)], 0)).toEqual([w('他', 120)])
   })
 
-  /* 返回新数组：调用方可能还要用原始的段内时间轴排查问题 */
+  /*
+   * 返回新数组：调用方可能还要用原始的段内时间轴排查问题。
+   *
+   * 下面用 toMatchObject 断言整个元素，而不是 orig[0]!.offsetMs 逐字段取。
+   * tsconfig 开了 noUncheckedIndexedAccess，索引结果是 T | undefined，
+   * 逐字段取要么加 ! 断言（等于关掉这道检查），要么整体比对——后者更好，
+   * 因为它顺带把「其他字段没被动过」也一起断言了。
+   */
   it('不修改入参数组', () => {
     const orig = [w('他', 100)]
     shiftWords(orig, 5000)
-    expect(orig[0].offsetMs).toBe(100)
+    expect(orig).toEqual([w('他', 100)])
   })
 
   it('文字与标点标记原样保留', () => {
     const src: WordTiming[] = [{ text: '。', offsetMs: 0, durationMs: 100, isPunctuation: true }]
-    const out = shiftWords(src, 1000)
-    expect(out[0].text).toBe('。')
-    expect(out[0].isPunctuation).toBe(true)
+    expect(shiftWords(src, 1000)).toEqual([
+      { text: '。', offsetMs: 1000, durationMs: 100, isPunctuation: true },
+    ])
   })
 })

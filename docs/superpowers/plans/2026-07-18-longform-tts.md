@@ -383,18 +383,24 @@ describe('shiftWords', () => {
     expect(shiftWords([w('他', 120)], 0)).toEqual([w('他', 120)])
   })
 
-  /* 返回新数组：调用方可能还要用原始的段内时间轴排查问题 */
+  /*
+   * 返回新数组：调用方可能还要用原始的段内时间轴排查问题。
+   *
+   * 【注意断言写法】tsconfig 开了 noUncheckedIndexedAccess，`arr[0]` 的
+   * 类型是 T | undefined，直接 `.offsetMs` 取值过不了 tsc。整体比对数组
+   * 既避开这个问题，又顺带断言了「其他字段没被动过」。不要用 `!` 绕过。
+   */
   it('不修改入参数组', () => {
     const orig = [w('他', 100)]
     shiftWords(orig, 5000)
-    expect(orig[0].offsetMs).toBe(100)
+    expect(orig).toEqual([w('他', 100)])
   })
 
   it('文字与标点标记原样保留', () => {
     const src: WordTiming[] = [{ text: '。', offsetMs: 0, durationMs: 100, isPunctuation: true }]
-    const out = shiftWords(src, 1000)
-    expect(out[0].text).toBe('。')
-    expect(out[0].isPunctuation).toBe(true)
+    expect(shiftWords(src, 1000)).toEqual([
+      { text: '。', offsetMs: 1000, durationMs: 100, isPunctuation: true },
+    ])
   })
 })
 ```
@@ -537,7 +543,7 @@ it('短文案：单段直通，不触发拼接', async () => {
     { synthesize: fakeSynth as any, probe: (async () => 200) as any }
   )
   expect(r.segmentCount).toBe(1)
-  expect(r.words[0].offsetMs).toBe(0)
+  expect(r.words.map((x) => x.offsetMs)).toEqual([0])   // 不用 r.words[0]，见 Task 3 的说明
 })
 
 it('分段文件用完即清，不留残渣', async () => {
@@ -650,7 +656,8 @@ Expected: 全部 PASS
 - [ ] **Step 6: 跑全套测试**
 
 Run: `npm test`
-Expected: 全绿（应为 224 + 本计划新增）
+Expected: 全绿。基线随任务推进而变化——**不要照抄计划里的数字**，
+以你开工前跑出来的实际值为准，只确认「没有变少、没有失败」。
 
 - [ ] **Step 7: 提交**
 
