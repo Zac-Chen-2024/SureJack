@@ -2,7 +2,11 @@ import type { FastifyInstance } from 'fastify'
 import { requireAuth } from '../auth/session.js'
 import { openLibraryDb, type LibraryDb } from './library-db.js'
 import { BUCKETS, isBucket } from './paths.js'
-import { listBucket, scanBucket } from './scan.js'
+import { listBucket, scanBucket, getLibraryItem } from './scan.js'
+import { libraryItemPath } from './paths.js'
+import { playbackMimeFor, parseRange } from '../assets/storage.js'
+import { createReadStream } from 'node:fs'
+import { stat } from 'node:fs/promises'
 
 export interface LibraryDeps {
   /** 素材库所在的 data 根目录。库在 <dataDir>/library/，全站一份，不属于任何用户 */
@@ -62,4 +66,57 @@ export function registerLibraryRoutes (app: FastifyInstance, deps: LibraryDeps):
       db.close()
     }
   })
+
+  /**
+   * 取素材文件本身，供预览播放。
+   *
+   * 【为什么需要它】：预览要让背景音乐跟着一起响，而 BGM 来自素材库。
+   * 原来只有列表接口，前端拿得到文件名却拿不到内容。
+   *
+   * 【按 id 取而不是按 桶+文件名 取】：id 是索引表的主键，对应的路径由
+   * 数据库给出、不来自用户输入，天然没有穿越问题。若做成
+   * /api/library/:bucket/:filename，filename 就成了外部输入，
+   * 又得再加一道校验——能不引入外部输入就不引入。
+   *
+   * 带 Range：BGM 是几十 MB 的 wav，不支持区间请求的话，
+   * 用户拖一下进度条就得等整首下完。
+   */
+  app.get<{ Params: { id: string } }>(
+    '/api/library/items/:id', { preHandler: requireAuth }, async (req, reply) => {
+      const db = openLibraryDb(dataDir)
+      let item
+      try {
+        item = getLibraryItem(db, req.params.id)
+      } finally {
+        db.close()
+      }
+      if (item === null) return reply.code(404).send({ error: '素材不存在' })
+
+      const path = libraryItemPath(dataDir, item)
+      let size: number
+      try {
+        size = (await stat(path)).size
+      } catch {
+        return reply.code(404).send({ error: '素材文件已丢失' })
+      }
+
+      reply.header('Content-Type', playbackMimeFor(path))
+      reply.header('Accept-Ranges', 'bytes')
+      // 素材库是只读的公共资源，内容不会变，可以长缓存
+      reply.header('Cache-Control', 'public, max-age=31536000, immutable')
+
+      const range = parseRange(req.headers.range, size)
+      if (range === 'invalid') {
+        reply.header('Content-Range', `bytes */${size}`)
+        return reply.code(416).send({ error: '请求的字节区间超出文件范围' })
+      }
+      if (range !== null) {
+        reply.code(206)
+        reply.header('Content-Range', `bytes ${range.start}-${range.end}/${size}`)
+        reply.header('Content-Length', range.end - range.start + 1)
+        return reply.send(createReadStream(path, { start: range.start, end: range.end }))
+      }
+      reply.header('Content-Length', size)
+      return reply.send(createReadStream(path))
+    })
 }

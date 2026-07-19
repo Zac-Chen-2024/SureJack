@@ -78,6 +78,7 @@ export function Preview ({ onTimeChange, seek }: Props) {
   const assets = usePipeline((s) => s.assets)
 
   const audioRef = useRef<HTMLAudioElement>(null)
+  const bgmRef = useRef<HTMLAudioElement>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
   const stageRef = useRef<HTMLDivElement>(null)
   const jassubRef = useRef<JASSUB | null>(null)
@@ -210,6 +211,14 @@ export function Preview ({ onTimeChange, seek }: Props) {
     if (audio) audio.currentTime = clamped / 1000
     const v = videoRef.current
     if (v && v.duration > 0 && Number.isFinite(v.duration)) v.currentTime = (clamped / 1000) % v.duration
+    /*
+     * BGM 也要跟着跳，但要【取模】——它比配音短得多（库里 7.6-11.6 分钟，
+     * 而配音可以 13 分钟），成片里是循环铺满的。直接把 currentTime 设成
+     * 超出它自身时长的值，浏览器会夹到末尾、听起来就是没声音了。
+     * 取模才对应"循环播放"里真正该响的那一刻。
+     */
+    const b = bgmRef.current
+    if (b && b.duration > 0 && Number.isFinite(b.duration)) b.currentTime = (clamped / 1000) % b.duration
     setCurrentMs(clamped)
     renderAt(clamped)
     onTimeChange?.(clamped)
@@ -224,13 +233,25 @@ export function Preview ({ onTimeChange, seek }: Props) {
   const toggle = useCallback(() => {
     const audio = audioRef.current
     const v = videoRef.current
+    const b = bgmRef.current
     if (!audio) return
     if (playing) {
       audio.pause()
       v?.pause()
+      b?.pause()
       setPlaying(false)
     } else {
-      void audio.play().then(() => { void v?.play() }).catch(() => setPlaying(false))
+      /*
+       * 配音先起播，画面和 BGM 跟着它。
+       *
+       * 【BGM 起播失败不能拖垮整个预览】：它是陪衬，没有它照样能看字幕
+       * 和听配音。所以它的 play() 单独 catch 掉——放进主链里的话，
+       * 一次 BGM 解码失败会让 setPlaying(false)，用户点了播放却什么都没发生。
+       */
+      void audio.play().then(() => {
+        void v?.play()
+        void b?.play().catch(() => {})
+      }).catch(() => setPlaying(false))
       setPlaying(true)
     }
   }, [playing])
@@ -241,9 +262,23 @@ export function Preview ({ onTimeChange, seek }: Props) {
     setCurrentMs(0)
   }, [projectId])
 
+  /*
+   * BGM 音量跟着素材栏那个滑块实时变。
+   *
+   * 【要和导出用同一个值】：成片里 ffmpeg 的 volume 滤镜吃的就是
+   * project.bgmVolume，这里如果另设一个数，用户在预览里调准了、
+   * 导出却是另一个响度——"预览即成片"就破了一半（画面对了声音不对）。
+   */
+  useEffect(() => {
+    const b = bgmRef.current
+    if (b) b.volume = Math.min(1, Math.max(0, project?.bgmVolume ?? 0.1))
+  }, [project?.bgmVolume])
+
   if (!project) return null
 
   const voiceSrc = voice ? `/api/assets/${voice.id}` : null
+  // BGM 来自【素材库】不是项目素材，所以走 library 接口
+  const bgmSrc = project?.bgmLibraryId ? `/api/library/items/${project.bgmLibraryId}` : null
   const videoSrc = video ? `/api/assets/${video.id}` : null
   const ready = Boolean(voiceSrc && ass)
 
@@ -305,8 +340,27 @@ export function Preview ({ onTimeChange, seek }: Props) {
           ref={audioRef}
           src={voiceSrc}
           preload="metadata"
-          onEnded={() => { setPlaying(false); videoRef.current?.pause() }}
+          onEnded={() => {
+            setPlaying(false)
+            videoRef.current?.pause()
+            // 配音结束时 BGM 必须一起停。它自己是 loop 的，不停就会
+            // 在静止的画面上一直响下去——成片里 amix duration=first
+            // 在配音结束时截断，预览也要照做才叫"所见即所得"。
+            bgmRef.current?.pause()
+          }}
         />
+      )}
+
+      {/*
+        背景音乐。和配音同步启停、同步跳转，但【不参与计时】——
+        时间源永远是配音那一条，这是整个预览的地基（见组件头部说明）。
+
+        loop：库里 9 首是 7.6–11.6 分钟，而配音可以到 13 分钟。
+        成片里 ffmpeg 用 -stream_loop -1 循环铺满，预览用原生 loop
+        达到同样效果；两边都循环，听感才对得上。
+      */}
+      {bgmSrc && (
+        <audio ref={bgmRef} src={bgmSrc} loop preload="metadata" />
       )}
 
       <div className="mt-2 flex items-center gap-2.5">
