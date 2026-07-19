@@ -151,7 +151,17 @@ export function Preview ({ onTimeChange, seek }: Props) {
     // 下 effect 会跑两遍——复用同一个 canvas 第二次必抛 InvalidStateError，
     // 开发模式下预览直接白屏。每次给一个全新的 canvas，这个坑就不存在。
     const canvas = document.createElement('canvas')
-    canvas.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;pointer-events:none'
+    /*
+     * 【z-index 必须显式给】：canvas 和 <video> 都是 position:absolute 且
+     * 都没有 z-index 时，谁在上完全取决于 DOM 顺序——而 canvas 是在 effect
+     * 里 appendChild 的，React 重渲染插入 <video> 之后顺序就不由我们说了算，
+     * 字幕会被画面整个盖住。
+     *
+     * 这个 bug 一直存在，只是被「没有背景视频」掩盖着：以前 videoSrc 恒为
+     * null，<video> 根本不渲染，canvas 自然在最上层。背景轨预生成一上线，
+     * 画面出现了，字幕就没了。
+     */
+    canvas.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:10'
     stage.appendChild(canvas)
 
     const instance = new JASSUB({
@@ -337,7 +347,7 @@ export function Preview ({ onTimeChange, seek }: Props) {
             loop
             playsInline
             preload="metadata"
-            className="absolute inset-0 size-full object-cover"
+            className="absolute inset-0 z-0 size-full object-cover"
           />
         )}
         {/*
