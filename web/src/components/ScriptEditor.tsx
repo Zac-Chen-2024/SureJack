@@ -12,9 +12,32 @@ export function ScriptEditor () {
   const project = current()
   const [text, setText] = useState(project?.scriptText ?? '')
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // 上一次从 store 同步过来的文案，用来分辨「文案变了」和「我自己刚打的字」
+  const lastSynced = useRef(project?.scriptText ?? '')
 
   // 切换项目时，把编辑框内容换成新项目的文案
-  useEffect(() => { setText(project?.scriptText ?? '') }, [project?.id])
+  useEffect(() => {
+    setText(project?.scriptText ?? '')
+    lastSynced.current = project?.scriptText ?? ''
+  }, [project?.id])
+
+  /*
+   * 文案【也可能被界面之外的动作改掉】：自备 SRT 派生完会把字幕正文
+   * 回填进 scriptText，然后重新拉项目列表。只在切项目时同步的话，
+   * 编辑框会一直空着显示 0 字，而侧栏已经显示 31 字——更糟的是用户
+   * 这时随手打一个字，防抖保存就会把回填的整篇文案覆盖成那一个字。
+   *
+   * 所以 store 里的文案与上次同步值不同时，就把它拉进编辑框。
+   * 自己打字触发的乐观更新不会误伤：那条路径写进 store 的值和本地
+   * text 相同，setText 是无操作。
+   */
+  useEffect(() => {
+    const fromStore = project?.scriptText ?? ''
+    if (fromStore !== lastSynced.current) {
+      lastSynced.current = fromStore
+      setText(fromStore)
+    }
+  }, [project?.scriptText])
 
   function onChange (value: string) {
     setText(value)

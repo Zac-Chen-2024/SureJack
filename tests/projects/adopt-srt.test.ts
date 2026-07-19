@@ -297,6 +297,29 @@ describe('POST /api/projects/:id/adopt-srt', () => {
     expect(JSON.parse(project.wordTimingsJson)).toHaveLength(2)
   })
 
+  it('【绝不改项目名】——项目名会被烧进成片当标题，任何状态后缀都会被观众看见', async () => {
+    const a = await makeApp()
+    const cookie = await loginAs(a, '自备派生甲')
+    const id = await makeProject(a, cookie, '军师')
+    await upload(a, cookie, id, 'voice', 'a.mp3', await makeTestMp3(3), 'audio/mpeg')
+    await upload(a, cookie, id, 'srt', 'a.srt', Buffer.from(SRT, 'utf8'), 'text/plain')
+    await adopt(a, cookie, id)
+
+    const project = (await a.inject({
+      method: 'GET', url: `/api/projects/${id}`, cookies: { sj_session: cookie },
+    })).json() as { name: string }
+    // 不是「军师（自备配音）」——buildAssForProject 会把项目名写成 Title
+    // 那一行的正文，塞进名字的东西全程挂在画面顶上
+    expect(project.name).toBe('军师')
+
+    const ass = (await a.inject({
+      method: 'GET', url: `/api/projects/${id}/subtitles.ass`, cookies: { sj_session: cookie },
+    })).body
+    expect(ass).toContain('Title,,0,0,0,,军师')
+    expect(ass).not.toContain('自备')
+    expect(ass).not.toContain('SRT')
+  })
+
   it('只有空白字符的文案算空，会被回填', async () => {
     const a = await makeApp()
     const cookie = await loginAs(a, '自备派生甲')

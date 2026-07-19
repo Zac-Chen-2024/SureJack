@@ -13,6 +13,12 @@ export interface Project {
   bgmLibraryId: string | null
   /** 背景音乐相对配音的音量，0..1。后端一直在用，默认 0.1 */
   bgmVolume: number
+  /**
+   * 字幕渲染模式，同时也是**时间轴粒度的标记**：
+   * `karaoke` = AI 配音的词级时间轴，逐字扫光；
+   * `line` = 自备 SRT 的句级时间轴，整句显示（SRT 没有逐字信息）。
+   */
+  subtitleMode: 'line' | 'karaoke'
   createdAt: string
   updatedAt: string
 }
