@@ -11,23 +11,26 @@ import { AssetPanel } from '../components/AssetPanel'
 import { Preview } from '../components/Preview'
 import { SubtitleHeight } from '../components/SubtitleHeight'
 import { ExportPanel } from '../components/ExportPanel'
+import { AmbientBackdrop } from '../components/AmbientBackdrop'
 import { Button } from '../components/ui/Button'
 import { Avatar } from '../components/ui/Avatar'
 import { BUILD_SHA, buildTimeLocal } from '../build-info'
 import {
-  IconChevronLeft, IconChevronRight, IconLogOut, IconPlay,
+  IconChevronLeft, IconChevronRight, IconLogOut, IconPlay, IconSubtitles,
 } from '../components/ui/Icon'
 
 /**
  * 三栏工作台：**说什么 → 出来什么（以及用了什么料）**。
  *
- *   ┌────────┬──────────────────┬──────────────────┐
- *   │ 项目   │   9:16 预览       │  文案编辑         │
- *   │ 列表   │  ──────────────  │  ──────────────  │
- *   │(可折叠)│  背景（自动）     │  配音 + 字幕      │
- *   │        │  背景音乐 / 音量  │                  │
- *   │  240   │  minmax(380,460) │   minmax(0,1fr)  │
- *   └────────┴──────────────────┴──────────────────┘
+ *   ┌──────┬────────┬────────────┬──────────────┐
+ *   │ 项目 │ 设置    │  9:16 预览  │  文案编辑     │
+ *   │ 列表 │ 字幕高度│            │  ───────────  │
+ *   │      │ 背景    │            │  配音 + 字幕  │
+ *   │      │ 音乐/音量│  [导出]    │              │
+ *   │ 180  │  200   │ 300-380    │ minmax(0,1fr)│
+ *   └──────┴────────┴────────────┴──────────────┘
+ *
+ * 整体限宽 1200 居中，两侧留白铺细斜纹 + 随时间变化的问候语。
  *
  * ── 为什么从四栏收成三栏 ─────────────────────────────────────────────
  * 原来「素材」自成一栏，是因为那时候背景视频要用户上传。现在背景是从
@@ -138,8 +141,8 @@ export function Workspace () {
    * 跟着换：预览那节在前、文案那节在后。
    */
   const cols = collapsed
-    ? 'grid-cols-[3.5rem_minmax(440px,540px)_minmax(0,1fr)]'
-    : 'grid-cols-[180px_minmax(440px,540px)_minmax(0,1fr)]'
+    ? 'grid-cols-[3.5rem_200px_minmax(300px,380px)_minmax(0,1fr)]'
+    : 'grid-cols-[180px_200px_minmax(300px,380px)_minmax(0,1fr)]'
 
   return (
     /*
@@ -155,8 +158,9 @@ export function Workspace () {
      * 外层保留 bg-ink-950，留白区域和最深的那栏同色——不然会看出一个
      * 悬浮的方块，那不是想要的效果。
      */
-    <div className="flex h-full justify-center bg-ink-950">
-      <div className={`grid h-full w-full max-w-[1200px] border-x border-line ${cols}`}>
+    <div className="relative flex h-full justify-center bg-ink-950">
+      <AmbientBackdrop />
+      <div className={`relative grid h-full w-full max-w-[1200px] border-x border-line bg-ink-950 ${cols}`}>
       {/* ① 项目列表 —— 可折叠 */}
       <aside className="flex min-w-0 flex-col border-r border-line bg-ink-900">
         <div className="flex h-14 shrink-0 items-center justify-between border-b border-line px-3">
@@ -209,9 +213,27 @@ export function Workspace () {
         </div>
       </aside>
 
-      {/* ② 出来什么 + 用了什么料 —— 预览在上，素材在下，导出常驻底部 */}
+      {/*
+        ② 用什么料 —— 字幕高度、背景、背景音乐、音量，全部的调节项。
+        从预览栏里抽出来单独成一列：预览就该是纯预览，一屏里既有画面
+        又堆着四五个控件时，眼睛不知道该看哪儿。设置独立之后，
+        看画面和调参数是两件分开的事，各有各的地盘。
+      */}
       <section className="flex min-h-0 min-w-0 flex-col border-r border-line bg-ink-900">
-        <ColumnHeader icon={<IconPlay className="size-4 text-ink-400" />}>预览与素材</ColumnHeader>
+        <ColumnHeader icon={<IconSubtitles className="size-4 text-ink-400" />}>设置</ColumnHeader>
+        {project ? (
+          <div className="min-h-0 flex-1 overflow-y-auto p-4">
+            <SubtitleHeight />
+            <div className="mt-4 border-t border-line pt-4">
+              <AssetPanel />
+            </div>
+          </div>
+        ) : <NeedProject />}
+      </section>
+
+      {/* ③ 出来什么 —— 纯预览，导出常驻底部 */}
+      <section className="flex min-h-0 min-w-0 flex-col border-r border-line bg-ink-900">
+        <ColumnHeader icon={<IconPlay className="size-4 text-ink-400" />}>预览</ColumnHeader>
         {project ? (
           <>
             <div className="min-h-0 flex-1 overflow-y-auto p-4">
@@ -240,24 +262,13 @@ export function Workspace () {
                 />
               </div>
 
-              {/*
-                字幕高度紧贴预览框下沿，且【在那条分隔描边之上】——它不是
-                "用了什么料"，而是"出来什么"的一部分。更要紧的是它得看着
-                画面调：眼睛不用离开预览就能拖，拖完字幕当场移动。
-              */}
-              <div className="mt-3"><SubtitleHeight /></div>
-
-              {/* 一条描边把「出来什么」和「用了什么料」分开，但仍在同一栏内 */}
-              <div className="mt-4 border-t border-line pt-4">
-                <AssetPanel />
-              </div>
             </div>
             {/* 导出常驻底部，不参与上面的高度竞争——它是这一栏的落点 */}
             <div className="shrink-0 border-t border-line p-4"><ExportPanel /></div>
           </>
         ) : <NeedProject />}
       </section>
-      {/* ③ 说什么 —— 上半文案编辑，下半「配音 + 字幕」。
+      {/* ④ 说什么 —— 上半文案编辑，下半「配音 + 字幕」。
           这一列是三栏里唯一用 ink-950 的，最深的那块就是让人写字的地方。 */}
       <section className="flex min-h-0 min-w-0 flex-col bg-ink-950">
         <ColumnHeader>{project?.name ?? '选一个项目开始'}</ColumnHeader>
