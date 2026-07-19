@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { useSession } from '../store/session'
 import { useProjects } from '../store/projects'
 import { usePipeline } from '../store/pipeline'
 import { useSubtitles } from '../store/subtitles'
 import { useLibrary } from '../store/library'
-import { ProjectList } from '../components/ProjectList'
+import { ProjectSwitcher } from '../components/ProjectSwitcher'
 import { ScriptEditor } from '../components/ScriptEditor'
 import { SubtitleList } from '../components/SubtitleList'
 import { AssetPanel } from '../components/AssetPanel'
@@ -16,7 +16,7 @@ import { Button } from '../components/ui/Button'
 import { Avatar } from '../components/ui/Avatar'
 import { BUILD_SHA, buildTimeLocal } from '../build-info'
 import {
-  IconChevronLeft, IconChevronRight, IconChevronDown, IconLogOut, IconPlay, IconSubtitles,
+  IconChevronRight, IconChevronDown, IconLogOut, IconPlay,
 } from '../components/ui/Icon'
 
 /**
@@ -49,8 +49,6 @@ import {
  * 一条 6% 白的描边就足够"接住光"，画粗线反而把三栏切成三个不相干的窗口。
  */
 
-/** 宽度低于这个值，项目列表自动收起——切项目的频率远低于编辑，先让出这 180px */
-const NARROW = '(max-width: 1400px)'
 
 /** 各列共用的列头，高度对齐成一条横向的头部带 */
 function ColumnHeader ({ icon, children }: { icon?: ReactNode; children: ReactNode }) {
@@ -97,8 +95,6 @@ export function Workspace () {
     void loadSubtitles(project.id)
   }, [project?.id, project?.ttsState, loadSubtitles, resetSubtitles])
 
-  // 初值直接问 matchMedia，避免"先展开再抽搐着收起"的首帧闪烁
-  const [collapsed, setCollapsed] = useState(() => window.matchMedia(NARROW).matches)
 
   /*
    * 文案区展开/收起，**默认折叠**。
@@ -109,27 +105,8 @@ export function Workspace () {
    */
   const [scriptOpen, setScriptOpen] = useState(false)
 
-  /*
-   * 用户一旦亲手点过这个按钮，窗口再怎么变宽变窄都不再自动收放。
-   * 自动行为覆盖用户的显式操作是很烦人的体验：他明明是特意展开来找项目的，
-   * 结果拖一下窗口又被收回去了。用 ref 而不是 state——它只用来在事件回调里
-   * 做判断，不需要触发重渲染。
-   */
-  const userDecided = useRef(false)
 
-  useEffect(() => {
-    const mq = window.matchMedia(NARROW)
-    const onChange = (e: MediaQueryListEvent) => {
-      if (!userDecided.current) setCollapsed(e.matches)
-    }
-    mq.addEventListener('change', onChange)
-    return () => mq.removeEventListener('change', onChange)
-  }, [])
 
-  const toggle = useCallback(() => {
-    userDecided.current = true
-    setCollapsed((c) => !c)
-  }, [])
 
   /*
    * 栅格。两个数字定死、一个 1fr 吸收余量：
@@ -149,9 +126,7 @@ export function Workspace () {
    * ⚠️ 栅格按 DOM 顺序排列，所以下面两个 section 的书写顺序也必须
    * 跟着换：预览那节在前、文案那节在后。
    */
-  const cols = collapsed
-    ? 'grid-cols-[3.5rem_200px_minmax(300px,380px)_minmax(0,1fr)]'
-    : 'grid-cols-[180px_200px_minmax(300px,380px)_minmax(0,1fr)]'
+  const cols = 'grid-cols-[240px_minmax(320px,400px)_minmax(0,1fr)]'
 
   return (
     /*
@@ -170,57 +145,6 @@ export function Workspace () {
     <div className="relative flex h-full justify-center bg-ink-950">
       <AmbientBackdrop />
       <div className={`relative grid h-full w-full max-w-[1200px] border-x border-line bg-ink-950 ${cols}`}>
-      {/* ① 项目列表 —— 可折叠 */}
-      <aside className="flex min-w-0 flex-col border-r border-line bg-ink-900">
-        <div className="flex h-14 shrink-0 items-center justify-between border-b border-line px-3">
-          {!collapsed && <span className="text-sm font-semibold tracking-[-0.02em] text-ink-50">SureJack</span>}
-          <button
-            onClick={toggle}
-            className="flex items-center justify-center rounded-lg p-1.5 text-ink-400 hover:bg-ink-800 hover:text-ink-100"
-            title={collapsed ? '展开项目列表' : '收起项目列表'}
-          >
-            {collapsed ? <IconChevronRight className="size-4" /> : <IconChevronLeft className="size-4" />}
-          </button>
-        </div>
-        <div className="min-h-0 flex-1 overflow-hidden">
-          {!collapsed && <ProjectList />}
-        </div>
-        {/* 折叠时只留头像——收起状态下它是唯一还能表明「你是谁」的元素 */}
-        <div className="shrink-0 border-t border-line p-2">
-          {collapsed ? (
-            <div className="flex justify-center py-1">
-              <Avatar name={name ?? ''} />
-            </div>
-          ) : (
-            <>
-              <div className="mb-2 flex items-center gap-2.5 px-1.5 py-1">
-                <Avatar name={name ?? ''} />
-                <span className="min-w-0 flex-1 truncate text-sm font-medium text-ink-100">{name}</span>
-              </div>
-              <Button className="w-full justify-start" onClick={logout}>
-                <IconLogOut className="size-4" /> 登出
-              </Button>
-              {/*
-                版本角标。刻意做得极轻（ink-600 + 10px）——它不是功能，
-                是排查用的锚点：一眼确认线上跑的是哪一版。
-
-                【为什么要有】：改完提交了但忘记重新构建+重启，线上还是旧版，
-                而界面看不出任何差别，只有真去点那个新功能才发现它不存在。
-                这个坑刚踩过：BGM 预览播放本地做完了，线上九小时前的代码里没有。
-
-                sha 后面带 + 号表示构建时工作区有未提交改动——线上出现这个
-                就说明部署的不是任何一个提交，排查时值得警惕。
-              */}
-              <div
-                className="mt-2 px-1.5 text-[10px] tabular-nums text-ink-600"
-                title={`构建版本 ${BUILD_SHA}\n构建时间 ${buildTimeLocal()}`}
-              >
-                {BUILD_SHA} · {buildTimeLocal()}
-              </div>
-            </>
-          )}
-        </div>
-      </aside>
 
       {/*
         ② 用什么料 —— 字幕高度、背景、背景音乐、音量，全部的调节项。
@@ -229,7 +153,8 @@ export function Workspace () {
         看画面和调参数是两件分开的事，各有各的地盘。
       */}
       <section className="flex min-h-0 min-w-0 flex-col border-r border-line bg-ink-900">
-        <ColumnHeader icon={<IconSubtitles className="size-4 text-ink-400" />}>设置</ColumnHeader>
+        {/* 题头就是项目切换器：当前项目名 + 点击向下展开列表 */}
+        <ProjectSwitcher />
         {project ? (
           <div className="min-h-0 flex-1 overflow-y-auto p-4">
             <SubtitleHeight />
@@ -237,7 +162,27 @@ export function Workspace () {
               <AssetPanel />
             </div>
           </div>
-        ) : <NeedProject />}
+        ) : <div className="min-h-0 flex-1"><NeedProject /></div>}
+        {/*
+          账号常驻这一栏底部。它和项目切换器一头一尾，把这栏framed成
+          「你是谁 / 你在哪 / 你能调什么」——原来那一整栏项目列表
+          干的就是前两件事，收进来之后省下 180px 给真正在用的地方。
+        */}
+        <div className="shrink-0 border-t border-line p-2">
+          <div className="mb-2 flex items-center gap-2.5 px-1.5 py-1">
+            <Avatar name={name ?? ''} />
+            <span className="min-w-0 flex-1 truncate text-sm font-medium text-ink-100">{name}</span>
+          </div>
+          <Button className="w-full justify-start" onClick={logout}>
+            <IconLogOut className="size-4" /> 登出
+          </Button>
+          <div
+            className="mt-2 px-1.5 text-[10px] tabular-nums text-ink-600"
+            title={`构建版本 ${BUILD_SHA}\n构建时间 ${buildTimeLocal()}`}
+          >
+            {BUILD_SHA} · {buildTimeLocal()}
+          </div>
+        </div>
       </section>
 
       {/* ③ 出来什么 —— 纯预览，导出常驻底部 */}
