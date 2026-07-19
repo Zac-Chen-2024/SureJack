@@ -1,6 +1,43 @@
 import { create } from 'zustand'
 import { api } from '../api/client'
 
+/**
+ * 字幕距底边的默认像素数。**必须和后端 src/subtitles/ass.ts 的
+ * DEFAULT_SUBTITLE_MARGIN_V 相等**——web/ 是独立的 TS 工程，跨目录
+ * import 不了后端代码，只能各写一份；tests/web/projects-store.test.ts
+ * 里有一条测试把两边钉在一起。
+ */
+export const DEFAULT_SUBTITLE_MARGIN_V = 300
+
+/** 和后端 ASPECT_PRESETS 一致。认不出的画幅回落竖屏，与 aspectOf 同规则 */
+const ASPECT_HEIGHT: Record<string, number> = {
+  '9:16': 1920, '4:5': 1350, '1:1': 1080, '16:9': 1080,
+}
+
+/**
+ * 滑块上界：画面高度的一半，与后端 clampSubtitleMarginV 同一条规则。
+ *
+ * ⚠️ 这里算出来的只是【体验】——真正的防线在路由层。滑块给不出越界值，
+ * 但接口是公开的，所以后端那一道不能省，这一道也不能自作主张放宽。
+ */
+export function maxSubtitleMarginV (aspectRatio: string): number {
+  return Math.floor((ASPECT_HEIGHT[aspectRatio] ?? 1920) / 2)
+}
+
+/**
+ * 把像素值说成人话。
+ *
+ * **故意不显示像素数**：用户关心的是"字幕压不压脸"，不是 120 还是 160。
+ * 报一个数字只会让人以为那个数本身有意义，然后开始纠结它。
+ */
+export function subtitleHeightLabel (value: number, max: number): string {
+  const ratio = max > 0 ? value / max : 0
+  if (ratio < 0.2) return '贴底'
+  if (ratio < 0.45) return '偏下'
+  if (ratio < 0.7) return '居中偏下'
+  return '偏上'
+}
+
 export interface Project {
   id: string
   name: string
@@ -19,6 +56,11 @@ export interface Project {
    * `line` = 自备 SRT 的句级时间轴，整句显示（SRT 没有逐字信息）。
    */
   subtitleMode: 'line' | 'karaoke'
+  /**
+   * 字幕距底边的像素数（ASS 的 MarginV）。改它 → 后端重算 ASS →
+   * JASSUB 预览和 ffmpeg 成片一起变，两边读的是同一份文件。
+   */
+  subtitleMarginV: number
   createdAt: string
   updatedAt: string
 }
@@ -33,11 +75,13 @@ interface ProjectsState {
   select: (id: string) => void
   updateScript: (text: string) => Promise<void>
   /** 素材选择类字段的通用补丁（乐观更新）。setBgm / setBgmVolume 的共用底座 */
-  patchProject: (patch: Partial<Pick<Project, 'bgmLibraryId' | 'bgmVolume'>>) => Promise<void>
+  patchProject: (patch: Partial<Pick<Project, 'bgmLibraryId' | 'bgmVolume' | 'subtitleMarginV'>>) => Promise<void>
   /** 选/取消选背景音乐。null 表示不要 BGM */
   setBgm: (bgmLibraryId: string | null) => Promise<void>
   /** 调背景音乐音量。调用方负责节流——见 AssetPanel 的滑块 */
   setBgmVolume: (volume: number) => Promise<void>
+  /** 调字幕高度。调用方负责防抖——见 SubtitleHeight 的滑块 */
+  setSubtitleMarginV: (marginV: number) => Promise<void>
   remove: (id: string) => Promise<void>
   current: () => Project | null
 }
@@ -83,7 +127,7 @@ export const useProjects = create<ProjectsState>((set, get) => ({
    * 点一下 BGM 要立刻选中、拖滑块要跟手，不能等一个来回。
    * 后端回来的整条项目再覆盖一次，以它为准。
    */
-  async patchProject (patch: Partial<Pick<Project, 'bgmLibraryId' | 'bgmVolume'>>) {
+  async patchProject (patch: Partial<Pick<Project, 'bgmLibraryId' | 'bgmVolume' | 'subtitleMarginV'>>) {
     const id = get().currentId
     if (!id) return
     set((s) => ({ items: s.items.map((p) => (p.id === id ? { ...p, ...patch } : p)) }))
@@ -96,6 +140,15 @@ export const useProjects = create<ProjectsState>((set, get) => ({
   async setBgmVolume (volume) {
     // 钳到 0..1：滑块本身给不出越界值，但 store 是公共入口，脏值不该落库
     await get().patchProject({ bgmVolume: Math.min(1, Math.max(0, volume)) })
+  },
+
+  /**
+   * 后端会按画幅把值钳到 0..高度的一半，并把钳好的整条项目回给我们——
+   * 乐观更新那一步只是为了跟手，最终以后端为准（updatedAt 也在那时候
+   * 变，Preview 靠它重新拉 subtitles.ass，字幕就跟着移动了）。
+   */
+  async setSubtitleMarginV (marginV) {
+    await get().patchProject({ subtitleMarginV: Math.max(0, Math.round(marginV)) })
   },
 
   async remove (id) {
