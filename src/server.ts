@@ -106,7 +106,18 @@ export function attachErrorHandler (app: FastifyInstance): void {
     request.log.error(error)
     const status = error.statusCode ?? 500
     if (status >= 500) {
-      reply.code(500).send({ error: '服务器内部错误' })
+      /*
+       * 5xx 一律不回真实原因——错误里常带文件路径、SQL、栈，泄露出去
+       * 既帮不了用户又是攻击面。
+       *
+       * 但【只回一句"服务器内部错误"是不够的】：调背景排布那个 500 时，
+       * 我为了看真实堆栈把服务重启加日志跑了两遍才定位到「配音时长是小数」。
+       * 客户端手里没有任何能跟服务端日志对上的东西。
+       *
+       * 所以带上 reqId。它已经在每条日志里了（Fastify 自动加），
+       * 用户报错时把这串给我，就能直接 grep 出那一条，不用复现。
+       */
+      reply.code(500).send({ error: '服务器内部错误', reqId: request.id })
     } else {
       reply.code(status).send({ error: error.message })
     }
