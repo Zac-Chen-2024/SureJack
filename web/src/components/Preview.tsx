@@ -10,6 +10,7 @@ import jassubModernWasmUrl from 'jassub/dist/wasm/jassub-worker-modern.wasm?url'
 import { useProjects } from '../store/projects'
 import { usePipeline } from '../store/pipeline'
 import { IconPlay, IconPause, IconPreview } from './ui/Icon'
+import { DEFAULT_BGM_VOLUME } from '../constants'
 
 /**
  * 字幕字体。**必须精确是这个族名**，不是 'Noto Sans SC'（那个族名根本不存在，
@@ -271,7 +272,7 @@ export function Preview ({ onTimeChange, seek }: Props) {
    */
   useEffect(() => {
     const b = bgmRef.current
-    if (b) b.volume = Math.min(1, Math.max(0, project?.bgmVolume ?? 0.1))
+    if (b) b.volume = Math.min(1, Math.max(0, project?.bgmVolume ?? DEFAULT_BGM_VOLUME))
   }, [project?.bgmVolume])
 
   if (!project) return null

@@ -79,3 +79,28 @@ describe('projects.bgm_library_id —— 增量迁移', () => {
     expect(db.getProject(p.id)?.bgmLibraryId).toBe(null)
   })
 })
+
+/*
+ * 改默认音量【绝不能动已有项目】。
+ *
+ * 默认从 10% 调到 15% 时，如果实现方式是"迁移里 UPDATE 一遍"，
+ * 用户手工调过的值会被静默改回去——那是不可逆的偏好丢失。
+ * ALTER TABLE 的 DEFAULT 只作用于新插入的行，这条测试钉住这个语义。
+ */
+describe('默认音量变更不影响已有项目', () => {
+  it('已存的 bgm_volume 不被迁移覆盖', () => {
+    const db = open()
+    const p = db.createProject('老项目')
+    // 模拟用户手工调过音量
+    db.raw.prepare('UPDATE projects SET bgm_volume = 0.42 WHERE id = ?').run(p.id)
+
+    // 重新打开：会再跑一遍建表和 addCol 迁移
+    const again = open()
+    expect(again.getProject(p.id)?.bgmVolume).toBe(0.42)
+  })
+
+  it('新建的项目用新默认值 15%', () => {
+    const db = open()
+    expect(db.createProject('新项目').bgmVolume).toBe(0.15)
+  })
+})

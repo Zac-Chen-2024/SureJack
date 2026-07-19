@@ -14,6 +14,15 @@ import { DEFAULT_SUBTITLE_MARGIN_V } from '../subtitles/ass.js'
  * - `srt`：用户自备的整句字幕文件。**不是媒体文件**，不要对它跑 ffprobe
  * - `export`：系统产出的成片，永不接受上传
  */
+/**
+ * 背景音乐的默认音量（相对配音）。
+ *
+ * 15%：配音必须始终压过 BGM，营销号的信息全在人声里。10% 试下来偏轻，
+ * 20% 开始抢话。这个值只作用于【新建】项目——已有项目存的是自己的值，
+ * ALTER TABLE 的 DEFAULT 只影响新行，不会回头改动任何一条既有数据。
+ */
+export const DEFAULT_BGM_VOLUME = 0.15
+
 export type AssetKind = 'video' | 'bgm' | 'voice' | 'srt' | 'export'
 export type JobStatus = 'queued' | 'running' | 'done' | 'error'
 export type TtsState = 'none' | 'generating' | 'ready' | 'stale' | 'error'
@@ -115,7 +124,7 @@ const toProject = (r: Row): Project => ({
   ttsState: (r.tts_state ?? 'none') as TtsState,
   ttsDurationMs: r.tts_duration_ms,
   wordTimingsJson: r.word_timings_json,
-  bgmVolume: r.bgm_volume ?? 0.1,
+  bgmVolume: r.bgm_volume ?? DEFAULT_BGM_VOLUME,
   bgmLibraryId: r.bgm_library_id ?? null,
   subtitleMode: (r.subtitle_mode ?? 'karaoke') as 'line' | 'karaoke',
   subtitleMarginV: r.subtitle_margin_v ?? DEFAULT_SUBTITLE_MARGIN_V,
@@ -159,7 +168,7 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
       tts_state TEXT NOT NULL DEFAULT 'none',
       tts_duration_ms INTEGER,
       word_timings_json TEXT,
-      bgm_volume REAL NOT NULL DEFAULT 0.1,
+      bgm_volume REAL NOT NULL DEFAULT 0.15,
       subtitle_mode TEXT NOT NULL DEFAULT 'karaoke',
       bgm_library_id TEXT,
       subtitle_margin_v INTEGER NOT NULL DEFAULT ${DEFAULT_SUBTITLE_MARGIN_V},
@@ -197,7 +206,7 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
   addCol('tts_state', "tts_state TEXT NOT NULL DEFAULT 'none'")
   addCol('tts_duration_ms', 'tts_duration_ms INTEGER')
   addCol('word_timings_json', 'word_timings_json TEXT')
-  addCol('bgm_volume', 'bgm_volume REAL NOT NULL DEFAULT 0.1')
+  addCol('bgm_volume', 'bgm_volume REAL NOT NULL DEFAULT 0.15')
   addCol('subtitle_mode', "subtitle_mode TEXT NOT NULL DEFAULT 'karaoke'")
   // 素材库驱动的 BGM 选择。【必须走这条增量迁移】：上面的
   // CREATE TABLE IF NOT EXISTS 对已存在的 projects 表一行都不改，
@@ -228,7 +237,7 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
       const project: Project = {
         id: randomUUID(), name: projectName, scriptText: '',
         aspectRatio: '9:16', ttsState: 'none', ttsDurationMs: null,
-        wordTimingsJson: null, bgmVolume: 0.1, subtitleMode: 'karaoke',
+        wordTimingsJson: null, bgmVolume: DEFAULT_BGM_VOLUME, subtitleMode: 'karaoke',
         bgmLibraryId: null, subtitleMarginV: DEFAULT_SUBTITLE_MARGIN_V,
         createdAt: now, updatedAt: now,
       }

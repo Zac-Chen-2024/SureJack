@@ -123,13 +123,13 @@ describe('PATCH /api/projects/:id —— bgmLibraryId', () => {
  * 这几条测试守的就是那条刚接上的通道。
  */
 describe('PATCH /api/projects/:id —— bgmVolume', () => {
-  it('能改音量，默认值是 0.1', async () => {
+  it('能改音量，默认值是 15%', async () => {
     const a = await makeApp()
     const cookie = await loginAs(a, '测试选曲甲')
     const id = await newProject(a, cookie)
 
     const before = await a.inject({ method: 'GET', url: `/api/projects/${id}`, cookies: { sj_session: cookie } })
-    expect(before.json().bgmVolume).toBe(0.1)
+    expect(before.json().bgmVolume).toBe(0.15)
 
     const res = await a.inject({
       method: 'PATCH', url: `/api/projects/${id}`,

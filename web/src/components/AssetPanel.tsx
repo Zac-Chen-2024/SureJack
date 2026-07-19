@@ -4,6 +4,7 @@ import {
   useLibrary, parseBgmName, groupPhases, segmentShares, describePlan, formatClock,
 } from '../store/library'
 import { IconFilm, IconMusic, IconVolume, IconLoader } from './ui/Icon'
+import { DEFAULT_BGM_VOLUME } from '../constants'
 
 /**
  * 素材区。**这里没有上传。**
@@ -205,7 +206,7 @@ function VolumeSlider () {
   const project = useProjects((s) => s.current())
   const setBgmVolume = useProjects((s) => s.setBgmVolume)
 
-  const stored = project?.bgmVolume ?? 0.1
+  const stored = project?.bgmVolume ?? DEFAULT_BGM_VOLUME
   const [value, setValue] = useState(stored)
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
