@@ -70,7 +70,23 @@ export function buildArgs (job: RenderJob): string[] {
     '-progress', 'pipe:1',
     '-stream_loop', '-1', '-i', clip.path,
     '-i', job.voicePath,
-    ...(hasBgm ? ['-i', job.bgmPath!] : []),
+    /*
+     * BGM 也要 -stream_loop -1 循环。
+     *
+     * 素材库里 9 首 BGM 是 7.6–11.6 分钟，而营销号长文案能到 13 分钟以上。
+     * 不循环的话，BGM 放完就静音——用最短的那首会有 5 分多钟全程没有音乐，
+     * 而成片时长看着完全正常（静音也算时长），只有真听才发现。
+     *
+     * 【必须紧挨着 BGM 的 -i】：-stream_loop 是输入选项，只作用于它后面
+     * 那一个 -i。放到别处会去循环配音或背景视频。
+     *
+     * 用 -stream_loop 而不是 aloop 滤镜：后者按帧工作、把整段音频读进内存，
+     * 在 100MB 的 wav 上代价明显。
+     *
+     * 收尾靠 buildAudioFilter 里的 amix duration=first —— 混音在配音结束时截断，
+     * 所以无限循环的 BGM 不会让成片变长。
+     */
+    ...(hasBgm ? ['-stream_loop', '-1', '-i', job.bgmPath!] : []),
     '-filter_complex', filters,
     '-map', '[v]', '-map', '[aout]',
     '-t', durationSec,
