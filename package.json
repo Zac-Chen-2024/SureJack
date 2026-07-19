@@ -9,7 +9,7 @@
   "scripts": {
     "test": "npm run typecheck && vitest run",
     "test:only": "vitest run",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc -b web",
     "cli": "tsx src/cli.ts",
     "server": "tsx src/server.ts",
     "reset-password": "tsx src/cli/reset-password.ts"
