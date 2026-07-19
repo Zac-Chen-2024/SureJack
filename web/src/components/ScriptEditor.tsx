@@ -32,10 +32,19 @@ export function ScriptEditor () {
   const charCount = [...text].length
 
   return (
-    <div className="flex h-full flex-col items-center">
-      {/* 限宽居中成一栏——正文行宽有上限才好读（约 30-40 字/行），
-          宽屏下两侧留白是有意为之，不是空间浪费 */}
-      <div className="flex w-full max-w-[720px] items-baseline justify-between pb-3">
+    <div className="flex h-full flex-col">
+      {/*
+        【不限宽】。原来这里卡了 720px 居中，理由是"正文行宽有上限才好读"。
+        那个理由在有框的时候成立：720 定义的是那张纸的宽度，两侧留白因为
+        有边界所以读得出是有意的。框去掉之后，同样的留白就没了来由——
+        文字浮在一栏正中间，看着像布局出错而不像刻意排版。
+
+        代价是超宽屏上行会偏长。但这一栏本来就是 minmax(0,1fr)：
+        1440 宽、项目列表展开时它只有约 740px，限不限宽根本没区别；
+        真正会拉长的只有 2560 那种屏幕。用得着的时候不别扭，
+        比在常用尺寸上凭空留两条白边更重要。
+      */}
+      <div className="flex w-full items-baseline justify-between pb-3">
         <div className="tabular-nums text-xs text-ink-400">
           {charCount} 字 · 约 {Math.round(charCount * 0.196)} 秒配音
         </div>
@@ -60,7 +69,7 @@ export function ScriptEditor () {
         value={text}
         onChange={(e) => onChange(e.target.value)}
         placeholder="把文案粘贴或写在这里…"
-        className="w-full max-w-[720px] flex-1 resize-none border-0 bg-transparent px-1 text-[15px] leading-[1.9] text-ink-100 outline-none placeholder:text-ink-400 focus:outline-none focus:ring-0"
+        className="w-full flex-1 resize-none border-0 bg-transparent text-[15px] leading-[1.9] text-ink-100 outline-none placeholder:text-ink-400 focus:outline-none focus:ring-0"
       />
     </div>
   )
