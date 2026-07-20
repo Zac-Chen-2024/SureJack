@@ -108,6 +108,8 @@ export interface UserDb {
     size: number; durationMs?: number; width?: number; height?: number
   }): Asset
   listAssets (projectId: string, kind?: AssetKind): Asset[]
+  /** 就地改一条素材。⚠️ 用它而不是删了重插——见 prebuild.ts 对 id 稳定性的说明 */
+  updateAsset (id: string, patch: { path?: string; durationMs?: number | null }): Asset | null
   getAsset (id: string): Asset | null
   deleteAsset (id: string): boolean
   createJob (projectId: string): ExportJob
@@ -322,6 +324,17 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
         asset.id, asset.projectId, asset.kind, asset.path, asset.originalName,
         asset.size, asset.durationMs, asset.width, asset.height, now)
       return asset
+    },
+
+    updateAsset (id, patch) {
+      const row = db.prepare('SELECT * FROM assets WHERE id = ?').get(id) as Record<string, unknown> | undefined
+      if (!row) return null
+      db.prepare('UPDATE assets SET path = ?, duration_ms = ? WHERE id = ?').run(
+        patch.path ?? row['path'],
+        patch.durationMs !== undefined ? patch.durationMs : row['duration_ms'],
+        id,
+      )
+      return toAsset(db.prepare('SELECT * FROM assets WHERE id = ?').get(id) as Record<string, unknown>)
     },
 
     listAssets (projectId, kind) {

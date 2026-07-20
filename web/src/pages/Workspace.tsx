@@ -164,7 +164,8 @@ export function Workspace () {
      * 1200 及以下则自动铺满，小屏不会被凭空挤掉宽度。
      *
      * 外层保留 bg-ink-950，留白区域和最深的那栏同色——不然会看出一个
-     * 悬浮的方块，那不是想要的效果。
+     * 悬浮的方块，那不是想要的效果。换配色时它跟着一起变，
+     * 整屏是一块布。
      */
     <div className="relative flex h-full justify-center bg-ink-950">
       <AmbientBackdrop />

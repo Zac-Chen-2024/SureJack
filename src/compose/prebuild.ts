@@ -138,14 +138,30 @@ function registerTrackAsset (
   const db = openUserDb(userName, deps.whitelist)
   try {
     /*
-     * 旧记录先清掉。**只删记录不删文件**——新轨就写在同一个路径上，
-     * 删文件等于把刚拼好的东西删了。
+     * ⚠️【已有记录就地更新，绝不删了重插】。
+     *
+     * 这条轨的 id 会被别人【拿在手里】：前端的 <video src="/api/assets/<id>">
+     * 一旦拿到就一直用着。删了重插会换一个新 id，于是那个正在播的 URL
+     * 当场 404——而重新登记是后台自己发生的，用户什么都没做，
+     * 画面就黑了。
+     *
+     * 同一条轨永远写在同一个路径（BG_TRACK_FILE），本来就该是同一条记录。
+     * 之前用删+插的写法还让测试随机 404：先读到 id，再取素材，
+     * 中间只要有另一条预拼作业完成，手里那个 id 就没了。
+     *
+     * 多于一条是不该出现的历史脏数据，留第一条、其余清掉。
      */
-    for (const a of db.listAssets(projectId, 'bgtrack')) db.deleteAsset(a.id)
-    db.addAsset({
-      projectId, kind: 'bgtrack', path,
-      originalName: BG_TRACK_FILE, size: 0, durationMs,
-    })
+    const [existing, ...extra] = db.listAssets(projectId, 'bgtrack')
+    for (const a of extra) db.deleteAsset(a.id)
+
+    if (existing !== undefined) {
+      db.updateAsset(existing.id, { path, durationMs })
+    } else {
+      db.addAsset({
+        projectId, kind: 'bgtrack', path,
+        originalName: BG_TRACK_FILE, size: 0, durationMs,
+      })
+    }
   } finally {
     db.close()
   }

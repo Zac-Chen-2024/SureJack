@@ -206,7 +206,15 @@ describe('背景轨预拼 —— 配音一就绪就在后台拼好', () => {
     const res = await a.inject({
       method: 'GET', url: `/api/assets/${info.assetId ?? ''}`, cookies: { sj_session: cookie },
     })
-    expect(res.statusCode).toBe(200)
+    /*
+     * 【失败时要说清是哪种 404】。这里有两个完全不同的原因：
+     * 「素材不存在」（记录被换掉了，id 不稳定）和「素材文件已丢失」
+     * （记录在但盘上没文件）。只断言状态码的话，两者长得一模一样——
+     * 这条测试随机红过五次，每次都因为看不出是哪个而只能猜"大概是抢CPU"。
+     */
+    if (res.statusCode !== 200) {
+      throw new Error(`取背景轨素材失败：${res.statusCode} ${res.body}`)
+    }
     expect(res.headers['content-type']).toContain('video/mp4')
     // Range 必须支持，否则浏览器拖进度条要把整条轨下完
     expect(res.headers['accept-ranges']).toBe('bytes')
@@ -399,4 +407,39 @@ describe('磁盘账 —— 背景轨常驻，但删项目时一并清掉', () =>
     expect(res.statusCode).toBe(200)
     await expect(stat(dir)).rejects.toThrow()
   }, 300_000)
+})
+
+describe('背景轨素材的 id 必须稳定', () => {
+  /*
+   * 这条轨的 id 会被【拿在手里】：前端的 <video src="/api/assets/<id>">
+   * 一旦拿到就一直用着。以前重新登记是「删了重插」，于是每次重拼都换一个
+   * 新 id，正在播的那个 URL 当场 404——而重新登记是后台自己发生的，
+   * 用户什么都没做画面就黑了。
+   *
+   * 同一个 bug 也让上面那条端到端测试随机红：先读到 id，再取素材，
+   * 中间只要有另一条预拼作业完成，手里那个 id 就没了。
+   */
+  it('重新登记同一条轨，id 不能变', () => {
+    const db = openUserDb('测试预拼甲', LIST)
+    try {
+      const project = db.createProject('id稳定性')
+      const path = '/tmp/bg-track.mp4'
+
+      db.addAsset({
+        projectId: project.id, kind: 'bgtrack', path,
+        originalName: 'bg-track.mp4', size: 0, durationMs: 3000,
+      })
+      const first = db.listAssets(project.id, 'bgtrack')[0]!
+
+      // 就地更新（registerTrackAsset 现在走的路）
+      db.updateAsset(first.id, { path, durationMs: 5000 })
+      const after = db.listAssets(project.id, 'bgtrack')
+
+      expect(after).toHaveLength(1)
+      expect(after[0]!.id).toBe(first.id)      // ← 核心：id 没变
+      expect(after[0]!.durationMs).toBe(5000)  // 内容确实更新了
+    } finally {
+      db.close()
+    }
+  })
 })
