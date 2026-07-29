@@ -77,6 +77,8 @@ export function FilmPlayer ({ onTimeChange, seek }: Props) {
           onEnded={pb.handleStop}
           onPause={pb.handleStop}
           onPlay={pb.handlePlay}
+          onWaiting={pb.handleWaiting}
+          onPlaying={pb.handlePlaying}
         />
         <SubtitleGuide />
 
@@ -118,11 +120,8 @@ export function FilmPlayer ({ onTimeChange, seek }: Props) {
           src={bgmSrc}
           loop
           preload="metadata"
-          onLoadedMetadata={(e) => {
-            e.currentTarget.volume = Math.min(1, Math.max(0, project.bgmVolume))
-            // 用户是在播放中途换的曲子：立刻接着放（相位同步在 hook 里已处理）
-            if (playing) { void e.currentTarget.play() }
-          }}
+          // 接进 Web Audio 图、上音量、播放中换曲就对齐续上——全在 hook 里
+          onLoadedMetadata={pb.onBgmReady}
         />
       )}
 

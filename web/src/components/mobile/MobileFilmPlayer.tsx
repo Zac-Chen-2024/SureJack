@@ -57,9 +57,12 @@ export function MobileFilmPlayer ({ onBack }: { onBack: () => void }) {
         onEnded={pb.handleStop}
         onPause={pb.handleStop}
         onPlay={pb.handlePlay}
+        onWaiting={pb.handleWaiting}
+        onPlaying={pb.handlePlaying}
       />
 
-      {/* 背景音乐：另叠一条，浏览器混音（同桌面）。key 换源即重建，避免相位串味 */}
+      {/* 背景音乐：另叠一条，接进 Web Audio 图混音（音量走 gain，iOS 才有效）。
+          key 换源即重建，避免相位串味；onBgmReady 负责接图/上音量/续播。 */}
       {pb.bgmSrc && (
         <audio
           key={pb.bgmSrc}
@@ -67,10 +70,7 @@ export function MobileFilmPlayer ({ onBack }: { onBack: () => void }) {
           src={pb.bgmSrc}
           loop
           preload="metadata"
-          onLoadedMetadata={(e) => {
-            e.currentTarget.volume = Math.min(1, Math.max(0, project.bgmVolume))
-            if (pb.playing) { void e.currentTarget.play() }
-          }}
+          onLoadedMetadata={pb.onBgmReady}
         />
       )}
 
@@ -90,7 +90,7 @@ export function MobileFilmPlayer ({ onBack }: { onBack: () => void }) {
         <button
           type="button"
           onClick={onBack}
-          className="flex items-center gap-2 rounded-full border border-white/15 bg-black/45 px-3.5 py-2 text-sm font-semibold text-white backdrop-blur-md"
+          className="flex items-center gap-2 rounded-full border border-white/15 bg-black/65 px-3.5 py-2 text-sm font-semibold text-white"
         >
           <IconChevronLeft className="size-4" strokeWidth={2.2} />
           <span className="max-w-[46vw] truncate">{project.name}</span>
@@ -110,7 +110,7 @@ export function MobileFilmPlayer ({ onBack }: { onBack: () => void }) {
       {/* ── 中央播放键：仅暂停时出现 ─────────────────────────────────── */}
       {!pb.playing && (
         <div className="pointer-events-none absolute left-1/2 top-[44%] z-20 -translate-x-1/2 -translate-y-1/2">
-          <div className="flex size-[74px] items-center justify-center rounded-full border-[1.5px] border-white/35 bg-black/40 backdrop-blur-sm">
+          <div className="flex size-[74px] items-center justify-center rounded-full border-[1.5px] border-white/35 bg-black/50">
             <IconPlay className="ml-1 size-8 fill-white text-white" />
           </div>
         </div>
@@ -122,7 +122,7 @@ export function MobileFilmPlayer ({ onBack }: { onBack: () => void }) {
           className="pointer-events-none absolute inset-x-0 z-20 text-center"
           style={{ bottom: 'calc(env(safe-area-inset-bottom, 0px) + 168px)' }}
         >
-          <span className="rounded-full bg-black/40 px-2.5 py-1 text-[11px] font-semibold text-white/80 backdrop-blur-sm">
+          <span className="rounded-full bg-black/55 px-2.5 py-1 text-[11px] font-semibold text-white/80">
             {subLabel}
           </span>
         </div>
@@ -150,7 +150,7 @@ export function MobileFilmPlayer ({ onBack }: { onBack: () => void }) {
 
       {/* ── 合成中蒙层：改了文案/字幕/语速正在重烧母带 ───────────────── */}
       {pb.composing && (
-        <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-3 bg-black/65 backdrop-blur-[1px]">
+        <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-3 bg-black/75">
           <IconLoader className="size-7 animate-spin text-accent" />
           <div className="text-sm font-medium text-ink-50">正在合成新版本…</div>
           <div className="w-2/3 max-w-[220px]">
