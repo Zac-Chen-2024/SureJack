@@ -119,7 +119,7 @@ export function registerExportRoutes (app: FastifyInstance, deps: Deps): void {
       if (path === null) return reply.code(404).send({ error: '母带还没合好' })
 
       // 母带按版本区分 URL（前端带 ?v=masterVersion），同版本可缓存
-      reply.header('Cache-Control', 'private, max-age=3600')
+      reply.header('Cache-Control', 'no-store')
       return sendFileRange(reply, path, req.headers.range, 'video/mp4')
     })
 

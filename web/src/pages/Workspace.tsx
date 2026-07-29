@@ -134,6 +134,20 @@ export function Workspace () {
    */
   useFilmStatus(project ?? null)
 
+  /*
+   * 【所有项目的合成进度】。给项目列表显示进度用——切走的项目也能看见它
+   * 在后台合成到哪。5 秒一轮（列表进度不需要 2 秒那么勤），只在有项目时跑。
+   */
+  const pollFilmProgress = usePipeline((s) => s.pollFilmProgress)
+  const projectIds = useProjects((s) => s.items.map((p) => p.id).join(','))
+  useEffect(() => {
+    if (!projectIds) return
+    const ids = projectIds.split(',')
+    void pollFilmProgress(ids)
+    const t = setInterval(() => { void pollFilmProgress(ids) }, 5000)
+    return () => clearInterval(t)
+  }, [projectIds, pollFilmProgress])
+
 
 
 

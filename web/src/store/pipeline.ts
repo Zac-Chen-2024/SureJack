@@ -157,6 +157,10 @@ export interface Film {
   masterVersion?: string | null
   /** 母带在盘上没有。预览按它决定显不显示，而不是 state==='ready'（那是混好BGM的成片） */
   masterReady?: boolean
+  /** 盘上母带的实际版本。预览视频 src 键在它上面：重烧完成才变、换 BGM 不变 */
+  masterOnDisk?: string | null
+  /** 盘上母带过期了：改了文案/字幕/语速正在重烧。预览据此盖"合成中"蒙层 */
+  masterStale?: boolean
 }
 
 /** 主按钮该长什么样。渲染只管照着画，判断全在这儿，好测。 */
@@ -252,6 +256,10 @@ interface PipelineState {
   loadFilm: (projectId: string) => Promise<void>
   /** 手动强制重合一遍。用户偶尔需要不问指纹重来 */
   recomposeFilm: (projectId: string) => Promise<void>
+  /** 所有项目的合成进度，projectId → {合成中, 进度}。给项目列表显示进度 */
+  filmProgress: Record<string, { composing: boolean; progress: number }>
+  /** 轮询一批项目的合成状态，刷 filmProgress。永远不抛 */
+  pollFilmProgress: (projectIds: string[]) => Promise<void>
   generateVoice: (projectId: string) => Promise<void>
   /** 拖进来的文件 → 上传 → 齐了就派生。返回是否真的派生了 */
   adoptFiles: (projectId: string, files: File[]) => Promise<boolean>
@@ -259,7 +267,7 @@ interface PipelineState {
 }
 
 export const usePipeline = create<PipelineState>((set, get) => ({
-  assets: [], bgTrack: null, film: null, voiceBusy: false,
+  assets: [], bgTrack: null, film: null, filmProgress: {}, voiceBusy: false,
   voiceSegmentCount: null, error: null,
   byoBusy: false, byoHint: null, byoWarning: null, byoScriptFilled: null,
 
@@ -394,5 +402,25 @@ export const usePipeline = create<PipelineState>((set, get) => ({
         film: null,   // 拉回未知态，让下一轮轮询问出真相
       })
     }
+  },
+
+  async pollFilmProgress (projectIds) {
+    /*
+     * 逐个问 /film（切走的项目也问，好在列表里看它合成到哪）。并发但各自
+     * 兜底——一个失败不该让整批瞎掉。只存"合成中 + 进度"，不碰当前项目的
+     * film（那条另有 useFilmStatus 在 2 秒轮询）。
+     */
+    const entries = await Promise.all(projectIds.map(async (id) => {
+      try {
+        const f = await api.get<Film>(`/api/projects/${id}/film`)
+        return [id, {
+          composing: f.state === 'building' && f.masterStale === true,
+          progress: f.progress,
+        }] as const
+      } catch { return null }
+    }))
+    const next: Record<string, { composing: boolean; progress: number }> = {}
+    for (const e of entries) if (e) next[e[0]] = e[1]
+    set({ filmProgress: next })
   },
 }))

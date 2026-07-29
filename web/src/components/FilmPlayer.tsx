@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useProjects } from '../store/projects'
 import { usePipeline } from '../store/pipeline'
-import { IconPlay, IconPause, IconDownload, IconMore } from './ui/Icon'
+import { IconPlay, IconPause, IconDownload, IconMore, IconLoader } from './ui/Icon'
 
 /**
  * 成片播放器。**一个 `<video>`，没别的。**
@@ -42,8 +42,13 @@ function fmt (s: number): string {
 export function FilmPlayer ({ onTimeChange, seek }: Props) {
   const project = useProjects((s) => s.current())
   const recomposeFilm = usePipeline((s) => s.recomposeFilm)
-  // 母带版本：换 BGM 时它不变 → 视频 src 不变 → 视频不重载。这是"换 BGM 不卡"的关键
-  const masterVersion = usePipeline((s) => s.film?.masterVersion ?? null)
+  // 视频 src 键在【盘上母带】的版本上：换 BGM 不变→不重载；重烧完成才变→换新片
+  const masterOnDisk = usePipeline((s) => s.film?.masterOnDisk ?? null)
+  // 母带过期（改了文案/字幕/语速正在重烧）+ 合成进度，给蒙层用
+  const filmState = usePipeline((s) => s.film?.state ?? null)
+  const filmProgress = usePipeline((s) => s.film?.progress ?? 0)
+  const masterStale = usePipeline((s) => s.film?.masterStale === true)
+  const composing = filmState === 'building' && masterStale
   const videoRef = useRef<HTMLVideoElement>(null)
   const bgmRef = useRef<HTMLAudioElement>(null)
   const [playing, setPlaying] = useState(false)
@@ -96,7 +101,7 @@ export function FilmPlayer ({ onTimeChange, seek }: Props) {
    * 改文案/字幕/语速才改它 → 视频重新拉母带。masterVersion 还没回来时
    * 退回 updatedAt，至少能播上。
    */
-  const ver = masterVersion ?? project.updatedAt
+  const ver = masterOnDisk ?? project.updatedAt
   const src = `/api/projects/${project.id}/film/master/stream?v=${encodeURIComponent(ver)}`
   // BGM 来自素材库（全局公用），不是项目素材
   const bgmSrc = project.bgmLibraryId ? `/api/library/items/${project.bgmLibraryId}` : null
@@ -143,6 +148,29 @@ export function FilmPlayer ({ onTimeChange, seek }: Props) {
           onPlay={() => setPlaying(true)}
         />
         <SubtitleGuide />
+
+        {/*
+          【合成中蒙层】。改了文案/字幕/语速后母带在重烧，盘上还是旧片——
+          盖一层半透明黑 + 进度，明确告诉用户"正在做新的"，而不是让他对着
+          一条悄悄过期的旧片纳闷。它【不挡操作】：切项目、调设置都照常，
+          合成在后台跑；也不拦播放（底下旧片还能看，只是蒙着）。
+          换 BGM 不会触发它（那不动母带）。
+        */}
+        {composing && (
+          <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 bg-black/60 backdrop-blur-[1px]">
+            <IconLoader className="size-7 animate-spin text-accent" />
+            <div className="text-sm font-medium text-ink-50">正在合成新版本…</div>
+            <div className="w-2/3 max-w-[200px]">
+              <div className="h-1 overflow-hidden rounded-full bg-ink-700">
+                <div className="h-full rounded-full bg-accent transition-[width] duration-500" style={{ width: `${filmProgress}%` }} />
+              </div>
+              <div className="mt-1.5 text-center text-[11px] tabular-nums text-ink-300">{filmProgress}%</div>
+            </div>
+            <div className="px-6 text-center text-[11px] leading-relaxed text-ink-400">
+              可以切到别的项目，合成在后台继续；好了这里会自动换成新片。
+            </div>
+          </div>
+        )}
       </div>
 
       {/*

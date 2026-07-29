@@ -582,14 +582,26 @@ export interface FilmInfo {
    */
   masterVersion: string | null
   /**
-   * 母带文件在盘上、能播了没有。
+   * 【盘上母带】的实际版本（母带戳里的指纹，短）。null = 盘上没有可播母带。
    *
-   * 预览播的是母带（+浏览器叠 BGM），所以前端【按它】决定显不显示播放器，
-   * 而不是按 state==='ready'（那是"混好 BGM 的成片"就绪）。否则换个 BGM
-   * 触发重混、state 掉回 building，播放器就被误判成"还没好"而消失。
-   * 母带一旦生成，改 BGM 不会让它失效，这个值就稳定为 true。
+   * 前端把预览 `<video>` 的 src 键在【它】上面，不是 masterVersion——
+   * 因为改文案/字幕/语速后 masterVersion（想要的）立刻变，但盘上母带要等
+   * 十几分钟重烧完才追上。键在盘上版本，重烧完成的那一刻 URL 才变、视频才
+   * 换新片；换 BGM 期间它不变，视频不重载。也让母带流的缓存安全：
+   * 内容变了 = URL 变了。
+   */
+  masterOnDisk: string | null
+  /**
+   * 母带文件在盘上、能播了没有（= masterOnDisk 非空）。
+   * 预览按它决定显不显示播放器，而不是 state==='ready'（那是混好BGM的成片）。
    */
   masterReady: boolean
+  /**
+   * 盘上母带【过期】了没有：masterVersion（想要的）和 masterOnDisk（盘上的）
+   * 不一致 → 改了文案/字幕/语速，正在或需要重烧母带。前端据此在预览上
+   * 盖一层"合成中"蒙层——换 BGM 不会让它为真（那不动母带）。
+   */
+  masterStale: boolean
 }
 
 /**
@@ -688,13 +700,22 @@ export async function filmInfo (
   // 母带指纹给前端键预览视频。再算一次 resolveFilm（纯内存计算，poll 也扛得住）；
   // 算不出（缺配音等）就 null。取前 16 位够唯一，URL 里也短。
   let masterVersion: string | null = null
+  let masterOnDisk: string | null = null
   let masterReady = false
   try {
     const r = resolveFilm(deps, userName, projectId)
     if (r.ok) masterVersion = r.film.masterFingerprint.slice(0, 16)
-    masterReady = await playableMaster(deps, userName, projectId) !== null
+    // 盘上母带能播才给它的版本；playableMaster 已经校验过 done + 文件在
+    if (await playableMaster(deps, userName, projectId) !== null) {
+      masterReady = true
+      const dir = assetDir(userName, deps.whitelist, projectId)
+      const ms = await readStamp(dir, MASTER_STAMP_FILE)
+      masterOnDisk = ms?.fingerprint.slice(0, 16) ?? null
+    }
   } catch { /* 算不出就不给版本，前端自会退回 building 态 */ }
-  const extra = { masterVersion, masterReady }
+  // 过期 = 想要的和盘上的都算得出、但不一致
+  const masterStale = masterVersion !== null && masterOnDisk !== null && masterVersion !== masterOnDisk
+  const extra = { masterVersion, masterOnDisk, masterReady, masterStale }
 
   switch (v.kind) {
     case 'blocked':

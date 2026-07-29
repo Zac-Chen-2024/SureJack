@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useProjects } from '../store/projects'
-import { IconChevronDown, IconPlus, IconTrash } from './ui/Icon'
+import { usePipeline } from '../store/pipeline'
+import { IconChevronDown, IconPlus, IconTrash, IconLoader } from './ui/Icon'
 
 /**
  * 项目切换器：当前项目名 + 点击向下展开的项目列表。
@@ -15,6 +16,7 @@ import { IconChevronDown, IconPlus, IconTrash } from './ui/Icon'
  */
 export function ProjectSwitcher () {
   const { items, currentId, select, create, remove } = useProjects()
+  const filmProgress = usePipeline((s) => s.filmProgress)
   const [open, setOpen] = useState(false)
   const [adding, setAdding] = useState(false)
   const [name, setName] = useState('')
@@ -129,9 +131,20 @@ export function ProjectSwitcher () {
                 }`}
               />
               <span className="min-w-0 flex-1 truncate">{p.name}</span>
-              <span className="shrink-0 tabular-nums text-[11px] text-ink-600">
-                {[...(p.scriptText ?? '')].length} 字
-              </span>
+              {/*
+                合成中的项目显示进度（一个转圈 + 百分比），替代字数——
+                这样切走的项目也能一眼看见它在后台合成到哪。合成完就变回字数。
+              */}
+              {filmProgress[p.id]?.composing ? (
+                <span className="flex shrink-0 items-center gap-1 tabular-nums text-[11px] text-accent">
+                  <IconLoader className="size-3 animate-spin" />
+                  {filmProgress[p.id]?.progress ?? 0}%
+                </span>
+              ) : (
+                <span className="shrink-0 tabular-nums text-[11px] text-ink-600">
+                  {[...(p.scriptText ?? '')].length} 字
+                </span>
+              )}
               <button
                 type="button"
                 aria-label={`删除 ${p.name}`}
