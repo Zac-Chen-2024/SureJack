@@ -49,10 +49,12 @@ export function BottomSheet ({ open, onClose, title, children }: {
       />
       {/* 面板 */}
       <div
-        className="absolute inset-x-0 bottom-0 flex max-h-[85vh] flex-col rounded-t-2xl border-t border-line bg-ink-900 shadow-2xl shadow-black/70"
+        className="absolute inset-x-0 bottom-0 flex max-h-[85vh] flex-col rounded-t-3xl border-t border-line bg-ink-900 shadow-2xl shadow-black/70"
         style={{ animation: 'sheet-up 0.22s cubic-bezier(0.32,0.72,0,1)' }}
       >
-        <div className="flex shrink-0 items-center gap-2 px-4 pb-2 pt-3">
+        {/* 顶部拖拽把手：手机抽屉的通用语汇，一眼看出"这是能往下拉走的一层" */}
+        <div className="mx-auto mt-2 h-1.5 w-10 shrink-0 rounded-full bg-white/20" />
+        <div className="flex shrink-0 items-center gap-2 px-4 pb-2 pt-2">
           <span className="text-sm font-medium text-ink-100">{title}</span>
           <button
             type="button" onClick={onClose} aria-label="收起"

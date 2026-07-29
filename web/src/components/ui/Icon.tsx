@@ -271,3 +271,50 @@ export function IconPreview (props: IconProps) {
     </Svg>
   )
 }
+
+/**
+ * 文案——左对齐的三条横线（最后一条短），是"一段文字"最省的意象。
+ * 手机版底栏「文案」入口和起始选择「文本起始」卡片共用，照概念图那支笔。
+ */
+export function IconTextLines (props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M4 6h16M4 12h16M4 18h10" />
+    </Svg>
+  )
+}
+
+/**
+ * 字幕——排版里的 "T"（文字工具）意象。手机底栏专用；桌面那版用的是
+ * 字幕框 IconSubtitles，两处形状不同是有意的：手机照概念图走 T 字工具。
+ */
+export function IconTypeTool (props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M4 7V5h16v2M9 20h6M12 5v15" />
+    </Svg>
+  )
+}
+
+/**
+ * 背景——一块画布/画面框（顶部一条栏 + 左上角一格），表示"底下铺的那层画面"。
+ * 和 IconMusic（背景音乐）分开，对应概念图里「背景」与「音乐」两个入口。
+ */
+export function IconFrame (props: IconProps) {
+  return (
+    <Svg {...props}>
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="M3 9h18M9 4v5" />
+    </Svg>
+  )
+}
+
+/** 设置——齿轮。项目列表右上角入口 */
+export function IconSettings (props: IconProps) {
+  return (
+    <Svg {...props}>
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 13a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-2.9 1.2v.1a2 2 0 1 1-4 0v-.2a1.7 1.7 0 0 0-2.9-1.1l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0-1.1-2.9H3a2 2 0 1 1 0-4h.2a1.7 1.7 0 0 0 1.1-2.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.2a1.7 1.7 0 0 0 2.9 1.1l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.2a1.7 1.7 0 0 0-1.4 1z" />
+    </Svg>
+  )
+}

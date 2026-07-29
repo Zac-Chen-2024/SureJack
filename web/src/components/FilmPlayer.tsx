@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useProjects } from '../store/projects'
 import { usePipeline } from '../store/pipeline'
+import { useFilmPlayback } from '../hooks/useFilmPlayback'
 import { IconPlay, IconPause, IconDownload, IconMore, IconLoader } from './ui/Icon'
 
 /**
@@ -42,83 +43,17 @@ function fmt (s: number): string {
 export function FilmPlayer ({ onTimeChange, seek }: Props) {
   const project = useProjects((s) => s.current())
   const recomposeFilm = usePipeline((s) => s.recomposeFilm)
-  // 视频 src 键在【盘上母带】的版本上：换 BGM 不变→不重载；重烧完成才变→换新片
-  const masterOnDisk = usePipeline((s) => s.film?.masterOnDisk ?? null)
-  // 母带过期（改了文案/字幕/语速正在重烧）+ 合成进度，给蒙层用
-  const filmState = usePipeline((s) => s.film?.state ?? null)
-  const filmProgress = usePipeline((s) => s.film?.progress ?? 0)
-  const masterStale = usePipeline((s) => s.film?.masterStale === true)
-  const composing = filmState === 'building' && masterStale
-  const videoRef = useRef<HTMLVideoElement>(null)
-  const bgmRef = useRef<HTMLAudioElement>(null)
-  const [playing, setPlaying] = useState(false)
-  const [cur, setCur] = useState(0)
-  const [dur, setDur] = useState(0)
-
   /*
-   * 换项目要停下来并回到开头。不重置的话，切过去的一瞬间新片子会从
-   * 上一条的播放位置开始——那个位置对新片子毫无意义。
+   * 所有播放逻辑（播母带 + 浏览器叠 BGM + 循环相位同步 + 换项目重置 +
+   * 母带过期蒙层 + src 键在盘上母带版本上）都在 useFilmPlayback 里，
+   * 和手机版 MobileFilmPlayer 共用同一份——这里只负责把它画成桌面那块
+   * 带边框的框 + 底下一条控制栏。
    */
-  useEffect(() => {
-    setPlaying(false)
-    setCur(0)
-    setDur(0)
-  }, [project?.id])
+  const pb = useFilmPlayback(onTimeChange, seek)
+  const { playing, cur, dur, src, bgmSrc, composing } = pb
+  const filmProgress = pb.progress
 
-  // 调 BGM 音量：不重载音轨，只改 volume（0..1，钳一层防脏值）
-  useEffect(() => {
-    const b = bgmRef.current
-    if (b) b.volume = Math.min(1, Math.max(0, project?.bgmVolume ?? 0.15))
-  }, [project?.bgmVolume])
-
-  // 外部跳转（点字幕某一行）。BGM 跟着跳到对应的循环相位
-  const lastNonce = useRef(0)
-  useEffect(() => {
-    if (!seek || seek.nonce === lastNonce.current) return
-    lastNonce.current = seek.nonce
-    const v = videoRef.current
-    if (v) v.currentTime = seek.ms / 1000
-    syncBgm(seek.ms / 1000)
-  }, [seek])
-
-  /*
-   * 把 BGM 音轨对到视频的某一刻。BGM 是循环的、比视频短，直接 set 到
-   * 超过它自身时长的值浏览器会夹到末尾（听着像没声），取模才对应
-   * "循环播放"里真正该响的那一刻。
-   */
-  function syncBgm (videoSec: number): void {
-    const b = bgmRef.current
-    if (b && b.duration > 0 && Number.isFinite(b.duration)) {
-      b.currentTime = videoSec % b.duration
-    }
-  }
-
-  if (!project) return null
-
-  /*
-   * 预览播【母带】(画面+字幕+配音，无 BGM)，BGM 在下面另叠一条 <audio>。
-   * src 键在 masterVersion 上：换 BGM / 调音量都不改它 → 视频一帧不动、无缝切；
-   * 改文案/字幕/语速才改它 → 视频重新拉母带。masterVersion 还没回来时
-   * 退回 updatedAt，至少能播上。
-   */
-  const ver = masterOnDisk ?? project.updatedAt
-  const src = `/api/projects/${project.id}/film/master/stream?v=${encodeURIComponent(ver)}`
-  // BGM 来自素材库（全局公用），不是项目素材
-  const bgmSrc = project.bgmLibraryId ? `/api/library/items/${project.bgmLibraryId}` : null
-
-  const toggle = () => {
-    const v = videoRef.current
-    const b = bgmRef.current
-    if (!v) return
-    if (v.paused) {
-      void v.play()
-      if (b) { syncBgm(v.currentTime); void b.play() }
-      setPlaying(true)
-    } else {
-      v.pause(); b?.pause()
-      setPlaying(false)
-    }
-  }
+  if (!project || !src) return null
 
   return (
     /*
@@ -132,20 +67,16 @@ export function FilmPlayer ({ onTimeChange, seek }: Props) {
         style={{ aspectRatio: '9 / 16' }}
       >
         <video
-          ref={videoRef}
+          ref={pb.videoRef}
           src={src}
           playsInline
           preload="metadata"
           className="absolute inset-0 size-full object-contain"
-          onLoadedMetadata={(e) => setDur(e.currentTarget.duration)}
-          onTimeUpdate={(e) => {
-            const t = e.currentTarget.currentTime
-            setCur(t)
-            onTimeChange?.(Math.round(t * 1000))
-          }}
-          onEnded={() => { setPlaying(false); bgmRef.current?.pause() }}
-          onPause={() => { setPlaying(false); bgmRef.current?.pause() }}
-          onPlay={() => setPlaying(true)}
+          onLoadedMetadata={(e) => pb.onLoadedMeta(e.currentTarget.duration)}
+          onTimeUpdate={(e) => pb.onTimeUpdate(e.currentTarget.currentTime)}
+          onEnded={pb.handleStop}
+          onPause={pb.handleStop}
+          onPlay={pb.handlePlay}
         />
         <SubtitleGuide />
 
@@ -183,14 +114,14 @@ export function FilmPlayer ({ onTimeChange, seek }: Props) {
       {bgmSrc && (
         <audio
           key={bgmSrc}
-          ref={bgmRef}
+          ref={pb.bgmRef}
           src={bgmSrc}
           loop
           preload="metadata"
           onLoadedMetadata={(e) => {
             e.currentTarget.volume = Math.min(1, Math.max(0, project.bgmVolume))
-            // 用户是在播放中途换的曲子：立刻对到当前进度并接着放
-            if (playing) { syncBgm(videoRef.current?.currentTime ?? 0); void e.currentTarget.play() }
+            // 用户是在播放中途换的曲子：立刻接着放（相位同步在 hook 里已处理）
+            if (playing) { void e.currentTarget.play() }
           }}
         />
       )}
@@ -211,7 +142,7 @@ export function FilmPlayer ({ onTimeChange, seek }: Props) {
       <div className="mt-2 flex h-11 shrink-0 items-stretch divide-x divide-line overflow-hidden rounded-xl border border-line bg-ink-850">
         <button
           type="button"
-          onClick={toggle}
+          onClick={pb.toggle}
           aria-label={playing ? '暂停' : '播放'}
           className="flex w-12 shrink-0 items-center justify-center text-ink-100 transition-colors hover:bg-ink-800 hover:text-accent"
         >
@@ -226,13 +157,7 @@ export function FilmPlayer ({ onTimeChange, seek }: Props) {
             max={Math.max(dur, 0.01)}
             step={0.01}
             value={cur}
-            onChange={(e) => {
-              const t = Number(e.target.value)
-              const v = videoRef.current
-              if (v) v.currentTime = t
-              syncBgm(t)
-              setCur(t)
-            }}
+            onChange={(e) => pb.seekTo(Number(e.target.value))}
             className="min-w-0 flex-1 accent-accent"
             aria-label="播放进度"
           />

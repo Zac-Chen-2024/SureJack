@@ -44,6 +44,8 @@ export function VoicePanel () {
    * 抵消，归零才算真的离开。
    */
   const dragDepth = useRef(0)
+  // 手机上没有拖放：点一下用系统文件选择器选配音+字幕，走同一条 handleFiles
+  const fileInput = useRef<HTMLInputElement>(null)
 
   if (!project) return null
   const current = project
@@ -121,6 +123,31 @@ export function VoicePanel () {
           ——SRT 只记整句的起止时间，格式本身就没有逐字信息。
         </span>
       </p>
+
+      {/*
+        点选上传：手机上拖放不可用，得有个能唤起系统文件选择器的入口。
+        桌面上它也无害——多一条不用拖的路。accept 覆盖配音 + srt，允许多选，
+        选完走的是和拖放同一个 handleFiles。
+      */}
+      <input
+        ref={fileInput}
+        type="file"
+        multiple
+        accept=".mp3,.wav,.m4a,.aac,.srt,audio/*"
+        className="hidden"
+        onChange={(e) => {
+          void handleFiles(Array.from(e.target.files ?? []))
+          e.target.value = ''  // 允许连续选同一个文件
+        }}
+      />
+      <button
+        type="button"
+        onClick={() => fileInput.current?.click()}
+        disabled={byoBusy}
+        className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-xs text-ink-200 transition-colors hover:border-accent hover:text-accent disabled:opacity-50"
+      >
+        <IconUpload className="size-3.5" />选择配音和字幕文件
+      </button>
 
       {byoHint !== null && (
         <p className="mt-1 text-[11px] leading-relaxed text-accent">{byoHint}</p>

@@ -23,6 +23,18 @@ import { IconMic, IconPlay, IconLoader } from './ui/Icon'
 
 const fmtPct = (n: number) => `${n >= 0 ? '+' : ''}${n}%`
 
+/**
+ * 常用音色快选。下拉里有全部 10 个，但九成场景就在这几个之间切——
+ * 摆成一排药丸，一点就换，不用展开下拉再找。顺序照概念图 Screen 2。
+ * id 必须都在 VOICES 里（否则点了会被后端白名单打回）。
+ */
+const QUICK_VOICE_IDS = [
+  'zh-CN-XiaochenNeural', 'zh-CN-YunxiNeural', 'zh-CN-XiaoxiaoNeural',
+  'zh-CN-YunyangNeural', 'zh-CN-XiaoyiNeural',
+]
+/** 药丸上的短名：取 VOICES.label 括号前那截（"晓辰（女·自然）" → "晓辰"） */
+const shortName = (label: string) => label.split('（')[0]
+
 export function VoiceSettings () {
   const project = useProjects((s) => s.current())
   const draft = useProjects((s) => s.draftVoice)
@@ -112,9 +124,31 @@ export function VoiceSettings () {
         {VOICES.map((v) => <option key={v.id} value={v.id}>{v.label}</option>)}
       </Select>
 
+      {/* 常用音色快选：横向一排药丸，可横滑。选中的高亮成强调色 */}
+      <div className="mt-2.5 flex gap-2 overflow-x-auto pb-1">
+        {QUICK_VOICE_IDS.map((id) => {
+          const v = VOICES.find((x) => x.id === id)
+          if (!v) return null
+          const on = voiceName === id
+          return (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setDraftVoice({ voiceName: id })}
+              className={`shrink-0 rounded-full border px-3.5 py-1.5 text-xs font-semibold transition-colors ${
+                on ? 'border-accent/45 bg-accent/12 text-accent' : 'border-line text-ink-300 hover:text-ink-100'
+              }`}
+            >
+              {shortName(v.label)}
+            </button>
+          )
+        })}
+      </div>
+
       <ParamSlider
         label="语速" value={rate} range={RATE_RANGE}
         onChange={(n) => setDraftVoice({ voiceRate: n })}
+        ticks={['-50%', '默认 +75%', '+100%']}
       />
       <ParamSlider
         label="音量" value={volume} range={VOLUME_RANGE}
@@ -169,12 +203,15 @@ export function VoiceSettings () {
   )
 }
 
-/** 一个百分比偏移滑块。0 居中，两端是范围端点，显示 +N% / -N% */
-function ParamSlider ({ label, value, range, onChange }: {
+/** 一个百分比偏移滑块。0 居中，两端是范围端点，显示 +N% / -N%。
+    可选 ticks：滑轨下方一排定位标签（如语速的 -50% / 默认 +75% / +100%），
+    两端对齐、中间居中，帮用户建立"默认在哪、还能往哪走"的方位感。 */
+function ParamSlider ({ label, value, range, onChange, ticks }: {
   label: string
   value: number
   range: { min: number; max: number; default: number }
   onChange: (n: number) => void
+  ticks?: string[]
 }) {
   return (
     <>
@@ -191,6 +228,11 @@ function ParamSlider ({ label, value, range, onChange }: {
         className="h-1 w-full cursor-pointer appearance-none rounded-full bg-ink-700"
         style={{ accentColor: 'var(--color-accent)' }}
       />
+      {ticks && (
+        <div className="mt-1.5 flex justify-between text-[10px] text-ink-500">
+          {ticks.map((t) => <span key={t}>{t}</span>)}
+        </div>
+      )}
     </>
   )
 }

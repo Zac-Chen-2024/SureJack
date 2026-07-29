@@ -261,3 +261,26 @@ export function AssetPanel () {
     </div>
   )
 }
+
+/**
+ * 手机版把素材区拆成两个底部抽屉——「背景」和「音乐」各一个入口
+ * （照概念图的五格底栏）。桌面仍是一整块 AssetPanel，这里只是把同样的
+ * 内部块重新分组导出，逻辑一行不改。
+ */
+export function BackgroundPanel () {
+  const project = useProjects((s) => s.current())
+  if (!project) return null
+  return <BackgroundStrip projectId={project.id} />
+}
+
+/** 「音乐」抽屉：选背景音乐 + 音量平衡。 */
+export function MusicPanel () {
+  const project = useProjects((s) => s.current())
+  if (!project) return null
+  return (
+    <div className="space-y-4">
+      <BgmPicker />
+      <VolumeSlider />
+    </div>
+  )
+}
