@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { userDbDir } from '../auth/whitelist.js'
 import { DEFAULT_SUBTITLE_MARGIN_V, DEFAULT_SUBTITLE_FONT_SIZE } from '../subtitles/ass.js'
-import { LEGACY_VOICE, DEFAULT_VOICE, RATE_RANGE, VOLUME_RANGE, PITCH_RANGE } from '../tts/voices.js'
+import { LEGACY_VOICE, DEFAULT_VOICE, DEFAULT_VOICE_RATE, RATE_RANGE, VOLUME_RANGE, PITCH_RANGE } from '../tts/voices.js'
 
 /**
  * 素材种类。
@@ -279,7 +279,7 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
         wordTimingsJson: null, bgmVolume: DEFAULT_BGM_VOLUME, subtitleMode: 'karaoke',
         bgmLibraryId: null, subtitleMarginV: DEFAULT_SUBTITLE_MARGIN_V,
         subtitleFontSize: DEFAULT_SUBTITLE_FONT_SIZE,
-        voiceName: DEFAULT_VOICE, voiceRate: RATE_RANGE.default,
+        voiceName: DEFAULT_VOICE, voiceRate: DEFAULT_VOICE_RATE,
         voiceVolume: VOLUME_RANGE.default, voicePitch: PITCH_RANGE.default,
         createdAt: now, updatedAt: now,
       }

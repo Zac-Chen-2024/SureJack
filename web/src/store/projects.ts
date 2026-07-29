@@ -52,6 +52,7 @@ export const VOICES: VoiceOption[] = [
 export interface VoiceDraft {
   voiceName: string; voiceRate: number; voiceVolume: number; voicePitch: number
 }
+export const DEFAULT_VOICE_RATE = 75
 export const RATE_RANGE = { min: -50, max: 100, default: 0 }
 export const VOLUME_RANGE = { min: -50, max: 50, default: 0 }
 export const PITCH_RANGE = { min: -50, max: 50, default: 0 }

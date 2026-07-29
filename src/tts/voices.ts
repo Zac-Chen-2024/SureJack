@@ -59,6 +59,20 @@ export const RATE_RANGE = { min: -50, max: 100, default: 0 } as const
 export const VOLUME_RANGE = { min: -50, max: 50, default: 0 } as const
 export const PITCH_RANGE = { min: -50, max: 50, default: 0 } as const
 
+/**
+ * 【新建文本项目的默认语速】+75%。
+ *
+ * ⚠️ 这和 RATE_RANGE.default（0）是两回事，别混：
+ *   - RATE_RANGE.default = 0 是「中性值」——迁移回填、母带指纹的老默认判定
+ *     都锚定它，绝不能改（改了老项目全重烧）。
+ *   - DEFAULT_VOICE_RATE = 75 只在 createProject 给【新】项目用。
+ * 就像 DEFAULT_VOICE（晓辰）之于 LEGACY_VOICE（晓晓）——新老分开。
+ *
+ * 为什么是 75：晓辰原生语速偏慢，一篇 4500 字要念 13 分钟；实测 +86% 追平
+ * 真人录的 9.8 分，+75% 略从容一点、约 10 分，是个更稳的起点。用户可再调。
+ */
+export const DEFAULT_VOICE_RATE = 75
+
 export interface VoiceParams {
   voice: string
   rate: number

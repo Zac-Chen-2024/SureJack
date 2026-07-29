@@ -1,12 +1,12 @@
 import { describe, it, expect } from 'vitest'
 import {
-  VOICES, DEFAULT_VOICE, LEGACY_VOICE, LEGACY_PARAMS,
+  VOICES, DEFAULT_VOICE, LEGACY_VOICE, LEGACY_PARAMS, DEFAULT_VOICE_RATE,
   isAllowedVoice, clampRate, clampVolume, clampPitch, isLegacyParams, pct,
   RATE_RANGE, VOLUME_RANGE, PITCH_RANGE,
 } from '../../src/tts/voices.js'
 // 前端各存一份，这里把两边钉死
 import {
-  VOICES as FE_VOICES, RATE_RANGE as FE_RATE,
+  VOICES as FE_VOICES, RATE_RANGE as FE_RATE, DEFAULT_VOICE_RATE as FE_DEF_RATE,
   VOLUME_RANGE as FE_VOL, PITCH_RANGE as FE_PITCH,
 } from '../../web/src/store/projects.js'
 
@@ -15,6 +15,10 @@ describe('音色清单', () => {
     expect(DEFAULT_VOICE).toBe('zh-CN-XiaochenNeural')
     expect(LEGACY_VOICE).toBe('zh-CN-XiaoxiaoNeural')
     expect(DEFAULT_VOICE).not.toBe(LEGACY_VOICE)
+    // 新项目默认语速是 75，但中性/老默认仍是 0（指纹 carve-out 靠它）
+    expect(DEFAULT_VOICE_RATE).toBe(75)
+    expect(LEGACY_PARAMS.rate).toBe(0)
+    expect(FE_DEF_RATE).toBe(DEFAULT_VOICE_RATE)
   })
 
   it('默认音色在清单里', () => {
