@@ -575,6 +575,21 @@ export interface FilmInfo {
   error: string | null
   /** state=none 时还缺什么，直接显示给用户 */
   reason: string | null
+  /**
+   * 母带指纹（短）。前端把预览 `<video>` 的 src 键在它上面：
+   * 换 BGM / 调 BGM 音量【不】改它 → 视频不重载、无缝切；
+   * 改文案 / 字幕 / 语速才改它 → 视频重新拉母带。null = 还算不出（缺配音等）。
+   */
+  masterVersion: string | null
+  /**
+   * 母带文件在盘上、能播了没有。
+   *
+   * 预览播的是母带（+浏览器叠 BGM），所以前端【按它】决定显不显示播放器，
+   * 而不是按 state==='ready'（那是"混好 BGM 的成片"就绪）。否则换个 BGM
+   * 触发重混、state 掉回 building，播放器就被误判成"还没好"而消失。
+   * 母带一旦生成，改 BGM 不会让它失效，这个值就稳定为 true。
+   */
+  masterReady: boolean
 }
 
 /**
@@ -670,22 +685,33 @@ export async function filmInfo (
   deps: FilmDeps, userName: string, projectId: string,
 ): Promise<FilmInfo> {
   const v = await judgeFilm(deps, userName, projectId)
+  // 母带指纹给前端键预览视频。再算一次 resolveFilm（纯内存计算，poll 也扛得住）；
+  // 算不出（缺配音等）就 null。取前 16 位够唯一，URL 里也短。
+  let masterVersion: string | null = null
+  let masterReady = false
+  try {
+    const r = resolveFilm(deps, userName, projectId)
+    if (r.ok) masterVersion = r.film.masterFingerprint.slice(0, 16)
+    masterReady = await playableMaster(deps, userName, projectId) !== null
+  } catch { /* 算不出就不给版本，前端自会退回 building 态 */ }
+  const extra = { masterVersion, masterReady }
+
   switch (v.kind) {
     case 'blocked':
-      return { state: 'none', jobId: null, progress: 0, error: null, reason: v.reason }
+      return { state: 'none', jobId: null, progress: 0, error: null, reason: v.reason, ...extra }
     case 'running':
-      return { state: 'building', jobId: v.jobId, progress: v.progress, error: null, reason: null }
+      return { state: 'building', jobId: v.jobId, progress: v.progress, error: null, reason: null, ...extra }
     case 'ready':
-      return { state: 'ready', jobId: v.jobId, progress: 100, error: null, reason: null }
+      return { state: 'ready', jobId: v.jobId, progress: 100, error: null, reason: null, ...extra }
     case 'failed':
-      return { state: 'error', jobId: v.jobId, progress: 0, error: v.error, reason: null }
+      return { state: 'error', jobId: v.jobId, progress: 0, error: v.error, reason: null, ...extra }
     case 'missing': {
       // 该有却没有 → 现在排一条
       const newJobId = await enqueueFilm(deps, userName, projectId)
       if (newJobId === null) {
-        return { state: 'none', jobId: null, progress: 0, error: null, reason: '暂时还不能合成成片' }
+        return { state: 'none', jobId: null, progress: 0, error: null, reason: '暂时还不能合成成片', ...extra }
       }
-      return { state: 'building', jobId: newJobId, progress: 0, error: null, reason: null }
+      return { state: 'building', jobId: newJobId, progress: 0, error: null, reason: null, ...extra }
     }
   }
 }
@@ -769,4 +795,22 @@ export async function downloadableFilm (
   if (masterStamp === null) return null
   if (masterStamp.status !== undefined && masterStamp.status !== 'done') return null
   return reusableOutput(dir, MASTER_STAMP_FILE, FILM_MASTER_FILE, masterStamp.fingerprint)
+}
+
+/**
+ * 【母带】文件现在能不能播。给预览用。⚠️ 永远不抛。
+ *
+ * 母带 = 画面 + 烧录字幕 + 配音，【不含 BGM】。预览播它、再在浏览器里叠一条
+ * BGM 音轨，换 BGM 就只换那条音轨、视频一帧不动——这是"换 BGM 不卡"的地基。
+ * 和 downloadableFilm 一样只看戳的 status、不比指纹（有更新版本在合时，
+ * 盘上这条仍是完整可播的）。
+ */
+export async function playableMaster (
+  deps: FilmDeps, userName: string, projectId: string,
+): Promise<string | null> {
+  const dir = assetDir(userName, deps.whitelist, projectId)
+  const stamp = await readStamp(dir, MASTER_STAMP_FILE)
+  if (stamp === null) return null
+  if (stamp.status !== undefined && stamp.status !== 'done') return null
+  return reusableOutput(dir, MASTER_STAMP_FILE, FILM_MASTER_FILE, stamp.fingerprint)
 }

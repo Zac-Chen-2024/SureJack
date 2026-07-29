@@ -153,6 +153,10 @@ export interface Film {
   error: string | null
   /** state=none 时还缺什么 */
   reason: string | null
+  /** 母带版本。预览视频 src 键在它上面：换 BGM 不变，改文案/字幕/语速才变 */
+  masterVersion?: string | null
+  /** 母带在盘上没有。预览按它决定显不显示，而不是 state==='ready'（那是混好BGM的成片） */
+  masterReady?: boolean
 }
 
 /** 主按钮该长什么样。渲染只管照着画，判断全在这儿，好测。 */

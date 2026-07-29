@@ -121,7 +121,12 @@ export function Workspace () {
    * 成片合好了没有。ExportPanel 已经在轮询这个状态，这里只是读同一份
    * store——不要另起一轮轮询，两轮问同一个接口会互相看到对方排的活。
    */
-  const filmReady = usePipeline((s) => s.film?.state === 'ready')
+  /*
+   * 预览播的是【母带】+ 浏览器叠 BGM，所以按母带就绪来显示播放器，
+   * 而不是成片(混好BGM)就绪——否则换个 BGM 触发重混、成片掉回 building，
+   * 播放器就被误判成没好而消失。母带一旦生成，改 BGM 不会让它失效。
+   */
+  const masterReady = usePipeline((s) => s.film?.masterReady === true)
   /*
    * 轮询挂在【整栏都在的地方】，不能挂在下面那两个会互相顶替的组件里：
    * 成片一好 ExportPanel 就整块不渲染了，轮询跟着断，之后用户改文案
@@ -258,7 +263,7 @@ export function Workspace () {
                 让用户在等的时候不至于对着一块空白。
               */}
               <div className="mx-auto w-full max-w-[min(100%,49vh)]">
-                {filmReady ? (
+                {masterReady ? (
                   <FilmPlayer
                     onTimeChange={setCurrentMs}
                     seek={seekNonce > 0 ? { ms: currentMs, nonce: seekNonce } : null}
@@ -279,7 +284,7 @@ export function Workspace () {
 
               没合完时它才出现——那时候它说的是另一件事：还要等多久。
             */}
-            {!filmReady && (
+            {!masterReady && (
               <div className="shrink-0 border-t border-line p-4"><ExportPanel /></div>
             )}
           </>

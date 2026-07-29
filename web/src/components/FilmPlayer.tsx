@@ -42,7 +42,10 @@ function fmt (s: number): string {
 export function FilmPlayer ({ onTimeChange, seek }: Props) {
   const project = useProjects((s) => s.current())
   const recomposeFilm = usePipeline((s) => s.recomposeFilm)
+  // 母带版本：换 BGM 时它不变 → 视频 src 不变 → 视频不重载。这是"换 BGM 不卡"的关键
+  const masterVersion = usePipeline((s) => s.film?.masterVersion ?? null)
   const videoRef = useRef<HTMLVideoElement>(null)
+  const bgmRef = useRef<HTMLAudioElement>(null)
   const [playing, setPlaying] = useState(false)
   const [cur, setCur] = useState(0)
   const [dur, setDur] = useState(0)
@@ -57,28 +60,59 @@ export function FilmPlayer ({ onTimeChange, seek }: Props) {
     setDur(0)
   }, [project?.id])
 
-  // 外部跳转（点字幕某一行）
+  // 调 BGM 音量：不重载音轨，只改 volume（0..1，钳一层防脏值）
+  useEffect(() => {
+    const b = bgmRef.current
+    if (b) b.volume = Math.min(1, Math.max(0, project?.bgmVolume ?? 0.15))
+  }, [project?.bgmVolume])
+
+  // 外部跳转（点字幕某一行）。BGM 跟着跳到对应的循环相位
   const lastNonce = useRef(0)
   useEffect(() => {
     if (!seek || seek.nonce === lastNonce.current) return
     lastNonce.current = seek.nonce
     const v = videoRef.current
     if (v) v.currentTime = seek.ms / 1000
+    syncBgm(seek.ms / 1000)
   }, [seek])
+
+  /*
+   * 把 BGM 音轨对到视频的某一刻。BGM 是循环的、比视频短，直接 set 到
+   * 超过它自身时长的值浏览器会夹到末尾（听着像没声），取模才对应
+   * "循环播放"里真正该响的那一刻。
+   */
+  function syncBgm (videoSec: number): void {
+    const b = bgmRef.current
+    if (b && b.duration > 0 && Number.isFinite(b.duration)) {
+      b.currentTime = videoSec % b.duration
+    }
+  }
 
   if (!project) return null
 
   /*
-   * 【必须带上 updatedAt】。成片的 URL 是固定的，改完文案重合出来
-   * 还是同一个地址——不带一个会变的查询参数，浏览器会把已经缓存的
-   * 旧片子接着放，用户改了半天设置看到的画面一动不动。
+   * 预览播【母带】(画面+字幕+配音，无 BGM)，BGM 在下面另叠一条 <audio>。
+   * src 键在 masterVersion 上：换 BGM / 调音量都不改它 → 视频一帧不动、无缝切；
+   * 改文案/字幕/语速才改它 → 视频重新拉母带。masterVersion 还没回来时
+   * 退回 updatedAt，至少能播上。
    */
-  const src = `/api/projects/${project.id}/film/stream?v=${encodeURIComponent(project.updatedAt)}`
+  const ver = masterVersion ?? project.updatedAt
+  const src = `/api/projects/${project.id}/film/master/stream?v=${encodeURIComponent(ver)}`
+  // BGM 来自素材库（全局公用），不是项目素材
+  const bgmSrc = project.bgmLibraryId ? `/api/library/items/${project.bgmLibraryId}` : null
 
   const toggle = () => {
     const v = videoRef.current
+    const b = bgmRef.current
     if (!v) return
-    if (v.paused) { void v.play(); setPlaying(true) } else { v.pause(); setPlaying(false) }
+    if (v.paused) {
+      void v.play()
+      if (b) { syncBgm(v.currentTime); void b.play() }
+      setPlaying(true)
+    } else {
+      v.pause(); b?.pause()
+      setPlaying(false)
+    }
   }
 
   return (
@@ -104,12 +138,34 @@ export function FilmPlayer ({ onTimeChange, seek }: Props) {
             setCur(t)
             onTimeChange?.(Math.round(t * 1000))
           }}
-          onEnded={() => setPlaying(false)}
-          onPause={() => setPlaying(false)}
+          onEnded={() => { setPlaying(false); bgmRef.current?.pause() }}
+          onPause={() => { setPlaying(false); bgmRef.current?.pause() }}
           onPlay={() => setPlaying(true)}
         />
         <SubtitleGuide />
       </div>
+
+      {/*
+        背景音乐叠在视频上，浏览器里混音。这条就是"换 BGM 不卡"的实现：
+        换 BGM 只让 bgmSrc 变、这个 <audio> 换源，视频一帧不动。
+        loop：库里的曲子比配音短，循环铺满。muted 的视频负责画面+人声，
+        音量只作用于这条 BGM（bgmVolume 是相对配音的比例）。
+        key 用 bgmSrc：换曲子时强制重建元素，避免旧曲的播放位置串味。
+      */}
+      {bgmSrc && (
+        <audio
+          key={bgmSrc}
+          ref={bgmRef}
+          src={bgmSrc}
+          loop
+          preload="metadata"
+          onLoadedMetadata={(e) => {
+            e.currentTarget.volume = Math.min(1, Math.max(0, project.bgmVolume))
+            // 用户是在播放中途换的曲子：立刻对到当前进度并接着放
+            if (playing) { syncBgm(videoRef.current?.currentTime ?? 0); void e.currentTarget.play() }
+          }}
+        />
+      )}
 
       {/*
         【一整条，内部分块】。
@@ -146,6 +202,7 @@ export function FilmPlayer ({ onTimeChange, seek }: Props) {
               const t = Number(e.target.value)
               const v = videoRef.current
               if (v) v.currentTime = t
+              syncBgm(t)
               setCur(t)
             }}
             className="min-w-0 flex-1 accent-accent"

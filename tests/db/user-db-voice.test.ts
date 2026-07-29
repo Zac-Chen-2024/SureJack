@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import Database from 'better-sqlite3'
 import { openUserDb, type UserDb } from '../../src/db/user-db.js'
-import { DEFAULT_VOICE, LEGACY_VOICE, RATE_RANGE } from '../../src/tts/voices.js'
+import { DEFAULT_VOICE, LEGACY_VOICE, DEFAULT_VOICE_RATE } from '../../src/tts/voices.js'
 
 const LIST = ['测试配音参数甲']
 let dbs: UserDb[] = []
@@ -29,7 +29,7 @@ describe('projects 配音参数列 —— 增量迁移', () => {
     const p = db.createProject('新项目')
     expect(p.voiceName).toBe(DEFAULT_VOICE)
     expect(db.getProject(p.id)?.voiceName).toBe(DEFAULT_VOICE)
-    expect(p.voiceRate).toBe(RATE_RANGE.default)
+    expect(p.voiceRate).toBe(DEFAULT_VOICE_RATE)   // 新项目默认 +75%
   })
 
   /*

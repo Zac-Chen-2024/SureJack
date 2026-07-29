@@ -3,7 +3,7 @@ import { createReadStream } from 'node:fs'
 import { sendFileRange } from '../assets/storage.js'
 import { openUserDb, type Project } from '../db/user-db.js'
 import { getSession, requireAuth } from '../auth/session.js'
-import { downloadableFilm, enqueueFilm, filmInfo, resolveFilm, type FilmDeps } from '../compose/film.js'
+import { downloadableFilm, playableMaster, enqueueFilm, filmInfo, resolveFilm, type FilmDeps } from '../compose/film.js'
 
 type Deps = FilmDeps
 
@@ -98,6 +98,28 @@ export function registerExportRoutes (app: FastifyInstance, deps: Deps): void {
        * 永远是旧片子。
        */
       reply.header('Cache-Control', 'no-store')
+      return sendFileRange(reply, path, req.headers.range, 'video/mp4')
+    })
+
+  /**
+   * 【母带】播放流。预览播它，BGM 在浏览器里另叠一条音轨。
+   *
+   * 母带 = 画面 + 烧录字幕 + 配音，不含 BGM。换 BGM 只换浏览器那条音轨、
+   * 这个视频流一帧不动，所以换 BGM 不再重载视频、不再等服务器混音。
+   * 支持 Range（能拖进度条）。带上 v=<masterVersion> 让浏览器缓存友好：
+   * 母带没变时命中缓存，母带变了（改文案/字幕/语速）URL 变、自然重取。
+   */
+  app.get<{ Params: { id: string } }>(
+    '/api/projects/:id/film/master/stream', { preHandler: requireAuth }, async (req, reply) => {
+      const name = getSession(req)!
+      const project = withUserDb(name, (db) => db.getProject(req.params.id))
+      if (!project) return reply.code(404).send({ error: '项目不存在' })
+
+      const path = await playableMaster(deps, name, req.params.id)
+      if (path === null) return reply.code(404).send({ error: '母带还没合好' })
+
+      // 母带按版本区分 URL（前端带 ?v=masterVersion），同版本可缓存
+      reply.header('Cache-Control', 'private, max-age=3600')
       return sendFileRange(reply, path, req.headers.range, 'video/mp4')
     })
 
