@@ -3,9 +3,12 @@ import { useSession } from './store/session'
 import { LoginPage } from './pages/LoginPage'
 import { WelcomePage } from './pages/WelcomePage'
 import { Workspace } from './pages/Workspace'
+import { MobileWorkspace } from './pages/MobileWorkspace'
+import { useIsMobile } from './hooks/useIsMobile'
 
 export default function App () {
   const { status, check } = useSession()
+  const isMobile = useIsMobile()
   const [entered, setEntered] = useState(false)
 
   useEffect(() => { check() }, [check])
@@ -16,5 +19,5 @@ export default function App () {
   }
   if (status === 'anon') return <LoginPage />
   if (!entered) return <WelcomePage onEnter={() => setEntered(true)} />
-  return <Workspace />
+  return isMobile ? <MobileWorkspace /> : <Workspace />
 }
