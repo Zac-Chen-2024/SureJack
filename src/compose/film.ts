@@ -51,6 +51,7 @@ import {
 } from './prebuild.js'
 import { readStamp, reusableOutput, writeStamp } from './stamp.js'
 import type { AspectPreset, Clip } from '../types.js'
+import { isLegacyParams, type VoiceParams } from '../tts/voices.js'
 
 /** 成片文件名。手动导出和后台自动合成落在同一个位置，谁先做完都算数。 */
 export const FILM_FILE = 'export.mp4'
@@ -102,6 +103,14 @@ export interface FilmFingerprintInput {
   /** ASS 全文。文案、词级时间轴、字幕高度、显示模式全在里面 */
   ass: string
   voicePath: string
+  /**
+   * 配音参数（音色/语速/音量/音调）。它们决定配音音频本身，属于母带层。
+   *
+   * 【为什么不能只靠 voicePath / durationMs 兜住】：配音输出永远写在固定的
+   * voice.mp3，路径不变；改音色/音量/音调又不一定改变总时长。两者都不动时
+   * 母带指纹就不会变——用户改了音色却下载到旧片。所以必须显式列进来。
+   */
+  voiceParams: VoiceParams
   bgmPath: string | null
   bgmVolume: number
 }
@@ -126,11 +135,28 @@ export interface FilmFingerprintInput {
 export function masterFingerprint (
   i: Omit<FilmFingerprintInput, 'bgmPath' | 'bgmVolume'>,
 ): string {
-  return createHash('sha256').update(JSON.stringify([
+  const parts: unknown[] = [
     i.aspect.width, i.aspect.height, i.durationMs, i.bgKey,
     createHash('sha256').update(i.ass).digest('hex'),
     i.voicePath,
-  ])).digest('hex')
+  ]
+  /*
+   * ⚠️【配音参数只在偏离老默认时才追加】。这是"过往项目不重烧"的关键。
+   *
+   * 加这个功能之前，所有项目隐含用晓晓 + 中性韵律（= LEGACY_PARAMS）。
+   * 那时的母带指纹就是上面那 6 个元素、没有配音参数这一项。如果现在
+   * 无条件追加，老项目算出来的数组会多一段 → 指纹变 → 开机补合把它们
+   * 全重烧一遍。而用户明确要求过往项目不动。
+   *
+   * 老项目的参数正是 LEGACY_PARAMS（迁移默认值就锚定到它，见 user-db.ts），
+   * isLegacyParams 为真 → 不追加 → 数组和从前逐字节相同 → 指纹不变。
+   * 新项目用晓辰（偏离）→ 追加 → 指纹反映音色，改任一参数都会重烧。
+   */
+  if (!isLegacyParams(i.voiceParams)) {
+    const v = i.voiceParams
+    parts.push(v.voice, v.rate, v.volume, v.pitch)
+  }
+  return createHash('sha256').update(JSON.stringify(parts)).digest('hex')
 }
 
 /**
@@ -287,7 +313,12 @@ export function resolveFilm (
   const bgmPath = libraryBgmPath ?? snap.bgms[0]?.path ?? null
   const fpInput = {
     aspect, durationMs, bgKey, ass,
-    voicePath: voice.path, bgmPath, bgmVolume: project.bgmVolume,
+    voicePath: voice.path,
+    voiceParams: {
+      voice: project.voiceName, rate: project.voiceRate,
+      volume: project.voiceVolume, pitch: project.voicePitch,
+    },
+    bgmPath, bgmVolume: project.bgmVolume,
   }
 
   return {

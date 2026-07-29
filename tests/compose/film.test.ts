@@ -10,6 +10,7 @@ const BASE: FilmFingerprintInput = {
   bgKey: 'plan:abc',
   ass: '[Script Info]\nDialogue: 他站在门口',
   voicePath: '/data/甲/p1/voice.mp3',
+  voiceParams: { voice: 'zh-CN-XiaoxiaoNeural', rate: 0, volume: 0, pitch: 0 },
   bgmPath: '/data/library/4-BGM/雨.mp3',
   bgmVolume: 0.15,
 }

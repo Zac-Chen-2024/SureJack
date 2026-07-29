@@ -51,7 +51,15 @@ export function registerTtsRoutes (app: FastifyInstance, deps: Deps): void {
         await mkdir(dir, { recursive: true })
         const outPath = join(dir, 'voice.mp3')
 
-        const result = await synth({ text, outPath, key, region })
+        // 配音参数从项目取（前端在触发生成前已经 patch 进去了）。
+        // 音色/语速/音量/音调对文本配音路生效；自备音频路根本不到这里。
+        const result = await synth({
+          text, outPath, key, region,
+          voice: project.voiceName,
+          rate: project.voiceRate,
+          volume: project.voiceVolume,
+          pitch: project.voicePitch,
+        })
 
         const updated = withUserDb(name, (db) => {
           // 旧的配音素材记录先清掉，避免堆积

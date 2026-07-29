@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import { usePipeline } from '../store/pipeline'
 import { useProjects } from '../store/projects'
+import { VoiceSettings } from './VoiceSettings'
 import { useSubtitles } from '../store/subtitles'
 import { Button } from './ui/Button'
 import { IconMic, IconCheck, IconLoader, IconUpload } from './ui/Icon'
@@ -147,6 +148,16 @@ export function VoicePanel () {
         <p className="mt-1.5 text-[11px] leading-relaxed text-ink-400">
           文案较长，已分 {voiceSegmentCount} 段合成并自动拼接。段落衔接处语气可能略有变化。
         </p>
+      )}
+
+      {/*
+        配音参数只在「文本配音」路给：自备音频那条路声音已固化在文件里，
+        音色/语速对它无意义。isByo 为真就整块不渲染。
+      */}
+      {!isByo && (
+        <div className="mt-3 border-t border-line pt-3">
+          <VoiceSettings />
+        </div>
       )}
     </div>
   )

@@ -18,8 +18,10 @@ const SENTENCE_END = /[。！？；…\n]/
  * 短文案原样返回单元素数组——调用方据此跳过拼接路径，
  * 行为与未引入分段前完全一致。
  */
-export function splitScript (text: string, maxMs = DEFAULT_MAX_MS): string[] {
-  if (estimateAudioMs(text.length) <= maxMs) return [text]
+export function splitScript (text: string, maxMs = DEFAULT_MAX_MS, rate = 0): string[] {
+  // rate 是语速百分比偏移：调慢会让实际音频变长，估算必须跟着放大，
+  // 否则某段真到 Azure 才发现超 10 分钟上限。见 azure.ts 的 rateFactor。
+  if (estimateAudioMs(text.length, rate) <= maxMs) return [text]
 
   // 先按句末标点切成句子，标点跟在句子末尾
   const sentences: string[] = []
@@ -30,7 +32,7 @@ export function splitScript (text: string, maxMs = DEFAULT_MAX_MS): string[] {
   }
   if (cur) sentences.push(cur)   // 结尾没标点的残句
 
-  const maxChars = maxCharsForMs(maxMs)
+  const maxChars = maxCharsForMs(maxMs, rate)
   const chunks: string[] = []
   let buf = ''
 

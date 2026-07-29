@@ -49,7 +49,8 @@ export async function synthesizeLong (
   const synth = deps.synthesize ?? synthesize
   const probe = deps.probe ?? probeDurationMs
 
-  const chunks = splitScript(opts.text)
+  // rate 透传给切段：调慢语速时估算要跟着放大，否则某段撞 Azure 10 分钟上限
+  const chunks = splitScript(opts.text, undefined, opts.rate ?? 0)
 
   // 直通：不切段就不碰拼接，少一层出错的可能
   if (chunks.length === 1) {

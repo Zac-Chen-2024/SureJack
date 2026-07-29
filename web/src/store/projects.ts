@@ -31,6 +31,31 @@ export const DEFAULT_SUBTITLE_FONT_SIZE = 64
 export const MIN_SUBTITLE_FONT_SIZE = 36
 export const MAX_SUBTITLE_FONT_SIZE = 120
 
+/*
+ * 配音音色与韵律。⚠️【必须和后端 src/tts/voices.ts 逐条一致】——前端不能
+ * import 后端（会把 better-sqlite3 拖进浏览器包），只能各存一份，
+ * 靠 tests/web 里的对齐测试钉死两边。加/删音色时两处都要改。
+ */
+export interface VoiceOption { id: string; label: string; gender: 'female' | 'male' }
+export const VOICES: VoiceOption[] = [
+  { id: 'zh-CN-XiaochenNeural', label: '晓辰（女·自然）', gender: 'female' },
+  { id: 'zh-CN-XiaoxiaoNeural', label: '晓晓（女·温柔）', gender: 'female' },
+  { id: 'zh-CN-XiaoyiNeural', label: '晓伊（女·活泼）', gender: 'female' },
+  { id: 'zh-CN-XiaohanNeural', label: '晓涵（女·温暖）', gender: 'female' },
+  { id: 'zh-CN-XiaomoNeural', label: '晓墨（女·多变）', gender: 'female' },
+  { id: 'zh-CN-YunxiNeural', label: '云希（男·少年）', gender: 'male' },
+  { id: 'zh-CN-YunyangNeural', label: '云扬（男·播报）', gender: 'male' },
+  { id: 'zh-CN-YunjianNeural', label: '云健（男·浑厚）', gender: 'male' },
+  { id: 'zh-CN-YunxiaNeural', label: '云夏（男·阳光）', gender: 'male' },
+  { id: 'zh-CN-YunyeNeural', label: '云野（男·成熟）', gender: 'male' },
+]
+export interface VoiceDraft {
+  voiceName: string; voiceRate: number; voiceVolume: number; voicePitch: number
+}
+export const RATE_RANGE = { min: -50, max: 100, default: 0 }
+export const VOLUME_RANGE = { min: -50, max: 50, default: 0 }
+export const PITCH_RANGE = { min: -50, max: 50, default: 0 }
+
 /** 和后端 ASPECT_PRESETS 一致。认不出的画幅回落竖屏，与 aspectOf 同规则 */
 const ASPECT_HEIGHT: Record<string, number> = {
   '9:16': 1920, '4:5': 1350, '1:1': 1080, '16:9': 1080,
@@ -84,6 +109,10 @@ export interface Project {
    */
   subtitleMarginV: number
   subtitleFontSize: number
+  voiceName: string
+  voiceRate: number
+  voiceVolume: number
+  voicePitch: number
   createdAt: string
   updatedAt: string
 }
@@ -114,7 +143,7 @@ interface ProjectsState {
   select: (id: string) => void
   updateScript: (text: string) => Promise<void>
   /** 素材选择类字段的通用补丁（乐观更新）。setBgm / setBgmVolume 的共用底座 */
-  patchProject: (patch: Partial<Pick<Project, 'bgmLibraryId' | 'bgmVolume' | 'subtitleMarginV' | 'subtitleFontSize'>>) => Promise<void>
+  patchProject: (patch: Partial<Pick<Project, 'bgmLibraryId' | 'bgmVolume' | 'subtitleMarginV' | 'subtitleFontSize' | 'voiceName' | 'voiceRate' | 'voiceVolume' | 'voicePitch'>>) => Promise<void>
   /** 选/取消选背景音乐。null 表示不要 BGM */
   setBgm: (bgmLibraryId: string | null) => Promise<void>
   /** 调背景音乐音量。调用方负责节流——见 AssetPanel 的滑块 */
@@ -122,6 +151,11 @@ interface ProjectsState {
   /** 调字幕高度。调用方负责防抖——见 SubtitleHeight 的滑块 */
   setSubtitleMarginV: (marginV: number) => Promise<void>
   commitSubtitleDraft: () => Promise<void>
+  /** 配音参数草稿。拖动/选择只改它，确认才落库+重配音 */
+  draftVoice: VoiceDraft | null
+  setDraftVoice: (patch: Partial<VoiceDraft>) => void
+  resetDraftVoice: () => void
+  commitVoiceParams: () => Promise<void>
   /*
    * 【字幕高度的草稿值】。拖滑块只改它，不落库。
    *
@@ -183,7 +217,7 @@ export const useProjects = create<ProjectsState>((set, get) => ({
 
   // 切项目要清掉草稿——否则上一个项目那个没确认的高度会跟着过来，
   // 界面显示着 A 的改动、确认下去改的却是 B
-  select (id) { saveLastProjectId(id); set({ currentId: id, draftMarginV: null, draftFontSize: null }) },
+  select (id) { saveLastProjectId(id); set({ currentId: id, draftMarginV: null, draftFontSize: null, draftVoice: null }) },
 
   /**
    * 保存文案。乐观更新：先改本地（打字不卡），再发请求。
@@ -205,7 +239,7 @@ export const useProjects = create<ProjectsState>((set, get) => ({
    * 点一下 BGM 要立刻选中、拖滑块要跟手，不能等一个来回。
    * 后端回来的整条项目再覆盖一次，以它为准。
    */
-  async patchProject (patch: Partial<Pick<Project, 'bgmLibraryId' | 'bgmVolume' | 'subtitleMarginV' | 'subtitleFontSize'>>) {
+  async patchProject (patch: Partial<Pick<Project, 'bgmLibraryId' | 'bgmVolume' | 'subtitleMarginV' | 'subtitleFontSize' | 'voiceName' | 'voiceRate' | 'voiceVolume' | 'voicePitch'>>) {
     const id = get().currentId
     if (!id) return
     set((s) => ({ items: s.items.map((p) => (p.id === id ? { ...p, ...patch } : p)) }))
@@ -229,6 +263,34 @@ export const useProjects = create<ProjectsState>((set, get) => ({
   setDraftMarginV (marginV) { set({ draftMarginV: marginV }) },
   draftFontSize: null,
   setDraftFontSize (size) { set({ draftFontSize: size }) },
+
+  draftVoice: null,
+  setDraftVoice (patch) {
+    // 从已存值起草，再叠上这次的改动——组件不必自己拼完整对象
+    const cur = get().current()
+    const base = get().draftVoice ?? (cur ? {
+      voiceName: cur.voiceName, voiceRate: cur.voiceRate,
+      voiceVolume: cur.voiceVolume, voicePitch: cur.voicePitch,
+    } : null)
+    if (!base) return
+    set({ draftVoice: { ...base, ...patch } })
+  },
+  resetDraftVoice () { set({ draftVoice: null }) },
+
+  /*
+   * 只把配音参数落库，清掉草稿。【不在这里触发重新生成】——重配音要烧
+   * Azure 配额、还要重烧成片，那是个"确认"动作，由组件在这之后显式调
+   * pipeline.generateVoice。放在这里会让一次纯参数保存也偷偷烧配额。
+   */
+  async commitVoiceParams () {
+    const d = get().draftVoice
+    if (!d) return
+    await get().patchProject({
+      voiceName: d.voiceName, voiceRate: d.voiceRate,
+      voiceVolume: d.voiceVolume, voicePitch: d.voicePitch,
+    })
+    set({ draftVoice: null })
+  },
 
   async setSubtitleMarginV (marginV) {
     await get().patchProject({ subtitleMarginV: Math.max(0, Math.round(marginV)) })

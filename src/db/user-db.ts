@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { userDbDir } from '../auth/whitelist.js'
 import { DEFAULT_SUBTITLE_MARGIN_V, DEFAULT_SUBTITLE_FONT_SIZE } from '../subtitles/ass.js'
+import { LEGACY_VOICE, DEFAULT_VOICE, RATE_RANGE, VOLUME_RANGE, PITCH_RANGE } from '../tts/voices.js'
 
 /**
  * 素材种类。
@@ -84,6 +85,11 @@ export interface Project {
   subtitleMarginV: number
   /** 正文字幕字号，ASS 单位 */
   subtitleFontSize: number
+  /** 配音音色/语速/音量/音调。只对文本配音路有意义，见 tts/voices.ts */
+  voiceName: string
+  voiceRate: number
+  voiceVolume: number
+  voicePitch: number
   createdAt: string
   updatedAt: string
 }
@@ -101,6 +107,7 @@ export interface UserDb {
     bgmLibraryId?: string | null
     subtitleMarginV?: number
     subtitleFontSize?: number
+    voiceName?: string; voiceRate?: number; voiceVolume?: number; voicePitch?: number
   }): Project | null
   deleteProject (id: string): boolean
   addAsset (input: {
@@ -126,6 +133,10 @@ interface Row {
   bgm_volume: number; subtitle_mode: string; bgm_library_id: string | null
   subtitle_margin_v: number | null
   subtitle_font_size: number | null
+  voice_name: string | null
+  voice_rate: number | null
+  voice_volume: number | null
+  voice_pitch: number | null
   created_at: string; updated_at: string
 }
 const toProject = (r: Row): Project => ({
@@ -138,6 +149,11 @@ const toProject = (r: Row): Project => ({
   subtitleMode: (r.subtitle_mode ?? 'karaoke') as 'line' | 'karaoke',
   subtitleMarginV: r.subtitle_margin_v ?? DEFAULT_SUBTITLE_MARGIN_V,
   subtitleFontSize: r.subtitle_font_size ?? DEFAULT_SUBTITLE_FONT_SIZE,
+  // 老行没有这几列时回落到「老默认」——晓晓+中性，正是它们的事实值
+  voiceName: r.voice_name ?? LEGACY_VOICE,
+  voiceRate: r.voice_rate ?? RATE_RANGE.default,
+  voiceVolume: r.voice_volume ?? VOLUME_RANGE.default,
+  voicePitch: r.voice_pitch ?? PITCH_RANGE.default,
   createdAt: r.created_at, updatedAt: r.updated_at,
 })
 
@@ -183,6 +199,10 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
       bgm_library_id TEXT,
       subtitle_margin_v INTEGER NOT NULL DEFAULT ${DEFAULT_SUBTITLE_MARGIN_V},
       subtitle_font_size INTEGER NOT NULL DEFAULT ${DEFAULT_SUBTITLE_FONT_SIZE},
+      voice_name TEXT NOT NULL DEFAULT '${LEGACY_VOICE}',
+      voice_rate INTEGER NOT NULL DEFAULT ${RATE_RANGE.default},
+      voice_volume INTEGER NOT NULL DEFAULT ${VOLUME_RANGE.default},
+      voice_pitch INTEGER NOT NULL DEFAULT ${PITCH_RANGE.default},
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -229,6 +249,13 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
   // 写死在 Sub 样式行里的那个数，所以老项目的观感一动不动。
   addCol('subtitle_margin_v', `subtitle_margin_v INTEGER NOT NULL DEFAULT ${DEFAULT_SUBTITLE_MARGIN_V}`)
   addCol('subtitle_font_size', `subtitle_font_size INTEGER NOT NULL DEFAULT ${DEFAULT_SUBTITLE_FONT_SIZE}`)
+  // ⚠️ 配音列的默认值填【老默认晓晓】不是晓辰：ALTER TABLE 会把这个默认回填进
+  // 所有老行，回填成晓晓才是它们的事实，母带指纹才不变、才不会被重烧。
+  // 新项目的晓辰由 createProject 显式写（见下）。
+  addCol('voice_name', `voice_name TEXT NOT NULL DEFAULT '${LEGACY_VOICE}'`)
+  addCol('voice_rate', `voice_rate INTEGER NOT NULL DEFAULT ${RATE_RANGE.default}`)
+  addCol('voice_volume', `voice_volume INTEGER NOT NULL DEFAULT ${VOLUME_RANGE.default}`)
+  addCol('voice_pitch', `voice_pitch INTEGER NOT NULL DEFAULT ${PITCH_RANGE.default}`)
 
   return {
     raw: db,
@@ -252,17 +279,21 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
         wordTimingsJson: null, bgmVolume: DEFAULT_BGM_VOLUME, subtitleMode: 'karaoke',
         bgmLibraryId: null, subtitleMarginV: DEFAULT_SUBTITLE_MARGIN_V,
         subtitleFontSize: DEFAULT_SUBTITLE_FONT_SIZE,
+        voiceName: DEFAULT_VOICE, voiceRate: RATE_RANGE.default,
+        voiceVolume: VOLUME_RANGE.default, voicePitch: PITCH_RANGE.default,
         createdAt: now, updatedAt: now,
       }
       db.prepare(
         `INSERT INTO projects
-          (id, name, script_text, aspect_ratio, tts_state, tts_duration_ms, word_timings_json, bgm_volume, subtitle_mode, bgm_library_id, subtitle_margin_v, subtitle_font_size, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          (id, name, script_text, aspect_ratio, tts_state, tts_duration_ms, word_timings_json, bgm_volume, subtitle_mode, bgm_library_id, subtitle_margin_v, subtitle_font_size, voice_name, voice_rate, voice_volume, voice_pitch, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         project.id, project.name, project.scriptText, project.aspectRatio,
         project.ttsState, project.ttsDurationMs, project.wordTimingsJson,
         project.bgmVolume, project.subtitleMode, project.bgmLibraryId,
-        project.subtitleMarginV, project.subtitleFontSize, now, now,
+        project.subtitleMarginV, project.subtitleFontSize,
+        project.voiceName, project.voiceRate, project.voiceVolume, project.voicePitch,
+        now, now,
       )
       return project
     },
@@ -277,7 +308,8 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
           name = ?, script_text = ?, aspect_ratio = ?,
           tts_state = ?, tts_duration_ms = ?, word_timings_json = ?,
           bgm_volume = ?, subtitle_mode = ?, bgm_library_id = ?,
-          subtitle_margin_v = ?, subtitle_font_size = ?, updated_at = ?
+          subtitle_margin_v = ?, subtitle_font_size = ?,
+          voice_name = ?, voice_rate = ?, voice_volume = ?, voice_pitch = ?, updated_at = ?
           WHERE id = ?`
       ).run(
         patch.name ?? row.name,
@@ -299,6 +331,10 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
         patch.subtitleFontSize !== undefined
           ? patch.subtitleFontSize
           : row.subtitle_font_size ?? DEFAULT_SUBTITLE_FONT_SIZE,
+        patch.voiceName !== undefined ? patch.voiceName : row.voice_name ?? LEGACY_VOICE,
+        patch.voiceRate !== undefined ? patch.voiceRate : row.voice_rate ?? RATE_RANGE.default,
+        patch.voiceVolume !== undefined ? patch.voiceVolume : row.voice_volume ?? VOLUME_RANGE.default,
+        patch.voicePitch !== undefined ? patch.voicePitch : row.voice_pitch ?? PITCH_RANGE.default,
         now, id,
       )
       const updated = db.prepare('SELECT * FROM projects WHERE id = ?').get(id) as Row

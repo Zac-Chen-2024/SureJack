@@ -3,6 +3,7 @@ import { readFile, rm } from 'node:fs/promises'
 import { openUserDb } from '../db/user-db.js'
 import { adoptSrtText, overrunWarning, scriptFromSrtWords } from '../subtitles/from-srt.js'
 import { clampSubtitleFontSize, clampSubtitleMarginV } from '../subtitles/project-ass.js'
+import { isAllowedVoice, clampRate, clampVolume, clampPitch } from '../tts/voices.js'
 import { probeDurationMs } from '../render/probe.js'
 import { getSession, requireAuth } from '../auth/session.js'
 import { assetDir } from '../assets/storage.js'
@@ -55,11 +56,13 @@ export function registerProjectRoutes (app: FastifyInstance, deps: Deps): void {
   app.patch<{ Params: { id: string }; Body: {
     name?: unknown; scriptText?: unknown; aspectRatio?: unknown
     bgmLibraryId?: unknown; bgmVolume?: unknown; subtitleMarginV?: unknown; subtitleFontSize?: unknown
+    voiceName?: unknown; voiceRate?: unknown; voiceVolume?: unknown; voicePitch?: unknown
   } }>(
     '/api/projects/:id', { preHandler: requireAuth }, async (req, reply) => {
       const patch: {
         name?: string; scriptText?: string; aspectRatio?: string
         bgmLibraryId?: string | null; bgmVolume?: number; subtitleMarginV?: number; subtitleFontSize?: number
+        voiceName?: string; voiceRate?: number; voiceVolume?: number; voicePitch?: number
       } = {}
       if (typeof req.body?.name === 'string') patch.name = req.body.name
       if (typeof req.body?.scriptText === 'string') patch.scriptText = req.body.scriptText
@@ -123,6 +126,20 @@ export function registerProjectRoutes (app: FastifyInstance, deps: Deps): void {
       patch.subtitleFontSize = clampSubtitleFontSize(raw)
     }
         }
+
+        /*
+         * 配音参数。音色走【枚举白名单】——不在清单里的 id 到了 Azure 会
+         * 直接合成失败，早挡早好；语速/音量/音调【钳位】到合法范围。
+         */
+        if (req.body?.voiceName !== undefined) {
+          if (!isAllowedVoice(req.body.voiceName)) {
+            return reply.code(400).send({ error: '不支持的音色' })
+          }
+          patch.voiceName = req.body.voiceName
+        }
+        if (req.body?.voiceRate !== undefined) patch.voiceRate = clampRate(req.body.voiceRate)
+        if (req.body?.voiceVolume !== undefined) patch.voiceVolume = clampVolume(req.body.voiceVolume)
+        if (req.body?.voicePitch !== undefined) patch.voicePitch = clampPitch(req.body.voicePitch)
 
         return db.updateProject(req.params.id, patch)
       })

@@ -1,5 +1,6 @@
 import * as sdk from 'microsoft-cognitiveservices-speech-sdk'
 import { unescapeXml } from '../importers/sanitize.js'
+import { DEFAULT_VOICE, pct } from './voices.js'
 import type { WordTiming, TtsResult } from '../types.js'
 
 /**
@@ -10,14 +11,25 @@ import type { WordTiming, TtsResult } from '../types.js'
  */
 export const MS_PER_CHAR = 196
 
-/** 由字数估算音频时长。用于切段与提交前校验，不求精确。 */
-export function estimateAudioMs (charCount: number): number {
-  return charCount * MS_PER_CHAR
+/**
+ * 语速偏移（百分比）→ 每字实际时长的缩放因子。
+ *
+ * rate=+50 表示快 50%，音频变短，每字时长 × 100/150；rate=-50 变慢，× 100/50=2。
+ * 切段用它把估算校准到【实际】语速——否则调慢语速时估算偏低，某一段可能
+ * 超出 Azure 单次 10 分钟硬上限而合成失败（split.ts 的 8 分钟目标本就贴着上限）。
+ */
+export function rateFactor (rate = 0): number {
+  return 100 / (100 + rate)
 }
 
-/** estimateAudioMs 的反函数：给定毫秒预算，最多能放几个字。 */
-export function maxCharsForMs (ms: number): number {
-  return Math.floor(ms / MS_PER_CHAR)
+/** 由字数估算音频时长。用于切段与提交前校验，不求精确。rate 是语速百分比偏移。 */
+export function estimateAudioMs (charCount: number, rate = 0): number {
+  return charCount * MS_PER_CHAR * rateFactor(rate)
+}
+
+/** estimateAudioMs 的反函数：给定毫秒预算，最多能放几个字。rate 同上。 */
+export function maxCharsForMs (ms: number, rate = 0): number {
+  return Math.floor(ms / (MS_PER_CHAR * rateFactor(rate)))
 }
 
 /**
@@ -61,8 +73,37 @@ export interface SynthesizeOptions {
   text: string
   outPath: string
   voice?: string
+  /** 语速/音量/音调，整数百分比偏移，缺省 0=不改。见 voices.ts 的范围 */
+  rate?: number
+  volume?: number
+  pitch?: number
   key: string
   region: string
+}
+
+/**
+ * 把正文包成 SSML。
+ *
+ * 【为什么必须 SSML】：rate/volume/pitch 只有 <prosody> 能表达，纯文本
+ * 的 speakTextAsync 给不了。音色也顺手放进 <voice>（虽然它也能走
+ * SpeechConfig，但同处一地更清楚）。
+ *
+ * ⚠️【正文必须 XML 转义】：文案里的 & < > 直接塞进 SSML 会让整段
+ * 解析失败或吞字。这里做的是 escape，和 toWordTiming 里对回传 text 做的
+ * unescape 是配对的两半。
+ */
+export function buildSsml (opts: {
+  text: string; voice: string; rate: number; volume: number; pitch: number
+}): string {
+  const body = opts.text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+  return `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="zh-CN">`
+    + `<voice name="${opts.voice}">`
+    + `<prosody rate="${pct(opts.rate)}" volume="${pct(opts.volume)}" pitch="${pct(opts.pitch)}">`
+    + body
+    + `</prosody></voice></speak>`
 }
 
 /**
@@ -80,9 +121,18 @@ export interface SynthesizeOptions {
 export function synthesize (opts: SynthesizeOptions): Promise<TtsResult> {
   return new Promise((resolve, reject) => {
     const config = sdk.SpeechConfig.fromSubscription(opts.key, opts.region)
-    config.speechSynthesisVoiceName = opts.voice ?? 'zh-CN-XiaoxiaoNeural'
+    // 音色由 SSML 的 <voice> 指定；这里不再设 speechSynthesisVoiceName，
+    // 避免两处各说一遍、将来漂移。格式仍要设。
     config.speechSynthesisOutputFormat =
       sdk.SpeechSynthesisOutputFormat.Audio24Khz96KBitRateMonoMp3
+
+    const ssml = buildSsml({
+      text: opts.text,
+      voice: opts.voice ?? DEFAULT_VOICE,
+      rate: opts.rate ?? 0,
+      volume: opts.volume ?? 0,
+      pitch: opts.pitch ?? 0,
+    })
 
     const synth = new sdk.SpeechSynthesizer(
       config, sdk.AudioConfig.fromAudioFileOutput(opts.outPath))
@@ -108,7 +158,7 @@ export function synthesize (opts: SynthesizeOptions): Promise<TtsResult> {
       reject(new Error(`配音超时：${Math.round(timeoutMs / 60000)} 分钟内未收到 Azure 响应`))
     }, timeoutMs)
 
-    synth.speakTextAsync(opts.text, (result) => {
+    synth.speakSsmlAsync(ssml, (result) => {
       if (settled) return
       settled = true
       clearTimeout(timer)

@@ -24,9 +24,52 @@ const BASE: FilmFingerprintInput = {
   bgKey: 'plan:abc123',
   ass: '[Script Info]\nPlayResX: 1080\n',
   voicePath: '/data/甲/assets/p1/voice.mp3',
+  voiceParams: { voice: 'zh-CN-XiaoxiaoNeural', rate: 0, volume: 0, pitch: 0 },
   bgmPath: '/data/library/背景音乐/一笑倾城.mp3',
   bgmVolume: 0.15,
 }
+
+describe('配音参数进母带指纹（carve-out 保护老项目）', () => {
+  /*
+   * 这是整个「配音参数化」最关键的一条断言：加了配音参数字段之后，
+   * 用【老默认】（晓晓+中性）算出的母带指纹，必须和「假想的、根本不含
+   * 配音参数」的旧版本逐字节相同——否则四个已存在的老项目一部署就被
+   * 开机补合全重烧一遍，而用户明确要求过往不动。
+   *
+   * 验证办法：老默认那一组算出来的指纹，等于把 voiceParams 那段完全去掉、
+   * 手工复刻旧公式（6 个元素）算出来的 sha256。两者相等 = carve-out 生效。
+   */
+  it('【老默认 = 旧指纹，逐字节相同】过往项目绝不重烧', async () => {
+    const { createHash } = await import('node:crypto')
+    const legacy: FilmFingerprintInput = {
+      ...BASE,
+      voiceParams: { voice: 'zh-CN-XiaoxiaoNeural', rate: 0, volume: 0, pitch: 0 },
+    }
+    // 手工复刻「没有配音参数时」的旧公式
+    const oldStyle = createHash('sha256').update(JSON.stringify([
+      legacy.aspect.width, legacy.aspect.height, legacy.durationMs, legacy.bgKey,
+      createHash('sha256').update(legacy.ass).digest('hex'),
+      legacy.voicePath,
+    ])).digest('hex')
+    expect(masterFingerprint(legacy)).toBe(oldStyle)
+  })
+
+  it('【换音色 → 母带指纹变】否则改了音色却下载到旧片', () => {
+    const legacy = { ...BASE, voiceParams: { voice: 'zh-CN-XiaoxiaoNeural', rate: 0, volume: 0, pitch: 0 } }
+    const chen = { ...BASE, voiceParams: { voice: 'zh-CN-XiaochenNeural', rate: 0, volume: 0, pitch: 0 } }
+    expect(masterFingerprint(chen)).not.toBe(masterFingerprint(legacy))
+  })
+
+  it.each([
+    ['语速', { rate: 30 }],
+    ['音量', { volume: -10 }],
+    ['音调', { pitch: 5 }],
+  ])('【改%s → 母带指纹变】', (_label, patch) => {
+    const legacy = { ...BASE, voiceParams: { voice: 'zh-CN-XiaoxiaoNeural', rate: 0, volume: 0, pitch: 0 } }
+    const changed = { ...BASE, voiceParams: { ...legacy.voiceParams, ...patch } }
+    expect(masterFingerprint(changed)).not.toBe(masterFingerprint(legacy))
+  })
+})
 
 describe('指纹分两层', () => {
   it('【换 BGM：母带指纹不变，成片指纹变】这是整个优化成立的前提', () => {
