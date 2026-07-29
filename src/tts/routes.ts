@@ -1,10 +1,13 @@
 import type { FastifyInstance } from 'fastify'
-import { mkdir } from 'node:fs/promises'
+import { mkdir, readFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { openUserDb } from '../db/user-db.js'
 import { getSession, requireAuth } from '../auth/session.js'
 import { assetDir } from '../assets/storage.js'
-import { synthesizeLong } from './index.js'
+import { synthesize, synthesizeLong } from './index.js'
+import { isAllowedVoice, clampRate, clampVolume, clampPitch } from './voices.js'
 import { normalizeScript } from '../importers/sanitize.js'
 import { enqueueFilm, type FilmDeps } from '../compose/film.js'
 
@@ -21,6 +24,47 @@ export function registerTtsRoutes (app: FastifyInstance, deps: Deps): void {
     const db = openUserDb(name, whitelist)
     try { return fn(db) } finally { db.close() }
   }
+
+  /**
+   * 【试听】。合成文案开头一小段（不是整篇），确认前就能听到当前
+   * 音色/语速/音量/音调的效果——否则每调一下都要等十几分钟整篇重做。
+   * 参数从请求体来（草稿值），不改项目、不入库、不触发合成。只合一句，
+   * Azure 花销可忽略。音频字节直接回给前端，不落盘、不建素材记录。
+   */
+  app.post<{ Params: { id: string }; Body: {
+    voice?: unknown; rate?: unknown; volume?: unknown; pitch?: unknown
+  } }>(
+    '/api/projects/:id/voice/preview', { preHandler: requireAuth }, async (req, reply) => {
+      const name = getSession(req)!
+      const project = withUserDb(name, (db) => db.getProject(req.params.id))
+      if (!project) return reply.code(404).send({ error: '项目不存在' })
+
+      const voice = isAllowedVoice(req.body?.voice) ? req.body.voice : project.voiceName
+      const rate = req.body?.rate !== undefined ? clampRate(req.body.rate) : project.voiceRate
+      const volume = req.body?.volume !== undefined ? clampVolume(req.body.volume) : project.voiceVolume
+      const pitch = req.body?.pitch !== undefined ? clampPitch(req.body.pitch) : project.voicePitch
+      const sample = sampleText(normalizeScript(project.scriptText))
+
+      const key = process.env.AZURE_SPEECH_KEY
+      const region = process.env.AZURE_SPEECH_REGION
+      if (!key || !region) return reply.code(500).send({ error: '服务端未配置配音服务' })
+
+      const dir = join(tmpdir(), `sj-preview-${randomUUID()}`)
+      await mkdir(dir, { recursive: true })
+      const out = join(dir, 'preview.mp3')
+      try {
+        await synthesize({ text: sample, outPath: out, voice, rate, volume, pitch, key, region })
+        const buf = await readFile(out)
+        reply.header('Content-Type', 'audio/mpeg')
+        reply.header('Cache-Control', 'no-store')
+        return reply.send(buf)
+      } catch (e) {
+        req.log.error(e)
+        return reply.code(502).send({ error: e instanceof Error ? e.message : '试听合成失败' })
+      } finally {
+        await rm(dir, { recursive: true, force: true }).catch(() => {})
+      }
+    })
 
   /**
    * 生成配音。设计文档第 6 节：这是【手动触发】的——
@@ -104,4 +148,16 @@ export function registerTtsRoutes (app: FastifyInstance, deps: Deps): void {
         return reply.code(502).send({ error: e instanceof Error ? e.message : '配音失败' })
       }
     })
+}
+
+/**
+ * 试听样段：取文案开头、到最近一个句末标点为止，最多约 50 字。
+ * 太短听不出语气，太长白烧配额还让人等。空文案给一句固定示例。
+ */
+function sampleText (script: string): string {
+  const s = script.trim()
+  if (!s) return '这是配音的试听效果，你可以听听音色和语速合不合适。'
+  const head = [...s].slice(0, 50).join('')
+  const m = /[。！？；…]/.exec(head)
+  return m ? head.slice(0, head.indexOf(m[0]) + 1) : head
 }

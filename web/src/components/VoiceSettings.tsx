@@ -1,10 +1,10 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import {
   useProjects, VOICES, RATE_RANGE, VOLUME_RANGE, PITCH_RANGE,
 } from '../store/projects'
 import { usePipeline } from '../store/pipeline'
 import { Select } from './ui/Select'
-import { IconMic } from './ui/Icon'
+import { IconMic, IconPlay, IconLoader } from './ui/Icon'
 
 /**
  * 配音参数：音色 + 语速 / 音量 / 音调。
@@ -33,6 +33,14 @@ export function VoiceSettings () {
   const generateVoice = usePipeline((s) => s.generateVoice)
   const voiceBusy = usePipeline((s) => s.voiceBusy)
   const [busy, setBusy] = useState(false)
+  const [previewBusy, setPreviewBusy] = useState(false)
+  const previewAudio = useRef<HTMLAudioElement | null>(null)
+
+  // 组件卸载/切项目时停掉正在放的试听，别让声音跟着飘到别的项目
+  useEffect(() => () => {
+    previewAudio.current?.pause()
+    if (previewAudio.current?.src) URL.revokeObjectURL(previewAudio.current.src)
+  }, [project?.id])
 
   if (!project) return null
 
@@ -65,6 +73,31 @@ export function VoiceSettings () {
 
   const working = busy || voiceBusy
 
+  /*
+   * 试听：拿当前（草稿）参数合一小段样本，就地播。让用户在花十几分钟整篇
+   * 重做【之前】就听到音色/语速对不对。返回的是音频字节，用 blob URL 播、
+   * 放完即弃。每次点都停掉上一段再放新的，避免叠着响。
+   */
+  async function onPreview () {
+    setPreviewBusy(true)
+    try {
+      const res = await fetch(`/api/projects/${project!.id}/voice/preview`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ voice: voiceName, rate, volume, pitch }),
+      })
+      if (!res.ok) throw new Error('试听失败')
+      const url = URL.createObjectURL(await res.blob())
+      previewAudio.current?.pause()
+      if (previewAudio.current?.src) URL.revokeObjectURL(previewAudio.current.src)
+      const audio = new Audio(url)
+      previewAudio.current = audio
+      await audio.play()
+    } catch { /* 试听失败不打断主流程，用户再点一次即可 */ } finally {
+      setPreviewBusy(false)
+    }
+  }
+
   return (
     <div>
       <div className="mb-1.5 flex items-center gap-1.5 text-[11px] uppercase tracking-wider text-ink-400">
@@ -91,6 +124,19 @@ export function VoiceSettings () {
         label="音调" value={pitch} range={PITCH_RANGE}
         onChange={(n) => setDraftVoice({ voicePitch: n })}
       />
+
+      {/*
+        试听常驻——不管有没有改动都能点，随时听听当前这套设置的效果。
+        它合的是文案开头一小段，几秒钟就好，不烧整篇配额。
+      */}
+      <button
+        type="button" onClick={() => void onPreview()} disabled={previewBusy}
+        className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-xs text-ink-200 transition-colors hover:border-accent hover:text-accent disabled:opacity-50"
+      >
+        {previewBusy
+          ? <><IconLoader className="size-3.5 animate-spin" />合成试听…</>
+          : <><IconPlay className="size-3.5" />试听这套设置</>}
+      </button>
 
       {dirty ? (
         <div className="mt-3">
