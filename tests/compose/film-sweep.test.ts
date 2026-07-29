@@ -6,7 +6,8 @@ import { openUserDb } from '../../src/db/user-db.js'
 import { assetDir } from '../../src/assets/storage.js'
 import { writeStamp } from '../../src/compose/stamp.js'
 import {
-  sweepFilms, resolveFilm, FILM_FILE, FILM_STAMP_FILE, type FilmDeps,
+  sweepFilms, resolveFilm, filmInfo, FILM_FILE, FILM_STAMP_FILE,
+  FILM_MASTER_FILE, MASTER_STAMP_FILE, type FilmDeps,
 } from '../../src/compose/film.js'
 
 /**
@@ -183,5 +184,56 @@ describe('开机补合扫描', () => {
     const r = await sweepFilms(deps, ['查无此人', ...LIST])
 
     expect(r.enqueued).toEqual(['好的那个'])
+  })
+})
+
+describe('无 BGM 的成片 = 母带，filmInfo 必须认它', () => {
+  /*
+   * 母带/成片拆分之后，没选 BGM 的项目【不会】生成 export.mp4——成片就是
+   * master.mp4（省一份 500MB 拷贝）。downloadableFilm 有这条回落，但
+   * judgeFilm 一度只查 export.mp4，于是这类项目 filmInfo 永远报「合成中」、
+   * 每次轮询还重排一条，UI 卡死、队列空转。
+   *
+   * 这个雷被所有老项目遗留的 export.mp4 挡着，直到第一个全新的无-BGM
+   * 项目（豪门Textest）才引爆。这条测试守住修复：无 export.mp4、只有母带，
+   * filmInfo 要报 ready，且【不能重排】。
+   */
+  it('【只有母带、没有 export.mp4 → ready 且不重排】', async () => {
+    const deps = q.deps(dataDir)
+    const id = await makeReadyProject('无BGM成片')
+    const dir = assetDir(USER, LIST, id)
+    const r = resolveFilm(deps, USER, id)
+    if (!r.ok) throw new Error('前置不成立：' + r.error)
+
+    // 造出 buildFilm 在无-BGM 时留下的盘面：母带 + 两个 done 戳，没有 export.mp4
+    await writeFile(join(dir, FILM_MASTER_FILE), 'master-bytes')
+    await writeStamp(dir, MASTER_STAMP_FILE, { fingerprint: r.film.masterFingerprint, status: 'done', jobId: 'j-m' })
+    await writeStamp(dir, FILM_STAMP_FILE, { fingerprint: r.film.fingerprint, status: 'done', jobId: 'j-f' })
+
+    const info = await filmInfo(deps, USER, id)
+    expect(info.state).toBe('ready')
+    // 【关键】没有触发重排——之前的 bug 就是每次都排一条
+    expect(q.enqueued).toEqual([])
+  })
+
+  it('【有 BGM 的项目仍认 export.mp4，不被母带回落误判】', async () => {
+    const deps = q.deps(dataDir)
+    const id = await makeReadyProject('有BGM成片')
+    const dir = assetDir(USER, LIST, id)
+    // 给它选一首库里的 BGM，让 bgmPath 非空——此时成片必须是 export.mp4
+    const db = openUserDb(USER, LIST)
+    // 没有真实库 BGM，直接塞一个 bgm 素材让 resolveFilm 的 bgmPath 非空
+    const bgm = join(dir, 'bgm.mp3'); await writeFile(bgm, 'x')
+    db.addAsset({ projectId: id, kind: 'bgm', path: bgm, originalName: 'b.mp3', size: 1 })
+    db.close()
+    const r = resolveFilm(deps, USER, id)
+    if (!r.ok) throw new Error('前置不成立：' + r.error)
+    // 只有母带、没有 export.mp4 —— 有 BGM 的项目这【不算】ready
+    await writeFile(join(dir, FILM_MASTER_FILE), 'm')
+    await writeStamp(dir, MASTER_STAMP_FILE, { fingerprint: r.film.masterFingerprint, status: 'done', jobId: 'j-m' })
+    await writeStamp(dir, FILM_STAMP_FILE, { fingerprint: r.film.fingerprint, status: 'done', jobId: 'j-f' })
+
+    const info = await filmInfo(deps, USER, id)
+    expect(info.state).not.toBe('ready')   // 缺 export.mp4，还没混音，不能算好
   })
 })

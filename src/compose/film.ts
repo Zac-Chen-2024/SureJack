@@ -639,6 +639,25 @@ async function judgeFilm (
     return { kind: 'ready', jobId }
   }
 
+  /*
+   * 【没选 BGM 时，成片就是母带，这里也要认】。
+   *
+   * buildFilm 在没有 BGM 时不会复制一份 export.mp4（省 500MB），成片直接
+   * 用 master.mp4——downloadableFilm 有这条回落，但上面那句只查 export.mp4，
+   * 于是 judgeFilm 永远判「缺」，filmInfo 每次轮询都重排一条，UI 卡在
+   * 「合成中」。这个雷是母带/成片拆分那次埋的，一直被老项目遗留的
+   * export.mp4 挡着，直到第一个全新的无-BGM 项目才引爆。
+   *
+   * 条件：成片戳 done 且指纹对得上（= 当前输入没变），且母带在盘上。
+   */
+  if (r.film.bgmPath === null
+    && stamp !== null
+    && (stamp.status === undefined || stamp.status === 'done')
+    && stamp.fingerprint === fingerprint
+    && await reusableOutput(dir, MASTER_STAMP_FILE, FILM_MASTER_FILE, r.film.masterFingerprint) !== null) {
+    return { kind: 'ready', jobId }
+  }
+
   // 失败的正是【当前这份输入】→ 停在这儿等用户重试
   if (stamp?.status === 'error' && stamp.fingerprint === fingerprint) {
     return { kind: 'failed', jobId, error: stamp.error ?? '合成失败' }
