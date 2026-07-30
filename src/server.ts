@@ -269,6 +269,17 @@ export function buildServer (opts: BuildOpts = {}): FastifyInstance {
     return reply.type('application/json').send(readFileSync(p, 'utf8'))
   })
 
+  /*
+   * 安卓 APK 的"最新版本"信息，给 App 内自检更新用（config/app-version.json）。
+   * 内容 = 最新 versionCode / versionName / APK 下载链接（GitHub releases/latest
+   * 稳定地址）。公开只读、不敏感。发版时更新那个 JSON + 壳的 appVersionCode 即可。
+   */
+  app.get('/api/app-version', async (_req, reply) => {
+    const p = join(__dirname, '..', 'config', 'app-version.json')
+    if (!existsSync(p)) return reply.code(404).send({ error: 'not found' })
+    return reply.type('application/json').send(readFileSync(p, 'utf8'))
+  })
+
   // 托管前端构建产物（同域，cookie 自动生效、无 CORS）。
   // public/ 由 `cd web && npm run build` 生成；开发时用 vite dev + proxy，不走这里。
   const publicDir = join(__dirname, '..', 'public')

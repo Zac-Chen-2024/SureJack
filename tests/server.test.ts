@@ -18,6 +18,15 @@ describe('buildServer', () => {
     expect(res.statusCode).toBe(200)
     expect(res.json()).toEqual({ status: 'ok' })
   })
+
+  it('/api/app-version 返回最新 APK 版本信息（给 App 自检更新）', async () => {
+    app = buildServer()
+    const res = await app.inject({ method: 'GET', url: '/api/app-version' })
+    expect(res.statusCode).toBe(200)
+    const v = res.json()
+    expect(typeof v.versionCode).toBe('number')
+    expect(typeof v.apkUrl).toBe('string')
+  })
 })
 
 describe('attachErrorHandler（Part A 分支评审必修1）：非预期异常不泄漏内部细节', () => {

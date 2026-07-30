@@ -16,6 +16,7 @@ import { BottomSheet } from '../components/mobile/BottomSheet'
 import { MobileProjectList } from '../components/mobile/MobileProjectList'
 import { MobileStartSelect } from '../components/mobile/MobileStartSelect'
 import { MobileFilmPlayer } from '../components/mobile/MobileFilmPlayer'
+import { AppUpdateBanner } from '../components/mobile/AppUpdateBanner'
 import { BUILD_SHA, buildTimeLocal } from '../build-info'
 import {
   IconTextLines, IconMic, IconTypeTool, IconFrame, IconMusic,
@@ -182,6 +183,7 @@ export function MobileWorkspace () {
         <MusicPanel />
       </BottomSheet>
 
+      <AppUpdateBanner />
       <VersionBadge />
     </div>
   )
