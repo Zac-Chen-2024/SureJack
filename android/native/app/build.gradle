@@ -8,8 +8,8 @@ android {
         applicationId 'win.zacchen.surejack'   // ⚠️ 必须和旧版一致，否则不是"升级"而是另一个 App
         minSdk 23
         targetSdk 35
-        versionCode 4
-        versionName '2.0.0'
+        versionCode 5
+        versionName '2.0.1'
     }
 
     /*

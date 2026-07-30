@@ -104,6 +104,8 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
             @Override
             public void onPageFinished(WebView v, String url) {
                 pageReady = true;   // 交接：启动图这才淡出
+                // 登录态刚可能变化，落盘一次（见 onPause 上的说明）
+                CookieManager.getInstance().flush();
             }
 
             @Override
@@ -236,6 +238,13 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
         super.onPause();
         if (sensors != null) sensors.unregisterListener(this);
         if (web != null) web.onPause();
+        /*
+         * 【必须 flush，否则每次关掉 App 都要重新登录】。
+         * WebView 的 cookie 先写在内存里，靠 CookieManager 异步落盘；进程被系统
+         * 杀掉时没落盘的就丢了——即使后端给的是 30 天持久 cookie 也白搭。
+         * 在这里显式落盘一次，登录态才能跨重启保留。
+         */
+        CookieManager.getInstance().flush();
     }
 
     @Override

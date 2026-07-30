@@ -95,6 +95,15 @@ export function MobileWorkspace () {
   const back = useNav((s) => s.back)
   const screen = topScreen(stack)
   const sheet = topSheet(stack)
+  /*
+   * 首屏【不放转场动画】。工作台是在欢迎页覆盖层底下先挂好的，如果第一帧就
+   * 播"从右滑入"，欢迎页淡出时底下正在滑，观感很怪。之后的换屏才有转场。
+   */
+  const [animateScreens, setAnimateScreens] = useState(false)
+  useEffect(() => {
+    const t = setTimeout(() => setAnimateScreens(true), 80)
+    return () => clearTimeout(t)
+  }, [])
 
   useEffect(() => {
     if (screen !== 'list') return
@@ -133,7 +142,7 @@ export function MobileWorkspace () {
           所以只有 list↔editor 切换才会重放这个动画。 */}
       <div
         key={screen}
-        className={`absolute inset-0 ${dir === 'fwd' ? 'sj-screen-fwd' : 'sj-screen-back'}`}
+        className={`absolute inset-0 ${!animateScreens ? '' : dir === 'fwd' ? 'sj-screen-fwd' : 'sj-screen-back'}`}
       >
         {screen === 'list' ? (
           <MobileProjectList onOpen={openProject} onNew={openNew} />

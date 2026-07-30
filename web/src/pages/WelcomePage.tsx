@@ -67,7 +67,8 @@ export function WelcomePage ({ onEnter }: { onEnter: () => void }) {
     timers.current.forEach(clearTimeout)
     timers.current = [
       setTimeout(() => setLeaving(true), dwell),
-      setTimeout(onEnter, dwell + 520),
+      // 等整层淡完（620ms）再卸载，避免最后一帧被硬切掉
+      setTimeout(onEnter, dwell + 660),
     ]
   }, [onEnter])
 
@@ -83,16 +84,28 @@ export function WelcomePage ({ onEnter }: { onEnter: () => void }) {
   }, [schedule])
   useShake(onShake)
 
+  /*
+   * 【不透明的固定覆盖层】。工作台已经在底下挂好了（见 App.tsx），这一层盖在
+   * 它上面；结束时【整层】（连背景一起）淡出，像揭开一层幕布——不会出现
+   * "字没了、页面还没来"的黑屏空档。
+   */
   return (
-    <div className="relative flex h-full items-center justify-center overflow-hidden px-8">
+    <div
+      className="fixed inset-0 z-[100] flex items-center justify-center overflow-hidden bg-ink-950 px-8"
+      style={{
+        transition: `opacity 620ms ${EASE}`,
+        opacity: leaving ? 0 : 1,
+        pointerEvents: leaving ? 'none' : undefined,
+      }}
+    >
       <AmbientBackdrop />
       <div
         key={shaken ? 'shake' : 'hi'}
         className={`relative whitespace-pre-line text-center text-[34px] font-semibold leading-snug tracking-[-0.01em] text-ink-50 ${shaken ? 'sj-wobble' : ''}`}
         style={{
           transition: `opacity 1100ms ${EASE}, transform 1100ms ${EASE}`,
-          opacity: leaving ? 0 : shown ? 1 : 0,
-          transform: shown && !leaving ? 'translateY(0)' : 'translateY(10px)',
+          opacity: shown ? 1 : 0,
+          transform: shown ? 'translateY(0)' : 'translateY(10px)',
         }}
       >
         {shaken ? `${honorific}辛苦了！\n我来帮您做视频！` : (welcome ?? '欢迎回来')}

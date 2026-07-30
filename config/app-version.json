@@ -1,6 +1,6 @@
 {
-  "versionCode": 4,
-  "versionName": "2.0.0",
+  "versionCode": 5,
+  "versionName": "2.0.1",
   "apkUrl": "https://github.com/Zac-Chen-2024/SureJack/releases/latest/download/SureJack.apk",
-  "notes": "原生 WebView 壳：返回键挽留、启动图保持到页面就绪（无空档）、原生摇一摇、下载走系统下载器。"
+  "notes": "修：关掉 App 后不用再重新登录（Cookie 落盘）；开屏改为交叉淡出，不再黑屏一下。"
 }
