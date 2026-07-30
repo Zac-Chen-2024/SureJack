@@ -51,7 +51,9 @@ export function MobileFilmPlayer ({ onBack }: { onBack: () => void }) {
         src={pb.src}
         playsInline
         preload="metadata"
-        className="absolute inset-0 size-full object-contain"
+        // object-top：9:16 的画面在更高的竖屏里顶对齐（贴最上沿），
+        // 黑边留到底部，正好被进度条/底栏盖住——画面顶格、不再离顶有距离
+        className="absolute inset-0 size-full object-contain object-top"
         onLoadedMetadata={(e) => pb.onLoadedMeta(e.currentTarget.duration)}
         onTimeUpdate={(e) => pb.onTimeUpdate(e.currentTarget.currentTime)}
         onEnded={pb.handleStop}

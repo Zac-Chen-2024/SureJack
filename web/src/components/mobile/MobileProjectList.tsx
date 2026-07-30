@@ -3,7 +3,7 @@ import { useProjects, type Project } from '../../store/projects'
 import { usePipeline } from '../../store/pipeline'
 import { AccountMenu } from '../AccountMenu'
 import { PaletteToggle } from '../PaletteToggle'
-import { IconPlus, IconLoader, IconTrash } from '../ui/Icon'
+import { IconPlus, IconLoader, IconTrash, IconMore } from '../ui/Icon'
 
 /**
  * 手机版项目列表（概念图 Screen 0）：**我的项目 + 一步新建**。
@@ -45,33 +45,10 @@ function summaryOf (p: Project): string {
   return '空项目 · 从这里开始'
 }
 
-export function MobileProjectList ({ onOpen }: { onOpen: (id: string) => void }) {
-  const { items, create } = useProjects()
+export function MobileProjectList ({ onOpen, onNew }: { onOpen: (id: string) => void; onNew: () => void }) {
+  const items = useProjects((s) => s.items)
   const remove = useProjects((s) => s.remove)
   const filmProgress = usePipeline((s) => s.filmProgress)
-
-  const [adding, setAdding] = useState(false)
-  const [name, setName] = useState('')
-  const [busy, setBusy] = useState(false)
-  const inputRef = useRef<HTMLInputElement>(null)
-
-  useEffect(() => { if (adding) inputRef.current?.focus() }, [adding])
-
-  async function submit () {
-    const v = name.trim()
-    if (!v || busy) return
-    setBusy(true)
-    try {
-      await create(v)
-      setName('')
-      setAdding(false)
-      // create() 已把新项目设为 current，直接进编辑器
-      const created = useProjects.getState().currentId
-      if (created) onOpen(created)
-    } finally {
-      setBusy(false)
-    }
-  }
 
   return (
     <div
@@ -88,39 +65,15 @@ export function MobileProjectList ({ onOpen }: { onOpen: (id: string) => void })
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-6">
-        {/* ── 新建：按钮，点开变成输入行 ─────────────────────────────── */}
-        {adding ? (
-          <div className="mb-5 flex items-center gap-2 rounded-2xl border border-accent/40 bg-ink-900 p-2">
-            <input
-              ref={inputRef}
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') void submit()
-                if (e.key === 'Escape') { setAdding(false); setName('') }
-              }}
-              placeholder="项目名"
-              className="min-w-0 flex-1 rounded-xl bg-ink-850 px-3 py-2.5 text-[15px] text-ink-50 outline-none placeholder:text-ink-500"
-            />
-            <button
-              type="button"
-              onClick={() => void submit()}
-              disabled={busy || !name.trim()}
-              className="shrink-0 rounded-xl bg-accent px-4 py-2.5 text-sm font-bold text-ink-950 disabled:opacity-40"
-            >
-              {busy ? '创建中' : '创建'}
-            </button>
-          </div>
-        ) : (
-          <button
-            type="button"
-            onClick={() => setAdding(true)}
-            className="mb-5 flex w-full items-center justify-center gap-2.5 rounded-2xl bg-accent py-4 text-[15px] font-extrabold text-ink-950 transition-colors hover:bg-accent-dim"
-          >
-            <IconPlus className="size-5" strokeWidth={2.4} />
-            新建项目
-          </button>
-        )}
+        {/* ── 新建：进引导页（填名+文案→分析人名→确认→生成）─────────── */}
+        <button
+          type="button"
+          onClick={onNew}
+          className="mb-5 flex w-full items-center justify-center gap-2.5 rounded-2xl bg-accent py-4 text-[15px] font-extrabold text-ink-950 transition-colors hover:bg-accent-dim"
+        >
+          <IconPlus className="size-5" strokeWidth={2.4} />
+          新建项目
+        </button>
 
         <div className="mb-3 px-0.5 text-xs font-bold uppercase tracking-wider text-ink-500">最近</div>
 
@@ -174,14 +127,7 @@ export function MobileProjectList ({ onOpen }: { onOpen: (id: string) => void })
                       {st.label}
                     </span>
 
-                    <button
-                      type="button"
-                      aria-label={`删除 ${p.name}`}
-                      onClick={(e) => { e.stopPropagation(); if (confirm(`删除「${p.name}」？`)) void remove(p.id) }}
-                      className="ml-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg text-ink-600 opacity-0 transition-opacity hover:text-danger group-hover:opacity-100"
-                    >
-                      <IconTrash className="size-4" />
-                    </button>
+                    <RowMenu name={p.name} onDelete={() => void remove(p.id)} />
                   </div>
                 </li>
               )
@@ -189,6 +135,43 @@ export function MobileProjectList ({ onOpen }: { onOpen: (id: string) => void })
           </ul>
         )}
       </div>
+    </div>
+  )
+}
+
+/**
+ * 每行右侧的「⋮」菜单。删除收进这里，不再是那个手机上根本点不着的隐形按钮。
+ * 以后加「收藏 / 置顶」直接往菜单里塞一项即可。
+ */
+function RowMenu ({ name, onDelete }: { name: string; onDelete: () => void }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false) }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [open])
+  return (
+    <div ref={ref} className="relative shrink-0" onClick={(e) => e.stopPropagation()}>
+      <button
+        type="button" aria-label="更多" onClick={() => setOpen((v) => !v)}
+        className="flex size-8 items-center justify-center rounded-lg text-ink-400 transition-colors hover:bg-ink-800 hover:text-ink-100"
+      >
+        <IconMore className="size-4" />
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full z-20 mt-1 min-w-32 overflow-hidden rounded-xl border border-line bg-ink-850 py-1 shadow-2xl shadow-black/60">
+          <button
+            type="button"
+            onClick={() => { setOpen(false); if (confirm(`删除「${name}」？`)) onDelete() }}
+            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-ink-300 transition-colors hover:bg-ink-800 hover:text-danger"
+          >
+            <IconTrash className="size-4" />删除
+          </button>
+          {/* 以后：收藏 / 置顶 往这儿加 */}
+        </div>
+      )}
     </div>
   )
 }

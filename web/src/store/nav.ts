@@ -18,10 +18,11 @@ import { create } from 'zustand'
  * list；在 list（根）按返回 → 浏览器默认行为（TWA 里=退出 App），符合直觉。
  */
 export type Sheet = 'script' | 'voice' | 'subtitle' | 'background' | 'music'
-export type NavEntry = { k: 'list' } | { k: 'editor' } | { k: 'sheet'; name: Sheet }
+export type NavEntry = { k: 'list' } | { k: 'newproject' } | { k: 'editor' } | { k: 'sheet'; name: Sheet }
+export type Screen = 'list' | 'newproject' | 'editor'
 
 /** 当前该渲染哪一屏（抽屉不改变底层屏） */
-export function topScreen (stack: NavEntry[]): 'list' | 'editor' {
+export function topScreen (stack: NavEntry[]): Screen {
   for (let i = stack.length - 1; i >= 0; i--) {
     const e = stack[i]!
     if (e.k !== 'sheet') return e.k
@@ -39,6 +40,8 @@ interface NavState {
   /** 上一次变化的方向，驱动进/退不同的转场 */
   dir: 'fwd' | 'back'
   push: (e: NavEntry) => void
+  /** 原地替换栈顶（不新增历史记录）。如新建页完成后换成 editor：回退直接到列表 */
+  replace: (e: NavEntry) => void
   /** 退一层——走 history.back()，由 popstate 统一落地（和系统返回键同一条路） */
   back: () => void
   /** popstate 回调：把栈裁到目标深度 */
@@ -59,6 +62,13 @@ export const useNav = create<NavState>((set, get) => ({
     const stack = [...get().stack, e]
     set({ stack, dir: 'fwd' })
     pushHistory(stack.length - 1)
+  },
+
+  replace (e) {
+    const stack = [...get().stack]
+    stack[stack.length - 1] = e
+    set({ stack, dir: 'fwd' })
+    try { history.replaceState({ sjDepth: stack.length - 1 }, '') } catch { /* 非浏览器忽略 */ }
   },
 
   back () {

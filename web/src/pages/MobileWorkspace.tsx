@@ -14,9 +14,11 @@ import { SubtitleList } from '../components/SubtitleList'
 import { BackgroundPanel, MusicPanel } from '../components/AssetPanel'
 import { BottomSheet } from '../components/mobile/BottomSheet'
 import { MobileProjectList } from '../components/mobile/MobileProjectList'
+import { MobileNewProject } from '../components/mobile/MobileNewProject'
 import { MobileStartSelect } from '../components/mobile/MobileStartSelect'
 import { MobileFilmPlayer } from '../components/mobile/MobileFilmPlayer'
 import { AppUpdateBanner } from '../components/mobile/AppUpdateBanner'
+import { SwipeBack } from '../components/mobile/SwipeBack'
 import { BUILD_SHA, buildTimeLocal } from '../build-info'
 import {
   IconTextLines, IconMic, IconTypeTool, IconFrame, IconMusic,
@@ -84,6 +86,7 @@ export function MobileWorkspace () {
   const stack = useNav((s) => s.stack)
   const dir = useNav((s) => s.dir)
   const push = useNav((s) => s.push)
+  const replace = useNav((s) => s.replace)
   const back = useNav((s) => s.back)
   const screen = topScreen(stack)
   const sheet = topSheet(stack)
@@ -95,6 +98,11 @@ export function MobileWorkspace () {
   function openProject (id: string) {
     useProjects.getState().select(id)
     push({ k: 'editor' })
+  }
+  const openNew = () => push({ k: 'newproject' })
+  function goEditor (id: string) {
+    useProjects.getState().select(id)
+    replace({ k: 'editor' })   // 用编辑器替换新建页：从编辑器返回直接回列表
   }
 
   const needsStart = !!project &&
@@ -111,9 +119,11 @@ export function MobileWorkspace () {
         className={`absolute inset-0 ${dir === 'fwd' ? 'sj-screen-fwd' : 'sj-screen-back'}`}
       >
         {screen === 'list' ? (
-          <MobileProjectList onOpen={openProject} />
+          <MobileProjectList onOpen={openProject} onNew={openNew} />
+        ) : screen === 'newproject' ? (
+          <MobileNewProject onBack={back} onGo={goEditor} />
         ) : !project ? (
-          <MobileProjectList onOpen={openProject} />
+          <MobileProjectList onOpen={openProject} onNew={openNew} />
         ) : needsStart ? (
           <MobileStartSelect
             onBack={back}
@@ -123,7 +133,7 @@ export function MobileWorkspace () {
             }}
           />
         ) : (
-          <>
+          <SwipeBack onBack={back}>
             {masterReady
               ? <MobileFilmPlayer onBack={back} />
               : <EmptyPreview onBack={back} projectName={project.name} onWriteScript={() => push({ k: 'sheet', name: 'script' })} />}
@@ -156,7 +166,7 @@ export function MobileWorkspace () {
                 )
               })}
             </nav>
-          </>
+          </SwipeBack>
         )}
       </div>
 
