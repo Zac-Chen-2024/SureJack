@@ -16,18 +16,20 @@ import { IconPlus, IconLoader, IconTrash, IconMore } from '../ui/Icon'
  */
 
 /** 项目此刻处在哪一步。合成进度来自列表轮询（filmProgress） */
-type Status = 'draft' | 'render' | 'done'
+type Status = 'draft' | 'voicing' | 'render' | 'done'
 
 function statusOf (p: Project, composing: boolean): Status {
   if (composing) return 'render'
+  if (p.ttsState === 'generating') return 'voicing'
   if (p.ttsState === 'ready') return 'done'
   return 'draft'
 }
 
 const STATUS_STYLE: Record<Status, { label: string; cls: string }> = {
   done: { label: '已完成', cls: 'text-accent bg-accent/12' },
-  // 琥珀写死成概念图的色值，不跟随冷/暖主题——它是"进行中"的语义色，
-  // 和强调色是两回事（强调色留给"完成/可下载"）
+  // 两个"进行中"阶段共用琥珀（语义色，独立于冷/暖主题），靠标签区分；
+  // 强调色留给"完成"。
+  voicing: { label: '配音中', cls: 'text-[#e0a82e] bg-[#e0a82e]/12' },
   render: { label: '合成中', cls: 'text-[#e0a82e] bg-[#e0a82e]/12' },
   draft: { label: '草稿', cls: 'text-ink-300 bg-ink-800' },
 }
@@ -118,8 +120,10 @@ export function MobileProjectList ({ onOpen, onNew }: { onOpen: (id: string) => 
                       <span className="block truncate text-base font-bold text-ink-50">{p.name}</span>
                       <span className="mt-1 block truncate text-xs text-ink-500">
                         {composing
-                          ? <span className="inline-flex items-center gap-1 text-accent"><IconLoader className="size-3 animate-spin" />合成中 {filmProgress[p.id]?.progress ?? 0}%</span>
-                          : summaryOf(p)}
+                          ? <span className="inline-flex items-center gap-1 text-[#e0a82e]"><IconLoader className="size-3 animate-spin" />视频合成中 {filmProgress[p.id]?.progress ?? 0}%</span>
+                          : p.ttsState === 'generating'
+                            ? <span className="inline-flex items-center gap-1 text-[#e0a82e]"><IconLoader className="size-3 animate-spin" />配音生成中…</span>
+                            : summaryOf(p)}
                       </span>
                     </span>
 

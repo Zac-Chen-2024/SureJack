@@ -17,6 +17,7 @@ import { MobileProjectList } from '../components/mobile/MobileProjectList'
 import { MobileNewProject } from '../components/mobile/MobileNewProject'
 import { MobileStartSelect } from '../components/mobile/MobileStartSelect'
 import { MobileFilmPlayer } from '../components/mobile/MobileFilmPlayer'
+import { MobileGenerating } from '../components/mobile/MobileGenerating'
 import { AppUpdateBanner } from '../components/mobile/AppUpdateBanner'
 import { SwipeBack } from '../components/mobile/SwipeBack'
 import { BUILD_SHA, buildTimeLocal } from '../build-info'
@@ -81,6 +82,10 @@ export function MobileWorkspace () {
     return () => clearInterval(t)
   }, [projectIds, pollFilmProgress])
 
+  // 在列表页时定时刷新项目，让"配音中→合成中→已完成"的状态自己往前走。
+  // 只在列表页刷（编辑器没挂载），不会冲掉正在编辑的文案。
+  const reloadProjects = useProjects((s) => s.load)
+
   // ── 导航（History 栈）────────────────────────────────────────────────
   useNavHistory()
   const stack = useNav((s) => s.stack)
@@ -91,7 +96,19 @@ export function MobileWorkspace () {
   const screen = topScreen(stack)
   const sheet = topSheet(stack)
 
+  useEffect(() => {
+    if (screen !== 'list') return
+    const t = setInterval(() => { void reloadProjects() }, 5000)
+    return () => clearInterval(t)
+  }, [screen, reloadProjects])
+
   const masterReady = usePipeline((s) => s.film?.masterReady === true)
+  const filmState = usePipeline((s) => s.film?.state ?? null)
+  // 流程在跑（配音中/合成中/出错）→ 盖进度蒙层，而不是"还没成片"的空态
+  const inProgress = !!project && (
+    project.ttsState === 'generating' || project.ttsState === 'error'
+    || filmState === 'building' || filmState === 'error'
+  )
   // 哪些项目这次会话过了"起始选择"。空项目第一次进要先选文本/自备
   const [startedIds, setStartedIds] = useState<Set<string>>(new Set())
 
@@ -136,7 +153,9 @@ export function MobileWorkspace () {
           <SwipeBack onBack={back}>
             {masterReady
               ? <MobileFilmPlayer onBack={back} />
-              : <EmptyPreview onBack={back} projectName={project.name} onWriteScript={() => push({ k: 'sheet', name: 'script' })} />}
+              : inProgress
+                ? <MobileGenerating onBack={back} projectName={project.name} />
+                : <EmptyPreview onBack={back} projectName={project.name} onWriteScript={() => push({ k: 'sheet', name: 'script' })} />}
 
             <nav
               className="absolute inset-x-0 bottom-0 z-30 flex justify-around px-2.5 pt-3.5"

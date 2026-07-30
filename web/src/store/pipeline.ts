@@ -1,5 +1,11 @@
 import { create } from 'zustand'
 import { api, ApiError } from '../api/client'
+import { useProjects, type Project } from './projects'
+
+/** 就地改某项目的配音状态（乐观更新，驱动进度蒙层/列表徽标） */
+function setProjectTts (projectId: string, ttsState: Project['ttsState']): void {
+  useProjects.setState((s) => ({ items: s.items.map((p) => (p.id === projectId ? { ...p, ttsState } : p)) }))
+}
 
 export interface Asset {
   id: string
@@ -299,14 +305,20 @@ export const usePipeline = create<PipelineState>((set, get) => ({
 
   async generateVoice (projectId) {
     set({ voiceBusy: true, voiceSegmentCount: null, error: null })
+    // 乐观地把项目标成「配音中」——前端立刻能盖进度蒙层、列表立刻显示"配音中"，
+    // 不用等这个来回（后端第一步也是置 generating，两边一致）。
+    setProjectTts(projectId, 'generating')
     try {
       const r = await api.post<VoiceResult>(`/api/projects/${projectId}/voice`)
       set({ voiceSegmentCount: r.segmentCount })
       await get().loadAssets(projectId)
       // 后端这时刚把背景轨排进队列，问一次好让预览立刻显示「背景生成中」
       await get().loadBgTrack(projectId)
+      // 刷新项目：ttsState 变 ready，进度蒙层从"配音中"推进到"合成中"
+      await useProjects.getState().load()
     } catch (e) {
       set({ error: e instanceof ApiError ? e.message : '配音失败' })
+      setProjectTts(projectId, 'error')
     } finally {
       set({ voiceBusy: false })
     }

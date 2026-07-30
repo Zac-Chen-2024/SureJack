@@ -41,7 +41,13 @@ export function MobileNewProject ({ onBack, onGo }: { onBack: () => void; onGo: 
   }
   async function onGenerate () {
     setBusy('generate')
-    try { const id = await ensureProject(); await generateVoice(id); onGo(id) } finally { setBusy(null) }
+    try {
+      const id = await ensureProject()
+      // 【不等配音跑完】：立刻开跑 + 立刻进编辑器看进度蒙层（配音中→合成中）。
+      // 配音/合成都在后台，这期间能返回列表继续建别的项目。
+      void generateVoice(id)
+      onGo(id)
+    } finally { setBusy(null) }
   }
 
   function pickFile (f: File | undefined) {
