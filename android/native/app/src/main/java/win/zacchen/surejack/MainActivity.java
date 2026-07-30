@@ -40,7 +40,7 @@ import androidx.core.splashscreen.SplashScreen;
  *      hack，而 TWA 的"没历史可退就结束 Activity"会先一步生效，真机上永远不弹。
  *   2) 原生启动图消失后 Chrome 才冷启动、再加载页面 → 中间那段空档没法消除。
  * 自己持有 WebView 之后这两件事都变成【我们的】：返回键在 onBackPressed 里，
- * 启动图可以一直держ到网页 onPageFinished 才交接。这才是安卓标准做法。
+ * 启动图可以一直保持到网页 onPageFinished 才交接。这才是安卓标准做法。
  *
  * ── WebView 必须显式接好的东西（不接就会坏）─────────────────────────
  *   · JS / DOM Storage / Cookie：会话与前端状态

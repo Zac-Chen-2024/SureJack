@@ -2,7 +2,7 @@
 <resources>
     <!--
       启动图主题（Android 12 SplashScreen API，core-splashscreen 向下兼容）。
-      MainActivity 会把启动图一直держ到网页加载完才淡出，消灭"启动图没了、
+      MainActivity 会把启动图一直保持到网页加载完才淡出，消灭"启动图没了、
       页面还没来"的空档——这正是 TWA 时代做不到的事。
     -->
     <style name="Theme.SureJack.Splash" parent="Theme.SplashScreen">
