@@ -10,7 +10,12 @@ import { IconLogOut } from './ui/Icon'
  * 每一屏里占着一整行、还带个图标——它的视觉分量和使用频率完全不匹配。
  * 收进头像之后，那一行还给了真正常看的东西，而"我是谁"仍然一眼可见。
  */
-export function AccountMenu () {
+/**
+ * align 决定菜单往哪边展开：
+ *   'up-left'（默认）——桌面版账户在栏底，向上+左对齐，别掉出视口。
+ *   'down-right'——手机版账户在右上角，必须向下+右对齐，否则弹到屏幕外看不见。
+ */
+export function AccountMenu ({ align = 'up-left' }: { align?: 'up-left' | 'down-right' }) {
   const { name, logout } = useSession()
   const [open, setOpen] = useState(false)
   const boxRef = useRef<HTMLDivElement>(null)
@@ -51,11 +56,12 @@ export function AccountMenu () {
 
       {open && (
         /*
-         * 向【上】展开：这个菜单在栏底，向下会掉出视口。
-         * 触发器只有一个头像那么宽，菜单不能跟着那么窄——用 left-0 从
-         * 头像左边缘起、min-w 给足，让「登出」有正常的点击面积。
+         * 展开方向按 align 决定（见上）。触发器只有一个头像那么宽，菜单
+         * 用足够的 min-w，让「登出」有正常的点击面积。
          */
-        <div className="absolute bottom-full left-0 z-30 mb-1 min-w-36 overflow-hidden rounded-lg border border-line bg-ink-850 py-1 shadow-2xl shadow-black/60">
+        <div className={`absolute z-30 min-w-36 overflow-hidden rounded-lg border border-line bg-ink-850 py-1 shadow-2xl shadow-black/60 ${
+          align === 'down-right' ? 'top-full right-0 mt-1' : 'bottom-full left-0 mb-1'
+        }`}>
           <div className="truncate border-b border-line px-3 pb-1.5 pt-1 text-xs text-ink-400">{name}</div>
 
           <button

@@ -20,14 +20,13 @@
     "path": "./android.keystore",
     "alias": "surejack"
   },
-  "appVersionName": "1.1.0",
-  "appVersionCode": 2,
-  "appVersion": "1.1.0",
+  "appVersionName": "1.2.0",
+  "appVersionCode": 3,
+  "appVersion": "1.2.0",
   "shortcuts": [],
   "webManifestUrl": "https://surejack.zacchen.win/manifest.webmanifest",
   "fallbackType": "customtabs",
   "fullScopeUrl": "https://surejack.zacchen.win/",
   "minSdkVersion": 21,
-  "orientation": "portrait",
-  "appVersion": "1"
+  "orientation": "portrait"
 }

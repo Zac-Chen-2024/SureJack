@@ -168,6 +168,16 @@ button, input, textarea, a, [role="button"], .interactive {
 .sj-screen-fwd { animation: sj-screen-in-fwd 0.26s cubic-bezier(0.32, 0.72, 0, 1) }
 .sj-screen-back { animation: sj-screen-in-back 0.26s cubic-bezier(0.32, 0.72, 0, 1) }
 
+/* 开屏"摇一摇"触发后，问候语抖一下 */
+@keyframes sj-wobble {
+  0%, 100% { transform: translateX(0) }
+  15% { transform: translateX(-7px) rotate(-1deg) }
+  35% { transform: translateX(7px) rotate(1deg) }
+  55% { transform: translateX(-5px) }
+  75% { transform: translateX(5px) }
+}
+.sj-wobble { animation: sj-wobble 0.55s ease }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;

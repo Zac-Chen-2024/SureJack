@@ -62,7 +62,7 @@ export function MobileProjectList ({ onOpen, onNew }: { onOpen: (id: string) => 
         <h2 className="text-2xl font-extrabold tracking-tight text-ink-50">我的项目</h2>
         <div className="flex items-center gap-1">
           <PaletteToggle />
-          <AccountMenu />
+          <AccountMenu align="down-right" />
         </div>
       </div>
 
