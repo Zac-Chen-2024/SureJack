@@ -51,6 +51,12 @@ async function makeProject (a: FastifyInstance, cookie: string, scriptText: stri
     method: 'PATCH', url: `/api/projects/${p.id}`,
     payload: { scriptText }, cookies: { sj_session: cookie },
   })
+  // 这些用例测的是配音/分段本身，不测改名——关掉默认开的改名链，
+  // 免得撞上"未确认人名替换"的 409 门。
+  await a.inject({
+    method: 'POST', url: `/api/projects/${p.id}/rename/toggle`,
+    payload: { enabled: false }, cookies: { sj_session: cookie },
+  })
   return p.id as string
 }
 
@@ -132,6 +138,11 @@ describe('生成配音接口', () => {
       await app.inject({
         method: 'PATCH', url: `/api/projects/${p.id}`,
         payload: { scriptText: '短文案。' }, cookies: { sj_session: cookie },
+      })
+      // 关掉默认开的改名链，直达 Azure 配置检查（不然先撞 409 改名门）
+      await app.inject({
+        method: 'POST', url: `/api/projects/${p.id}/rename/toggle`,
+        payload: { enabled: false }, cookies: { sj_session: cookie },
       })
       const res = await app.inject({ method: 'POST', url: `/api/projects/${p.id}/voice`, cookies: { sj_session: cookie } })
       expect(res.statusCode).toBe(500)

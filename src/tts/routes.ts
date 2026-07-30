@@ -79,6 +79,15 @@ export function registerTtsRoutes (app: FastifyInstance, deps: Deps): void {
       const text = normalizeScript(project.scriptText)
       if (!text) return reply.code(400).send({ error: '文案是空的，先写点内容再生成配音' })
 
+      /*
+       * 【状态阻拦】：开了改名的文本项目，必须先确认人名替换才能配音。
+       * 只作用于文本路（karaoke）+ renameEnabled；自备(line)和关了改名的
+       * 项目不拦。未确认就配音会拿到没改名的文案，白烧一遍。
+       */
+      if (project.renameEnabled && project.subtitleMode !== 'line' && project.renameState !== 'confirmed') {
+        return reply.code(409).send({ error: '请先在「文案」里确认人名替换，再生成配音' })
+      }
+
       // 【不再按长度拒绝】：Azure 单次 10 分钟的上限现在由 synthesizeLong
       // 内部自动切段消化，超长文案不需要用户手工拆项目。
       const key = process.env.AZURE_SPEECH_KEY

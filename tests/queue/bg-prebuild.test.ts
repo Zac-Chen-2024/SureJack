@@ -187,6 +187,12 @@ describe('背景轨预拼 —— 配音一就绪就在后台拼好', () => {
       method: 'PATCH', url: `/api/projects/${id}`,
       payload: { scriptText: '他站在门口，一动不动。' }, cookies: { sj_session: cookie },
     })
+    // 本用例测的是配音就绪后的背景预拼，不测改名——关掉默认开的改名链，
+    // 免得撞上"未确认人名替换"的 409 门。
+    await a.inject({
+      method: 'POST', url: `/api/projects/${id}/rename/toggle`,
+      payload: { enabled: false }, cookies: { sj_session: cookie },
+    })
 
     // 【用户什么都没多做】——只点了「生成配音」
     const voice = await a.inject({
