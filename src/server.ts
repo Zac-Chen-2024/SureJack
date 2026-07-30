@@ -13,6 +13,7 @@ import { registerAssetRoutes } from './assets/routes.js'
 import { registerTtsRoutes } from './tts/routes.js'
 import { registerSubtitleRoutes } from './subtitles/routes.js'
 import { registerRenameRoutes } from './rename/routes.js'
+import { openLibraryDb } from './library/library-db.js'
 import { registerEpisodeRoutes } from './episodes/routes.js'
 import { registerLibraryRoutes } from './library/routes.js'
 import { ExportQueue } from './queue/queue.js'
@@ -223,7 +224,10 @@ export function buildServer (opts: BuildOpts = {}): FastifyInstance {
     registerAuthRoutes(scope, { authDb, whitelist, welcome, birthdays })
     registerProjectRoutes(scope, { whitelist, libraryDataDir, queue })
     registerSubtitleRoutes(scope, { whitelist })
-    registerRenameRoutes(scope, { whitelist, analyze: opts.analyzeNovel, review: opts.reviewNovel })
+    registerRenameRoutes(scope, {
+      whitelist, analyze: opts.analyzeNovel, review: opts.reviewNovel,
+      openLibrary: () => openLibraryDb(libraryDataDir),
+    })
     registerEpisodeRoutes(scope, { whitelist, plan: opts.planSplit })
     registerLibraryRoutes(scope, { dataDir: libraryDataDir })
 

@@ -4,9 +4,14 @@ import { getSession, requireAuth } from '../auth/session.js'
 import { analyzeNovel, reviewCleanup, coerceAnalysis, coerceReview, type ReviewResult } from './deepseek.js'
 import { applyRename, stripChapters } from './replace.js'
 import type { RenameAnalysis } from './types.js'
+import { recommendBgm } from '../bgm/recommend.js'
+import { listBucket } from '../library/scan.js'
+import type { LibraryDb } from '../library/library-db.js'
 
 interface Deps {
   whitelist: string[]
+  /** 打开素材库（推荐配乐要读背景音乐桶）。测试注入内存库 */
+  openLibrary: () => LibraryDb
   /** 仅供测试注入假分析，生产不传——真调 DeepSeek 会烧配额 */
   analyze?: typeof analyzeNovel
   /** 同上，复查（API-2） */
@@ -89,6 +94,35 @@ export function registerRenameRoutes (app: FastifyInstance, deps: Deps): void {
         renameMapJson: JSON.stringify(analysis),
         renameState: 'proposed',
       }))
+
+      /*
+       * 顺手推荐一首背景音乐。**只在用户没选过的时候写**——推荐是默认值，
+       * 不是命令；他自己挑过之后再被"智能"改回去，而且不知道是谁改的，
+       * 是最恼人的一种自作主张。
+       *
+       * 【不 await、失败只记日志】：配乐推荐挂了不该让人名分析跟着报错。
+       * 没推荐成的话就走原来的默认（库里第一首），一切照旧。
+       */
+      void (async () => {
+        try {
+          if (project.bgmLibraryId !== null) return
+          const lib = deps.openLibrary()
+          const choices = listBucket(lib, '背景音乐')
+            .map((i) => ({ id: i.id, filename: i.filename }))
+          const pick = await recommendBgm(source, choices)
+          if (!pick) return
+          withUserDb(name, (db) => {
+            // 再查一次：分析这几秒里用户可能已经自己选了
+            const now = db.getProject(project.id)
+            if (!now || now.bgmLibraryId !== null) return
+            db.updateProject(project.id, { bgmLibraryId: pick.id })
+          })
+          req.log.info({ pick }, '已按故事类型推荐背景音乐')
+        } catch (e) {
+          req.log.warn({ err: e }, '配乐推荐失败，沿用默认曲目')
+        }
+      })()
+
       return reply.send({ analysis })
     })
 

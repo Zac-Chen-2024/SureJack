@@ -1,7 +1,10 @@
 import { describe, it, expect } from 'vitest'
 import { splitSentences, cutAfter, totalEstimatedMs } from '../../src/episodes/sentences.js'
 import { splitStory, sequelTitles, buildReminder } from '../../src/episodes/split.js'
-import { allowedRange, coerceSplitPlan, TARGET_MIN_MS, TARGET_MAX_MS } from '../../src/episodes/split-ai.js'
+import {
+  allowedRange, coerceSplitPlan, maxIntroIndex, MAX_INTRO_MS,
+  TARGET_MIN_MS, TARGET_MAX_MS,
+} from '../../src/episodes/split-ai.js'
 import { EPISODE_MS_PER_CHAR } from '../../src/episodes/sentences.js'
 
 const STORY = '第一句话。第二句话！第三句话？第四句话；第五句话。第六句话。'
@@ -166,9 +169,25 @@ describe('模型返回的收拢', () => {
     expect(r.candidates.map((c) => c.sentenceIndex)).toEqual([40, 50])
   })
 
-  it('引子不会超过全文四分之一', () => {
+  /*
+   * 【引子按时长夹死在 40 秒】。第一次实跑模型划了 36 句 = 1 分半的回顾，
+   * 续集开头一分半都在复述第一集，追更的人会直接划走。
+   * 提示词里也写了上限，但那是建议；这条断言守的是代码这道保证。
+   */
+  it('引子超时会被夹回 40 秒以内', () => {
     const r = coerceSplitPlan({ introEndIndex: 90 }, s, allowed)
-    expect(r.introEndIndex).toBeLessThanOrEqual(25)
+    expect(s[r.introEndIndex]!.cumulativeMs).toBeLessThanOrEqual(MAX_INTRO_MS)
+  })
+
+  it('模型没回引子时，兜底也不超过 40 秒', () => {
+    const r = coerceSplitPlan({}, s, allowed)
+    expect(s[r.introEndIndex]!.cumulativeMs).toBeLessThanOrEqual(MAX_INTRO_MS)
+  })
+
+  /* 句数不是好指标：同样 20 句，对话体 15 秒、铺陈体 2 分钟 */
+  it('句子很长时，引子上限会缩到很少的句数', () => {
+    const fat = splitSentences(Array.from({ length: 20 }, () => `${'字'.repeat(199)}。`).join(''))
+    expect(maxIntroIndex(fat)).toBeLessThanOrEqual(1)
   })
 
   it('缺字段也不炸，给得出兜底值', () => {

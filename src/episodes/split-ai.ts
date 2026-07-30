@@ -26,6 +26,17 @@ const MODEL = 'deepseek-chat'
 export const TARGET_MIN_MS = 7 * 60 * 1000
 export const TARGET_MAX_MS = 10 * 60 * 1000
 
+/**
+ * 引子最长多久。**按时长卡，不按句数**。
+ *
+ * 第一次实跑 AI 划了 36 句 = 1 分 30 秒的回顾，续集开头一分半都在复述
+ * 第一集——追更的人会直接划走。40 秒差不多是"讲清楚是谁、发生了什么"
+ * 的下限，再长就是在替观众重看一遍。
+ *
+ * 【句数不是好指标】：同样 20 句，对话体可能只有 15 秒，铺陈体能到 2 分钟。
+ */
+export const MAX_INTRO_MS = 40 * 1000
+
 export interface BreakCandidate {
   /** 切在这一句【之后】 */
   sentenceIndex: number
@@ -59,8 +70,10 @@ export const SPLIT_SYSTEM_PROMPT = `你是中文长篇故事的分集编辑，�
 
 【二】选出「引子」的结束句。
 - 引子是续集开头要重念一遍的部分，作用是让没看过第一集的人也能听懂后面。
-- 通常是开篇交代人物和处境的那几句，到"故事正式开始"为止。
-- 一般在前 10 到 30 句之间，不要超过全文的四分之一。
+- **越短越好**：交代清楚主角是谁、处境是什么就够了，观众是来看后续的，
+  不是来重看第一集的。
+- 我在【引子上限】里给了一个句号，你选的编号**不能超过它**。
+- 通常就是开篇那几句钩子，到"故事正式开始"为止。
 
 只输出 JSON，不要任何解释文字：
 {
@@ -75,6 +88,19 @@ export const SPLIT_SYSTEM_PROMPT = `你是中文长篇故事的分集编辑，�
 interface RawPlan {
   candidates?: { sentenceIndex?: unknown; reason?: unknown }[]
   introEndIndex?: unknown
+}
+
+/**
+ * 引子最多能到第几句：累计朗读时长不超过 MAX_INTRO_MS。
+ * 第一句就超了也至少给一句——一句话的引子总好过没有引子。
+ */
+export function maxIntroIndex (sentences: Sentence[]): number {
+  let last = 0
+  for (const s of sentences) {
+    if (s.cumulativeMs > MAX_INTRO_MS) break
+    last = s.index
+  }
+  return Math.min(last, Math.max(0, sentences.length - 1))
 }
 
 /**
@@ -105,10 +131,16 @@ export function coerceSplitPlan (
     candidates.push({ sentenceIndex: idx, reason })
   }
 
+  /*
+   * 【引子按时长夹，不按句数】。模型上一版被要求"10–30 句"，它回了 36 句
+   * = 1 分半的回顾。改成硬卡 40 秒：提示词里也把上限告诉它，但最终以
+   * 这里的夹取为准——提示词是建议，代码才是保证。
+   */
+  const introCap = maxIntroIndex(sentences)
   const introRaw = Number(r.introEndIndex)
   const introEndIndex = Number.isFinite(introRaw)
-    ? clamp(Math.trunc(introRaw), 0, Math.max(0, Math.min(last, Math.floor(sentences.length / 4))))
-    : Math.min(last, 9)
+    ? clamp(Math.trunc(introRaw), 0, introCap)
+    : introCap
 
   candidates.sort((a, b) => a.sentenceIndex - b.sentenceIndex)
   return { introEndIndex, candidates }
@@ -164,6 +196,7 @@ export async function planSplit (text: string, deps: AnalyzeDeps = {}): Promise<
   const user = [
     `全文共 ${sentences.length} 句，总估算配音时长 ${Math.round(totalEstimatedMs(sentences) / 60000)} 分钟。`,
     `断点【可选范围】：第 ${allowed.min} 句 到 第 ${allowed.max} 句（含两端）。范围外的编号一律无效。`,
+    `引子【上限】：最多到第 ${maxIntroIndex(sentences)} 句（再往后念就超过 40 秒了）。`,
     '',
     '=== 开头部分（用来划引子）===',
     numbered(head),
