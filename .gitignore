@@ -51,7 +51,10 @@ Example/*.srt
 config/whitelist.json
 
 # 前端构建产物（由 vite build 生成，不入库）
-public/
+# ⚠️ 必须 /public/ 锚定到仓库根：不写斜杠的话 public/ 会连 web/public/
+# （vite 的 publicDir，放 favicon / manifest / 应用图标等【源文件】）一起
+# 忽略掉，那些是要入库、要随部署走的，不是构建产物。
+/public/
 web/node_modules/
 web/dist/
 

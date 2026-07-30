@@ -1,0 +1,17 @@
+{
+  "name": "SureJack",
+  "short_name": "SureJack",
+  "description": "营销号短视频制作——文案配音、卡拉OK字幕、自动拼背景、一键成片。",
+  "lang": "zh-CN",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#161a1e",
+  "theme_color": "#161a1e",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

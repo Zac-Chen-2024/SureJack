@@ -5,6 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#161a1e" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <!-- PWA：可"添加到主屏幕" + 独立窗口打开，也是安卓 TWA(APK) 包壳的依据。
+         图标/名字/主题色都在 manifest 里；这里补上 iOS 那套私有 meta。 -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/icon-192.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="SureJack" />
+    <meta name="mobile-web-app-capable" content="yes" />
     <title>SureJack</title>
     <!--
       配色必须在【首屏画出来之前】定下来。React 挂载要等模块下载执行完，
