@@ -25,6 +25,7 @@ interface Plan {
   sentences: Sentence[]
   candidates: Candidate[]
   introEndIndex: number
+  introReason: string
   allowed: { min: number; max: number }
   totalMs: number
   reminderPreview: string
@@ -204,6 +205,20 @@ export function SplitPicker ({ projectId, onDone, onCancel }: {
           </button>
         ))}
       </div>
+
+      {/*
+        * 引子那一页：把 AI 的判断依据摆出来。它找的是"钩子段落和正文第一个
+        * 场景的交界"，理由通常是「出现具体时间状语『晚膳时』」这种——
+        * 用户看一眼就知道该不该信，比一个光秃秃的推荐值有用得多。
+        */}
+      {tab === 'intro' && (
+        <div className="rounded-xl border border-line bg-ink-850 px-3 py-2 text-[11px] leading-relaxed text-ink-300">
+          <span className="font-bold text-ink-100">AI 的判断：</span>{plan.introReason}
+          <span className="mt-1 block text-ink-500">
+            引子是开篇那段钩子，收在正文第一个场景之前。觉得不对就滚轮自己挪。
+          </span>
+        </div>
+      )}
 
       {tab === 'break' && (
         <div className="flex flex-wrap gap-1.5">

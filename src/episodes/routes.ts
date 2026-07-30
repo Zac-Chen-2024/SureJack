@@ -62,6 +62,7 @@ export function registerEpisodeRoutes (app: FastifyInstance, deps: Deps): void {
         })),
         candidates: plan.candidates,
         introEndIndex: plan.introEndIndex,
+        introReason: plan.introReason,
         allowed,
         totalMs: totalEstimatedMs(plan.sentences),
         /** 提醒语长什么样，先给用户看一眼 */

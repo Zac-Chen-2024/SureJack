@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { splitSentences, cutAfter, totalEstimatedMs } from '../../src/episodes/sentences.js'
 import { splitStory, sequelTitles, buildReminder } from '../../src/episodes/split.js'
 import {
-  allowedRange, coerceSplitPlan, maxIntroIndex, MAX_INTRO_MS,
+  allowedRange, coerceSplitPlan, maxIntroIndex, MAX_INTRO_RATIO,
   TARGET_MIN_MS, TARGET_MAX_MS,
 } from '../../src/episodes/split-ai.js'
 import { EPISODE_MS_PER_CHAR } from '../../src/episodes/sentences.js'
@@ -170,24 +170,41 @@ describe('模型返回的收拢', () => {
   })
 
   /*
-   * 【引子按时长夹死在 40 秒】。第一次实跑模型划了 36 句 = 1 分半的回顾，
-   * 续集开头一分半都在复述第一集，追更的人会直接划走。
-   * 提示词里也写了上限，但那是建议；这条断言守的是代码这道保证。
+   * 引子只做【防呆夹取】。真正的判断在提示词里——找"钩子段落"和"正文
+   * 第一个场景"的交界。
+   *
+   * ⚠️ 试过按时长硬卡 40 秒，是错的：时长和"钩子写完了没有"毫不相干，
+   * 卡在 40 秒只会把一段钩子拦腰截断，续集开头听起来像话没说完。
+   * 所以这里断言的是"荒谬值被挡住"，不是"引子必须多短"。
    */
-  it('引子超时会被夹回 40 秒以内', () => {
-    const r = coerceSplitPlan({ introEndIndex: 90 }, s, allowed)
-    expect(s[r.introEndIndex]!.cumulativeMs).toBeLessThanOrEqual(MAX_INTRO_MS)
+  it('荒谬的引子编号被夹回上界', () => {
+    const r = coerceSplitPlan({ firstSceneIndex: 9999 }, s, allowed)
+    expect(r.introEndIndex).toBe(maxIntroIndex(s))
+    expect(r.introEndIndex).toBeLessThanOrEqual(Math.floor(s.length * MAX_INTRO_RATIO))
   })
 
-  it('模型没回引子时，兜底也不超过 40 秒', () => {
+  /*
+   * 【问的是"正文从哪句开始"，引子边界由代码往前退一句】。
+   * 前一版问"钩子的最后一句"，三次实测有一次答偏一格——模型把第一个场景
+   * 那句自己的编号回了过来。改成指具体句子，减法交给代码，歧义就没了。
+   */
+  it('模型指第一个场景，引子退一句', () => {
+    expect(coerceSplitPlan({ firstSceneIndex: 7 }, s, allowed).introEndIndex).toBe(6)
+  })
+
+  it('第一个场景就是第 0 句时不会退成负数', () => {
+    expect(coerceSplitPlan({ firstSceneIndex: 0 }, s, allowed).introEndIndex).toBe(0)
+  })
+
+  it('模型没回引子时给个保守兜底', () => {
     const r = coerceSplitPlan({}, s, allowed)
-    expect(s[r.introEndIndex]!.cumulativeMs).toBeLessThanOrEqual(MAX_INTRO_MS)
+    expect(r.introEndIndex).toBeLessThanOrEqual(maxIntroIndex(s))
   })
 
-  /* 句数不是好指标：同样 20 句，对话体 15 秒、铺陈体 2 分钟 */
-  it('句子很长时，引子上限会缩到很少的句数', () => {
-    const fat = splitSentences(Array.from({ length: 20 }, () => `${'字'.repeat(199)}。`).join(''))
-    expect(maxIntroIndex(fat)).toBeLessThanOrEqual(1)
+  it('引子的理由也带回来，给用户看', () => {
+    expect(coerceSplitPlan({ introReason: '下一句「晚膳时」是第一个场景' }, s, allowed).introReason)
+      .toBe('下一句「晚膳时」是第一个场景')
+    expect(coerceSplitPlan({}, s, allowed).introReason).not.toBe('')
   })
 
   it('缺字段也不炸，给得出兜底值', () => {

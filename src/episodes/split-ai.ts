@@ -27,15 +27,18 @@ export const TARGET_MIN_MS = 7 * 60 * 1000
 export const TARGET_MAX_MS = 10 * 60 * 1000
 
 /**
- * 引子最长多久。**按时长卡，不按句数**。
+ * 引子最多占全文的几分之一。
  *
- * 第一次实跑 AI 划了 36 句 = 1 分 30 秒的回顾，续集开头一分半都在复述
- * 第一集——追更的人会直接划走。40 秒差不多是"讲清楚是谁、发生了什么"
- * 的下限，再长就是在替观众重看一遍。
+ * ⚠️ 这是【防呆兜底，不是设计目标】。引子该在哪儿结束是**结构问题**：
+ * 营销号的开篇是一段钩子——几句短促的概括，抛完钩子之后正文才从第一个
+ * 场景开始讲。引子就该收在那个交界处，可能是 8 句，也可能是 20 句，
+ * 取决于这篇钩子写了多长。
  *
- * 【句数不是好指标】：同样 20 句，对话体可能只有 15 秒，铺陈体能到 2 分钟。
+ * 【试过按时长卡 40 秒，是错的】：时长和"钩子写完了没有"毫不相干，
+ * 卡在 40 秒只会把一段钩子拦腰截断，续集开头听起来像话没说完。
+ * 所以这里只留一个宽松的上界防止模型回一个荒谬的数，真正的判断交给提示词。
  */
-export const MAX_INTRO_MS = 40 * 1000
+export const MAX_INTRO_RATIO = 0.25
 
 export interface BreakCandidate {
   /** 切在这一句【之后】 */
@@ -49,6 +52,8 @@ export interface BreakCandidate {
 export interface SplitPlan {
   /** 引子到这一句【结束】为止（续集开头重念的那部分） */
   introEndIndex: number
+  /** 模型凭什么判断钩子在这里结束。给用户看，帮他决定要不要调 */
+  introReason: string
   /** 断点候选，按句子顺序排 */
   candidates: BreakCandidate[]
   /** 全文切好的句子。前端滚轮直接用它，保证编号和后端一致 */
@@ -68,12 +73,36 @@ export const SPLIT_SYSTEM_PROMPT = `你是中文长篇故事的分集编辑，�
 - 三个候选要**分散开**，不要挤在相邻几句里，让用户有得选。
 - 每个候选写一句话说明"为什么这里断"，20 字以内，说人话，不要写"此处为高潮"这种空话。
 
-【二】选出「引子」的结束句。
-- 引子是续集开头要重念一遍的部分，作用是让没看过第一集的人也能听懂后面。
-- **越短越好**：交代清楚主角是谁、处境是什么就够了，观众是来看后续的，
-  不是来重看第一集的。
-- 我在【引子上限】里给了一个句号，你选的编号**不能超过它**。
-- 通常就是开篇那几句钩子，到"故事正式开始"为止。
+【二】找出「开篇钩子」的最后一句。
+
+这不是"截取前多少句"，是找一个**结构上的交界处**。营销号的开篇长这样：
+
+  ① 钩子段落：几句短促的概括，把全篇最抓人的冲突先抛出来。
+     常见特征——一句一行、句子短、跳跃、经常带「后来」「再后来」这种
+     跨时间的连接词、往往以一句反问或一句台词收尾。它在概括，不在叙事。
+  ② 正文：从第一个【具体场景】开始，有时间地点、有动作、按顺序往下讲。
+     开头常见「晚膳时」「三日后」「我推开门」「那天夜里」这类状语。
+
+你要回答的是 ②【正文第一个场景的第一句】的编号，填在 firstSceneIndex 里。
+
+⚠️ 注意问的是【正文开始的那一句】，不是"钩子的最后一句"。引子的边界由我
+自己往前退一句算出来——你只要指准那个开始点。
+
+举个真实例子：
+  [5] 太子看着楚楚可怜的她，一声冷笑。
+  [6] 「来，你现在就表演一下，你是怎么单手扛着我，追着刺客跑了二里地的？」
+  [7] 晚膳时，我神色恹恹。
+「晚膳时」有明确时间、接着是连续动作，是正文第一个场景，
+所以 firstSceneIndex = **7**。
+
+判断要点：
+- 一旦出现具体场景（有时间/地点/连续动作），钩子就已经结束了，不要再往后拖。
+- 钩子如果写得长（十几句），就照它的实际长度选，不要为了"短"而截断——
+  截断的钩子读起来是话没说完。
+- 反过来，钩子只有三五句也别硬凑。
+- 「防呆上限」是个边界，不是目标，正常情况你选的数会远小于它。
+- 用 introReason 一句话说明你是靠什么认出这是第一个场景的（20 字以内），
+  并且**把那句话的开头几个字引出来**，方便我核对你有没有数错行。
 
 只输出 JSON，不要任何解释文字：
 {
@@ -82,25 +111,21 @@ export const SPLIT_SYSTEM_PROMPT = `你是中文长篇故事的分集编辑，�
     {"sentenceIndex": 数字, "reason": "..."},
     {"sentenceIndex": 数字, "reason": "..."}
   ],
-  "introEndIndex": 数字
+  "firstSceneIndex": 数字,
+  "introReason": "凭什么认出这是正文第一个场景（引出那句话的开头几个字）"
 }`
 
 interface RawPlan {
   candidates?: { sentenceIndex?: unknown; reason?: unknown }[]
-  introEndIndex?: unknown
+  /** 正文第一个场景的第一句。引子的边界由它往前退一句算出来 */
+  firstSceneIndex?: unknown
+  introReason?: unknown
 }
 
-/**
- * 引子最多能到第几句：累计朗读时长不超过 MAX_INTRO_MS。
- * 第一句就超了也至少给一句——一句话的引子总好过没有引子。
- */
+/** 引子最多能到第几句。防呆上界，见 MAX_INTRO_RATIO 那段 */
 export function maxIntroIndex (sentences: Sentence[]): number {
-  let last = 0
-  for (const s of sentences) {
-    if (s.cumulativeMs > MAX_INTRO_MS) break
-    last = s.index
-  }
-  return Math.min(last, Math.max(0, sentences.length - 1))
+  const last = Math.max(0, sentences.length - 1)
+  return Math.min(last, Math.max(0, Math.floor(sentences.length * MAX_INTRO_RATIO)))
 }
 
 /**
@@ -112,7 +137,7 @@ export function maxIntroIndex (sentences: Sentence[]): number {
  */
 export function coerceSplitPlan (
   raw: unknown, sentences: Sentence[], allowed: { min: number; max: number },
-): { introEndIndex: number; candidates: { sentenceIndex: number; reason: string }[] } {
+): { introEndIndex: number; introReason: string; candidates: { sentenceIndex: number; reason: string }[] } {
   const r = (raw ?? {}) as RawPlan
   const last = sentences.length - 1
   const clamp = (n: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, n))
@@ -132,18 +157,27 @@ export function coerceSplitPlan (
   }
 
   /*
-   * 【引子按时长夹，不按句数】。模型上一版被要求"10–30 句"，它回了 36 句
-   * = 1 分半的回顾。改成硬卡 40 秒：提示词里也把上限告诉它，但最终以
-   * 这里的夹取为准——提示词是建议，代码才是保证。
+   * 【问"正文从哪句开始"，而不是"钩子的最后一句"】。
+   *
+   * 前一版问的是后者，三次实测里有一次答偏一格——模型把「晚膳时」自己的
+   * 编号回了过来。"某个块的最后一句"是个需要它自己做减法的问法，而它给
+   * 的理由每次都对（都认出了「晚膳时」）。所以改成让它指一个能被引用的
+   * 具体句子，减法由这里做——同一个判断，去掉了唯一会出错的那一步。
+   *
+   * 剩下的只是防呆夹取：夹得太狠会把一段完整的钩子拦腰截断，
+   * 那比让模型自己判断更糟。
    */
   const introCap = maxIntroIndex(sentences)
-  const introRaw = Number(r.introEndIndex)
-  const introEndIndex = Number.isFinite(introRaw)
-    ? clamp(Math.trunc(introRaw), 0, introCap)
-    : introCap
+  const sceneRaw = Number(r.firstSceneIndex)
+  const introEndIndex = Number.isFinite(sceneRaw)
+    ? clamp(Math.trunc(sceneRaw) - 1, 0, introCap)
+    : Math.min(introCap, 6)
+  const introReason = typeof r.introReason === 'string' && r.introReason.trim() !== ''
+    ? r.introReason.trim().slice(0, 30)
+    : '钩子段落到此为止'
 
   candidates.sort((a, b) => a.sentenceIndex - b.sentenceIndex)
-  return { introEndIndex, candidates }
+  return { introEndIndex, introReason, candidates }
 }
 
 /**
@@ -189,14 +223,15 @@ export async function planSplit (text: string, deps: AnalyzeDeps = {}): Promise<
    * 引子只会落在开头——发全文既慢又贵，还让模型更容易在无关段落上跑偏。
    * 发的是：开头 40 句（够它划引子）+ 可选范围前后各 20 句（够它找悬念）。
    */
-  const head = sentences.slice(0, 40)
+  // 开头发 60 句：钩子最长也就十几句，多给一截让模型看清"正文从哪儿开始"
+  const head = sentences.slice(0, 60)
   const mid = sentences.slice(Math.max(0, allowed.min - 20), Math.min(sentences.length, allowed.max + 20))
   const numbered = (arr: Sentence[]): string =>
     arr.map((s) => `[${s.index}] ${s.text.trim()}`).join('\n')
   const user = [
     `全文共 ${sentences.length} 句，总估算配音时长 ${Math.round(totalEstimatedMs(sentences) / 60000)} 分钟。`,
     `断点【可选范围】：第 ${allowed.min} 句 到 第 ${allowed.max} 句（含两端）。范围外的编号一律无效。`,
-    `引子【上限】：最多到第 ${maxIntroIndex(sentences)} 句（再往后念就超过 40 秒了）。`,
+    `引子【防呆上限】：不要超过第 ${maxIntroIndex(sentences)} 句。这只是边界，不是目标。`,
     '',
     '=== 开头部分（用来划引子）===',
     numbered(head),
@@ -224,7 +259,7 @@ export async function planSplit (text: string, deps: AnalyzeDeps = {}): Promise<
     const data = await res.json() as { choices?: { message?: { content?: string } }[] }
     const content = data.choices?.[0]?.message?.content
     if (!content) throw new Error('DeepSeek 返回为空')
-    const { introEndIndex, candidates } = coerceSplitPlan(extractJson(content), sentences, allowed)
+    const { introEndIndex, introReason, candidates } = coerceSplitPlan(extractJson(content), sentences, allowed)
 
     /*
      * 一个候选都没解析出来时【兜一个中点】而不是报错。模型偶尔会回一个
@@ -237,6 +272,7 @@ export async function planSplit (text: string, deps: AnalyzeDeps = {}): Promise<
 
     return {
       introEndIndex,
+      introReason,
       sentences,
       candidates: list.map((c) => ({
         ...c,
