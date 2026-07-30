@@ -171,6 +171,8 @@ interface BuildOpts {
   synthesizeLong?: Parameters<typeof registerTtsRoutes>[1]['synthesizeLong']
   /** 仅供测试注入假人名分析，生产不传——真调 DeepSeek 会烧配额 */
   analyzeNovel?: Parameters<typeof registerRenameRoutes>[1]['analyze']
+  /** 同上，第二层清理复查（API-2） */
+  reviewNovel?: Parameters<typeof registerRenameRoutes>[1]['review']
   /**
    * 启动后扫一遍，把"该有成片却没有"的项目补上队。
    *
@@ -218,7 +220,7 @@ export function buildServer (opts: BuildOpts = {}): FastifyInstance {
     registerAuthRoutes(scope, { authDb, whitelist, welcome, birthdays })
     registerProjectRoutes(scope, { whitelist, libraryDataDir, queue })
     registerSubtitleRoutes(scope, { whitelist })
-    registerRenameRoutes(scope, { whitelist, analyze: opts.analyzeNovel })
+    registerRenameRoutes(scope, { whitelist, analyze: opts.analyzeNovel, review: opts.reviewNovel })
     registerLibraryRoutes(scope, { dataDir: libraryDataDir })
 
     // 背景视频可能很大；nginx 侧已放开到 500M

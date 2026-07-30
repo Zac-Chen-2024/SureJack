@@ -183,6 +183,16 @@ button, input, textarea, a, [role="button"], .interactive {
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
   }
+  /*
+   * 【豁免纯淡入淡出】。安卓上打开"移除动画/关闭动画缩放"后，系统会报
+   * prefers-reduced-motion: reduce，上面那条会把开屏的淡出也压成 0.01ms
+   * ——于是欢迎页是"闪没了"而不是淡出（真机上就是这么翻车的）。
+   * 而 reduce 要防的是位移/缩放引起的眩晕，opacity 渐变不在其列，
+   * 所以标了 .sj-fade 的元素保留它自己的时长。
+   */
+  .sj-fade {
+    transition-duration: revert !important;
+  }
 }
 
 /* 滚动条也要克制——默认的亮色滚动条会破坏深色沉浸感 */

@@ -25,8 +25,16 @@ export const SYSTEM_PROMPT = `你是中文小说的人名与关系分析器，�
 给你一段小说正文，你【只输出一个 JSON 对象】，不要任何解释、不要 markdown 代码块。
 
 任务：
-1. chapterHeadings：找出所有【章节/卷标题】（如"第一章 惊变""序章""番外·后来""楔子"等，
-   通常独占一行），把这些标题的【原文串】原样列进数组。绝不改动正文内容，只是把标题挑出来。
+1. chapterHeadings：找出所有【不该出现在视频里的非正文内容】，把它们的【原文串】原样列进数组。
+   这不只是章节标题，而是所有"不是故事本身"的东西：
+     · 章节/卷标题：第一章 惊变、序章、楔子、番外·后来、Chapter 3、【第一章】…
+     · 方括号/书名号包起来的标注：【作者有话说】、（未完待续）、[本章完]
+     · 作者的话、求收藏求月票、更新公告
+     · 分隔线与装饰：——————、***、===
+     · 站点水印/来源：本文首发于XXX、请记住本站网址、XX小说网
+   这些内容会被【整行删除】，或当它出现在某行【开头】时把这一截删掉
+   （例如"【第一章】他回来了"→"他回来了"）。所以请把要删的那一截【原样、完整】给出。
+   ⚠️ 绝不改动正文本身，只是把这些"非正文"挑出来。宁可漏挑，也不要把正文当成标注。
 2. characters：抽取所有人物，每个人物给出：
    - original：原全名（如"沈砚之"）。
    - role：主角=protagonist，与主角关系密切者=related，其余=minor。
@@ -150,6 +158,80 @@ async function callDeepSeek (novel: string, extraSystem: string, deps: AnalyzeDe
     const content = data.choices?.[0]?.message?.content
     if (!content) throw new Error('DeepSeek 返回为空')
     return coerceAnalysis(extractJson(content))
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+/**
+ * API-2 的系统提示词：**复查**。
+ *
+ * 第一次调用负责"分析 + 出映射"，难免有漏——尤其【孤立的数字行】（光秃秃一个
+ * "17" 就是章节号）这种，没有任何字符特征可循，只有语义能判。所以第二次调用
+ * 拿【第一层处理完的文本】再过一遍，专门捞漏网的非正文内容，并顺手核对改名
+ * 是否留了尾巴。同样【只出指令】，删除仍由代码执行。
+ */
+export const REVIEW_SYSTEM_PROMPT = `你是中文小说正文的清理复查器。给你的文本已经过一轮清理（去章节标题、人名改谐音）。
+你的任务是【复查还有什么不该出现在视频里的内容漏掉了】，只输出一个 JSON 对象，不要解释、不要 markdown。
+
+重点找这些漏网的"非正文"：
+  · 【孤立的数字行】：整行只有一个数字（如 "17"、"023"）——那是章节号，必须删。
+  · 残留的章节/卷标记：第十七章、卷二、Chapter 5、（三）、十七
+  · 作者的话、求收藏/求月票、更新说明、字数统计
+  · 分隔线与装饰：——————、***、===、···
+  · 站点水印/来源/广告：本文首发、请记住本站、XX小说网、免费阅读
+  · 明显不是故事内容的杂项（页码、时间戳、书签标记等）
+
+输出：
+{"removeLines":["要整行删除或从行首删掉的原文串，原样、完整"],
+ "leftoverNames":["文本里仍然出现的、看起来像未改名的原人名（可选，用于提醒）"]}
+
+⚠️ 铁律：
+  · removeLines 里的每一项都必须是文本里【原样出现过】的串，否则无效。
+  · 只挑"非正文"。剧情内容里出现的数字（"他等了3年"）绝不能删。
+  · 宁可漏挑，也绝不误删正文。没有要删的就给空数组。`
+
+export interface ReviewResult { removeLines: string[]; leftoverNames: string[] }
+
+/** 收敛复查结果，防 LLM 乱给字段 */
+export function coerceReview (raw: unknown): ReviewResult {
+  const o = (raw ?? {}) as Record<string, unknown>
+  const arr = (v: unknown): string[] => Array.isArray(v)
+    ? v.filter((x): x is string => typeof x === 'string' && x.trim().length > 0)
+    : []
+  return { removeLines: arr(o.removeLines), leftoverNames: arr(o.leftoverNames) }
+}
+
+/**
+ * API-2：复查第一层的清理结果，捞漏网的非正文内容。
+ * **失败不阻塞**——调用方拿不到结果就沿用第一层的产物即可。
+ */
+export async function reviewCleanup (text: string, deps: AnalyzeDeps = {}): Promise<ReviewResult> {
+  const apiKey = deps.apiKey ?? process.env.DEEPSEEK_API_KEY
+  if (!apiKey) throw new Error('缺少 DEEPSEEK_API_KEY，无法做清理复查')
+  const doFetch = deps.fetch ?? fetch
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), deps.timeoutMs ?? 60_000)
+  try {
+    const res = await doFetch(ENDPOINT, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model: MODEL,
+        messages: [
+          { role: 'system', content: REVIEW_SYSTEM_PROMPT },
+          { role: 'user', content: `复查下面这段已清理过的正文，只输出 JSON：\n\n${text}` },
+        ],
+        temperature: 0.2,
+        response_format: { type: 'json_object' },
+      }),
+      signal: ctrl.signal,
+    })
+    if (!res.ok) throw new Error(`清理复查失败（DeepSeek ${res.status}）`)
+    const data = await res.json() as { choices?: { message?: { content?: string } }[] }
+    const content = data.choices?.[0]?.message?.content
+    if (!content) throw new Error('DeepSeek 返回为空')
+    return coerceReview(extractJson(content))
   } finally {
     clearTimeout(timer)
   }

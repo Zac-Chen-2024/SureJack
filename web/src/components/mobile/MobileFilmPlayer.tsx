@@ -50,7 +50,8 @@ export function MobileFilmPlayer ({ onBack }: { onBack: () => void }) {
         ref={pb.videoRef}
         src={pb.src}
         playsInline
-        preload="metadata"
+        // auto：连第一帧一起拿到（配合 src 的 #t=0.001），未播放时显示画面本身
+        preload="auto"
         // object-top：9:16 的画面在更高的竖屏里顶对齐（贴最上沿），
         // 黑边留到底部，正好被进度条/底栏盖住——画面顶格、不再离顶有距离
         className="absolute inset-0 size-full object-contain object-top"

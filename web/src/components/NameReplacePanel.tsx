@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { useProjects } from '../store/projects'
-import { useRename, type CharacterRole, type RenameAnalysis } from '../store/rename'
+import { useRename, readReview, type CharacterRole, type RenameAnalysis } from '../store/rename'
 import { IconLoader, IconCheck, IconEdit } from './ui/Icon'
 
 /**
@@ -21,7 +21,9 @@ const ROLE: Record<CharacterRole, { label: string; cls: string }> = {
 
 export function NameReplacePanel () {
   const project = useProjects((s) => s.current())
-  const { draft, busy, error, hydrate, analyze, editReplacement, confirm, toggle } = useRename()
+  const { draft, busy, error, step, hydrate, analyze, editReplacement, confirm, toggle, retryReview } = useRename()
+  // 第二层复查的结果/错误存在 renameAnalysisJson 里，读出来给状态行用
+  const { review, error: reviewError } = readReview(project?.renameAnalysisJson ?? null)
 
   // 切项目 / 映射更新时，从项目已存映射恢复草稿
   useEffect(() => { hydrate(project ?? null) }, [project?.id, project?.renameMapJson, hydrate])
@@ -71,7 +73,56 @@ export function NameReplacePanel () {
               : state === 'none' ? '分析人名' : '重新分析'}
           </button>
 
-          {error && <p className="mt-2 text-[11px] text-danger">{error}</p>}
+          {/* 出错就把重试按钮摆在错误旁边——哪一步崩了就重试哪一步，
+              不用把整条流程从头走一遍 */}
+          {error && (
+            <div className="mt-2 rounded-lg border border-danger/40 bg-danger/10 p-2">
+              <p className="text-[11px] leading-relaxed text-danger">{error}</p>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => {
+                  if (step === 'review') void retryReview(project.id)
+                  else if (step === 'confirm') void confirm(project.id)
+                  else void analyze(project.id)
+                }}
+                className="mt-1.5 rounded-md border border-danger/50 px-2 py-1 text-[11px] font-medium text-danger disabled:opacity-50"
+              >
+                重试
+              </button>
+            </div>
+          )}
+
+          {/* 第二层复查（API-2）的结果与重试。它负责捞第一层漏掉的非正文——
+              尤其孤立的章节号数字行那种只有语义判得出的 */}
+          {state === 'confirmed' && (
+            <div className="mt-2 rounded-lg bg-ink-850 p-2">
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] text-ink-400">清理复查</span>
+                {reviewError
+                  ? <span className="text-[11px] text-danger">失败</span>
+                  : review
+                    ? <span className="text-[11px] text-accent">
+                        已复查{review.removeLines.length > 0 ? ` · 又清掉 ${review.removeLines.length} 处` : ' · 没有漏网'}
+                      </span>
+                    : <span className="text-[11px] text-ink-500">未复查</span>}
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void retryReview(project.id)}
+                  className="ml-auto rounded-md border border-line px-2 py-1 text-[11px] text-ink-300 transition-colors hover:border-accent hover:text-accent disabled:opacity-50"
+                >
+                  {busy && step === 'review' ? '复查中…' : '再查一遍'}
+                </button>
+              </div>
+              {reviewError && <p className="mt-1 text-[11px] leading-relaxed text-danger">{reviewError}</p>}
+              {review && review.leftoverNames.length > 0 && (
+                <p className="mt-1 text-[11px] leading-relaxed text-[#e0a82e]">
+                  疑似还有没改的名字：{review.leftoverNames.join('、')}
+                </p>
+              )}
+            </div>
+          )}
 
           {draft && draft.characters.length > 0 && (
             <>

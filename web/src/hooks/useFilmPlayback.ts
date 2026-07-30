@@ -148,7 +148,12 @@ export function useFilmPlayback (
   }, [seek])
 
   const ver = masterOnDisk ?? project?.updatedAt ?? '0'
-  const src = project ? `/api/projects/${project.id}/film/master/stream?v=${encodeURIComponent(ver)}` : null
+  /*
+   * 末尾的 `#t=0.001` 是【媒体片段】，只作用于播放器、不会发给服务器。
+   * 作用：让 WebView/浏览器把播放头落在开头并【渲染出第一帧】，于是未播放时
+   * 看到的是画面本身，而不是安卓 WebView 那个又大又丑的默认播放键占位图。
+   */
+  const src = project ? `/api/projects/${project.id}/film/master/stream?v=${encodeURIComponent(ver)}#t=0.001` : null
   const bgmSrc = project?.bgmLibraryId ? `/api/library/items/${project.bgmLibraryId}` : null
 
   const toggle = (): void => {

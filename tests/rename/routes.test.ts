@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest'
 import { buildServer } from '../../src/server.js'
 import type { FastifyInstance } from 'fastify'
 import type { RenameAnalysis } from '../../src/rename/types.js'
-import type { analyzeNovel } from '../../src/rename/deepseek.js'
+import type { analyzeNovel, reviewCleanup } from '../../src/rename/deepseek.js'
 
 let app: FastifyInstance
 afterEach(async () => { await app?.close(); vi.unstubAllEnvs() })
@@ -21,6 +21,11 @@ const FAKE: RenameAnalysis = {
   relationships: [],
 }
 const fakeAnalyze: typeof analyzeNovel = async () => FAKE
+/** 假复查（API-2）：把"孤立的数字行"当漏网内容捞出来 */
+const fakeReview: typeof reviewCleanup = async (text) => ({
+  removeLines: text.split('\n').map((l) => l.trim()).filter((l) => /^\d+$/.test(l)),
+  leftoverNames: [],
+})
 
 const fakeSynth = (): NonNullable<Parameters<typeof buildServer>[0]>['synthesizeLong'] =>
   async (opts) => ({
@@ -34,6 +39,7 @@ async function makeApp () {
     authDbPath: ':memory:', whitelist: LIST,
     cookieSecret: 'test-secret-32-chars-long-abcdefg',
     analyzeNovel: fakeAnalyze,
+    reviewNovel: fakeReview,
     synthesizeLong: fakeSynth(),
   })
   await a.ready()
@@ -104,6 +110,51 @@ describe('改名接口', () => {
     await app.inject({ method: 'POST', url: `/api/projects/${id}/rename/confirm`, cookies: { sj_session: cookie } })
     const ok = await app.inject({ method: 'POST', url: `/api/projects/${id}/voice`, cookies: { sj_session: cookie } })
     expect(ok.statusCode).toBe(200)
+  })
+
+  /*
+   * API-2 的价值：孤立的数字行（纯章节号）只有语义判得出来，第一层的
+   * chapterHeadings 常常漏掉——第二层复查负责把它捞掉。
+   */
+  it('confirm 会跑第二层复查，捞掉第一层漏掉的孤立数字行（章节号）', async () => {
+    app = await makeApp()
+    const cookie = await loginAs(app, '测试改名路由甲')
+    const id = await newProject(app, cookie, '第一章 归来\n17\n沈砚之回来了。')
+    await app.inject({ method: 'POST', url: `/api/projects/${id}/rename/analyze`, cookies: { sj_session: cookie } })
+    await app.inject({ method: 'POST', url: `/api/projects/${id}/rename/confirm`, cookies: { sj_session: cookie } })
+    const p = await getProject(app, cookie, id)
+    expect(p.scriptText).toBe('沈屿之回来了。')          // 章节行 + 数字行都没了
+    expect(JSON.parse(p.renameAnalysisJson).review.removeLines).toEqual(['17'])
+  })
+
+  it('复查失败不阻塞确认，错误记下来供前端重试', async () => {
+    app = buildServer({
+      authDbPath: ':memory:', whitelist: LIST,
+      cookieSecret: 'test-secret-32-chars-long-abcdefg',
+      analyzeNovel: fakeAnalyze,
+      reviewNovel: async () => { throw new Error('DeepSeek 超时') },
+      synthesizeLong: fakeSynth(),
+    })
+    await app.ready()
+    const cookie = await loginAs(app, '测试改名路由甲')
+    const id = await newProject(app, cookie, '沈砚之回来了。')
+    await app.inject({ method: 'POST', url: `/api/projects/${id}/rename/analyze`, cookies: { sj_session: cookie } })
+    const res = await app.inject({ method: 'POST', url: `/api/projects/${id}/rename/confirm`, cookies: { sj_session: cookie } })
+    expect(res.statusCode).toBe(200)                     // 照常确认
+    const p = await getProject(app, cookie, id)
+    expect(p.renameState).toBe('confirmed')
+    expect(p.scriptText).toBe('沈屿之回来了。')            // 第一层结果保留
+    expect(JSON.parse(p.renameAnalysisJson).reviewError).toContain('超时')
+  })
+
+  it('重试接口 /rename/review 能单独再跑一次复查', async () => {
+    app = await makeApp()
+    const cookie = await loginAs(app, '测试改名路由甲')
+    const id = await newProject(app, cookie, '沈屿之回来了。\n23')
+    const res = await app.inject({ method: 'POST', url: `/api/projects/${id}/rename/review`, cookies: { sj_session: cookie } })
+    expect(res.statusCode).toBe(200)
+    expect(res.json().review.removeLines).toEqual(['23'])
+    expect((await getProject(app, cookie, id)).scriptText).toBe('沈屿之回来了。')
   })
 
   it('toggle 关掉改名 → 配音不再被拦', async () => {

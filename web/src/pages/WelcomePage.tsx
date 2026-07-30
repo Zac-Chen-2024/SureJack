@@ -91,7 +91,7 @@ export function WelcomePage ({ onEnter }: { onEnter: () => void }) {
    */
   return (
     <div
-      className="fixed inset-0 z-[100] flex items-center justify-center overflow-hidden bg-ink-950 px-8"
+      className="sj-fade fixed inset-0 z-[100] flex items-center justify-center overflow-hidden bg-ink-950 px-8"
       style={{
         transition: `opacity 620ms ${EASE}`,
         opacity: leaving ? 0 : 1,
@@ -101,7 +101,7 @@ export function WelcomePage ({ onEnter }: { onEnter: () => void }) {
       <AmbientBackdrop />
       <div
         key={shaken ? 'shake' : 'hi'}
-        className={`relative whitespace-pre-line text-center text-[34px] font-semibold leading-snug tracking-[-0.01em] text-ink-50 ${shaken ? 'sj-wobble' : ''}`}
+        className={`sj-fade relative whitespace-pre-line text-center text-[34px] font-semibold leading-snug tracking-[-0.01em] text-ink-50 ${shaken ? 'sj-wobble' : ''}`}
         style={{
           transition: `opacity 1100ms ${EASE}, transform 1100ms ${EASE}`,
           opacity: shown ? 1 : 0,

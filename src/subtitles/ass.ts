@@ -93,6 +93,26 @@ export function escapeAssText (s: string): string {
  * 点（例如给 SRT 路径加一个 karaoke 选项）时，务必先确认 words 真的是
  * 词级而非句级切分。
  */
+/**
+ * 剔掉文本里【所有标点符号】，只留可读内容（汉字/字母/数字）。
+ *
+ * 为什么不能只靠 Azure 的 isPunctuation：那个标记只覆盖它自己单独切出来的
+ * 逗号句号一类；**方括号【】、引号「」“”、书名号《》、破折号、省略号这些
+ * 经常粘在词里**（"【第一章】他"是一个词），或者压根没被标记 → 于是字幕上
+ * 就漏出括号。这里按 Unicode 标点类（\p{P}）一律剔除，才真正做到"字幕上
+ * 不出现任何标点"。
+ *
+ * ⚠️ 两处豁免，都是为了【不损失内容】：
+ *   · 不删 \p{S}（数学/货币符号）——否则 ￥50 变 50。
+ *   · \p{P} 里有几个其实承载信息的字符要留：% / # & @ _ ~
+ *     （百分号也在 Unicode 标点类里，删了 100% 就变成 100）。
+ */
+const KEEP = new Set(['%', '％', '/', '#', '&', '@', '_', '~'])
+
+export function stripPunctuation (text: string): string {
+  return [...text].filter((ch) => KEEP.has(ch) || !/\p{P}/u.test(ch)).join('')
+}
+
 export function buildKaraoke (line: SubtitleLine, hidePunctuation = false): string {
   return line.words.map((word, i) => {
     const next = line.words[i + 1]
@@ -100,12 +120,17 @@ export function buildKaraoke (line: SubtitleLine, hidePunctuation = false): stri
     // {\kf..} 是我们自己生成的标签，不转义；word.text 是用户/ASR 来的文本，要转义
     const tag = `{\\kf${Math.round(spanMs / 10)}}`   // ASS 的 \k 单位是厘秒
     /*
-     * 隐藏标点：只留 \kf（时长照旧推进 → 停顿和扫光节奏一字不差），
-     * 不追加标点字形。行末的标点也照此处理，于是这一行会在停顿期间
-     * 继续停留，但屏幕上不显示那个标点。
+     * 隐藏标点：只留 \kf（时长照旧推进 → 停顿和扫光节奏一字不差），字形里
+     * 一个标点都不留。两道都要做：
+     *   ① Azure 单独切出来的标点词整个不画；
+     *   ② 粘在词里的符号（【】「」《》—…等）用 stripPunctuation 剔掉——
+     *      光靠 ① 会漏，这正是之前字幕上还看得到中括号的原因。
+     * 剔完为空就只剩 \kf（时间照走、屏幕上什么都不显示）。
      */
-    if (hidePunctuation && word.isPunctuation) return tag
-    return `${tag}${escapeAssText(word.text)}`
+    if (!hidePunctuation) return `${tag}${escapeAssText(word.text)}`
+    if (word.isPunctuation) return tag
+    const clean = stripPunctuation(word.text)
+    return clean === '' ? tag : `${tag}${escapeAssText(clean)}`
   }).join('')
 }
 
@@ -142,9 +167,12 @@ export function buildAss (opts: BuildAssOptions): string {
   const fontSize = opts.subtitleFontSize ?? DEFAULT_SUBTITLE_FONT_SIZE
 
   const dialogues = lines.map((line) => {
+    // 整句模式（自备 SRT）也照同一条规则：字幕上不出现标点
     const text = mode === 'karaoke'
       ? buildKaraoke(line, opts.hidePunctuation)
-      : line.words.map((w) => escapeAssText(w.text)).join('')
+      : line.words
+        .map((w) => escapeAssText(opts.hidePunctuation === true ? stripPunctuation(w.text) : w.text))
+        .join('')
     return `Dialogue: 0,${formatAssTime(line.startMs)},${formatAssTime(line.endMs)},Sub,,0,0,0,,${text}`
   })
 

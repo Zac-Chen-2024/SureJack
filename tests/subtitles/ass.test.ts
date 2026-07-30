@@ -107,6 +107,31 @@ describe('buildKaraoke', () => {
     }
     expect(buildKaraoke(line, true)).toBe('{\\kf50}包子{\\kf20}')
   })
+
+  /*
+   * 线上真实翻车过：字幕上还能看到【】。Azure 只把它单独切出的逗号句号标成
+   * isPunctuation，粘在词里的方括号/引号/书名号一概不标 → 光看那个标记会漏。
+   */
+  it('hidePunctuation：粘在词里的方括号/引号/书名号也必须剔掉', () => {
+    const line: SubtitleLine = {
+      startMs: 0, endMs: 900,
+      words: [w('【第一章】他', 0, 400), w('「走了」', 400, 300), w('《书名》', 700, 200)],
+    }
+    expect(buildKaraoke(line, true)).toBe('{\\kf40}第一章他{\\kf30}走了{\\kf20}书名')
+  })
+
+  it('hidePunctuation：整词都是符号（剔完为空）→ 只留时长，不画字形', () => {
+    const line: SubtitleLine = {
+      startMs: 0, endMs: 600,
+      words: [w('包子', 0, 400), w('——', 400, 200)],   // 破折号没被标成 isPunctuation
+    }
+    expect(buildKaraoke(line, true)).toBe('{\\kf40}包子{\\kf20}')
+  })
+
+  it('不删数学/货币符号——100% 不能变成 100', () => {
+    const line: SubtitleLine = { startMs: 0, endMs: 400, words: [w('100%', 0, 400)] }
+    expect(buildKaraoke(line, true)).toBe('{\\kf40}100%')
+  })
 })
 
 describe('buildAss', () => {

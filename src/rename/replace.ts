@@ -13,17 +13,36 @@ import type { RenameAnalysis, ReplacePair, CharacterReplacement } from './types.
  */
 
 /**
- * 删章节标题：把【整行】trim 后等于某个标题串的行删掉，正文一字不动。
+ * 删掉"非正文内容"（章节标题、【作者有话说】、分隔线、站点水印…由 API-1 判定）。
  *
- * 只按整行匹配、不做子串删除——标题几乎总是独占一行（"第一章 惊变"、
- * "序章"、"番外·后来"）。子串删除会误伤正文里恰好出现的同样文字。
- * 删行后相邻的多余空行折叠成一个，避免 TTS 在空行处拖长停顿。
+ * 两种删法，都【只在行的边界上动手】，正文一字不改：
+ *   ① 整行命中 → 整行删掉（"第一章 惊变"独占一行的常见情况）。
+ *   ② 出现在行【开头】→ 只删这一截（"【第一章】他回来了" → "他回来了"）。
+ *      这条是必需的：线上真实翻车过——方括号标注内联在段首，只做整行匹配
+ *      就漏了，于是"第一章"三个字被念进配音、还显示在字幕上。
+ *
+ * 【故意不做任意位置的子串删除】：那会误伤正文里恰好出现同样文字的地方
+ * （比如正文里讲"这一章"）。只认行首/整行，是保真与去噪之间的正确取舍。
+ * 删完把多余空行折叠，免得 TTS 在空行处拖出长停顿。
  */
 export function stripChapters (text: string, headings: string[]): string {
   if (headings.length === 0) return text
-  const set = new Set(headings.map((h) => h.trim()).filter((h) => h.length > 0))
-  if (set.size === 0) return text
-  const kept = text.split(/\r\n|\r|\n/).filter((line) => !set.has(line.trim()))
+  const marks = headings.map((h) => h.trim()).filter((h) => h.length > 0)
+  if (marks.length === 0) return text
+  const exact = new Set(marks)
+  // 长的先试，避免短的先啃掉一半（"【第一章】" vs "第一章"）
+  const byLongest = [...marks].sort((a, b) => b.length - a.length)
+
+  const kept: string[] = []
+  for (const raw of text.split(/\r\n|\r|\n/)) {
+    const line = raw.trim()
+    if (exact.has(line)) continue          // ① 整行就是要删的
+    let out = line
+    for (const m of byLongest) {           // ② 出现在行首 → 只削掉这一截
+      if (out.startsWith(m)) { out = out.slice(m.length).trim(); break }
+    }
+    kept.push(out)
+  }
   return kept.join('\n').replace(/\n{3,}/g, '\n\n').trim()
 }
 

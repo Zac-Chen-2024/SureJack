@@ -54,11 +54,27 @@ export function renameGates (p: Project | null): boolean {
   return !!p && p.renameEnabled && p.subtitleMode !== 'line' && p.renameState !== 'confirmed'
 }
 
+/** 第二层复查（API-2）的结果：捞到的漏网非正文 + 可能的残留原名 */
+export interface ReviewResult { removeLines: string[]; leftoverNames: string[] }
+
+/** 从项目的 renameAnalysisJson 里取出复查结果与错误（供展示 + 重试） */
+export function readReview (analysisJson: string | null): { review: ReviewResult | null; error: string | null } {
+  if (!analysisJson) return { review: null, error: null }
+  try {
+    const o = JSON.parse(analysisJson) as { review?: ReviewResult | null; reviewError?: string | null }
+    return { review: o?.review ?? null, error: o?.reviewError ?? null }
+  } catch { return { review: null, error: null } }
+}
+
 interface RenameState {
   /** 可编辑的工作副本；null = 还没分析 */
   draft: RenameAnalysis | null
   busy: boolean
   error: string | null
+  /** 哪一步在忙 / 哪一步失败了——决定重试按钮长在哪 */
+  step: 'analyze' | 'confirm' | 'review' | null
+  /** 重跑第二层复查（清理漏网的章节号等）。失败会写进 error，可反复重试 */
+  retryReview: (id: string) => Promise<void>
   /** 从项目已存的映射恢复草稿（切项目 / 首次进面板时） */
   hydrate: (project: Project | null) => void
   analyze: (id: string) => Promise<void>
@@ -69,14 +85,14 @@ interface RenameState {
 }
 
 export const useRename = create<RenameState>((set, get) => ({
-  draft: null, busy: false, error: null,
+  draft: null, busy: false, error: null, step: null,
 
   hydrate (project) {
     set({ draft: parseMap(project?.renameMapJson ?? null), error: null })
   },
 
   async analyze (id) {
-    set({ busy: true, error: null })
+    set({ busy: true, error: null, step: 'analyze' })
     try {
       const { analysis } = await api.post<{ analysis: RenameAnalysis }>(`/api/projects/${id}/rename/analyze`)
       set({ draft: analysis })
@@ -84,7 +100,7 @@ export const useRename = create<RenameState>((set, get) => ({
     } catch (e) {
       set({ error: e instanceof ApiError ? e.message : '人名分析失败' })
     } finally {
-      set({ busy: false })
+      set({ busy: false, step: null })
     }
   },
 
@@ -97,14 +113,30 @@ export const useRename = create<RenameState>((set, get) => ({
 
   async confirm (id) {
     const d = get().draft
-    set({ busy: true, error: null })
+    set({ busy: true, error: null, step: 'confirm' })
     try {
       await api.post(`/api/projects/${id}/rename/confirm`, { analysis: d })
       await useProjects.getState().load()
     } catch (e) {
       set({ error: e instanceof ApiError ? e.message : '确认失败' })
     } finally {
-      set({ busy: false })
+      set({ busy: false, step: null })
+    }
+  },
+
+  /*
+   * 重跑第二层复查。用途：某次 DeepSeek 抽风/超时导致漏网内容没清掉（比如
+   * 孤立的章节号数字行），点一下就能重来，不用整条流程从头走。
+   */
+  async retryReview (id) {
+    set({ busy: true, error: null, step: 'review' })
+    try {
+      await api.post(`/api/projects/${id}/rename/review`)
+      await useProjects.getState().load()
+    } catch (e) {
+      set({ error: e instanceof ApiError ? e.message : '清理复查失败' })
+    } finally {
+      set({ busy: false, step: null })
     }
   },
 
