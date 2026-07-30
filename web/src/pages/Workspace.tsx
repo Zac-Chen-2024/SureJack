@@ -5,6 +5,7 @@ import { useSubtitles } from '../store/subtitles'
 import { useLibrary } from '../store/library'
 import { ProjectSwitcher } from '../components/ProjectSwitcher'
 import { ScriptEditor } from '../components/ScriptEditor'
+import { NameReplacePanel } from '../components/NameReplacePanel'
 import { SubtitleList } from '../components/SubtitleList'
 import { AssetPanel } from '../components/AssetPanel'
 import { SubtitleHeight } from '../components/SubtitleHeight'
@@ -342,7 +343,12 @@ export function Workspace () {
                 ? <span className="tabular-nums text-ink-600">{[...project.scriptText].length} 字</span>
                 : null}
             </button>
-            {scriptOpen && <div className="min-h-0 flex-1 px-6 pb-4"><ScriptEditor /></div>}
+            {scriptOpen && (
+              <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-4">
+                <ScriptEditor />
+                <div className="mt-3"><NameReplacePanel /></div>
+              </div>
+            )}
           </div>
         </div>
       </section>

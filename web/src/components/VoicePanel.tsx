@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import { usePipeline } from '../store/pipeline'
 import { useProjects } from '../store/projects'
+import { renameGates } from '../store/rename'
 import { VoiceSettings } from './VoiceSettings'
 import { useSubtitles } from '../store/subtitles'
 import { Button } from './ui/Button'
@@ -103,12 +104,19 @@ export function VoicePanel () {
         <Button
           variant={state === 'ready' ? 'ghost' : 'primary'}
           className="shrink-0"
-          disabled={voiceBusy || byoBusy || !current.scriptText.trim()}
+          disabled={voiceBusy || byoBusy || !current.scriptText.trim() || renameGates(current)}
           onClick={async () => { await generateVoice(current.id); await reload() }}
         >
           {voiceBusy ? '生成中…' : state === 'none' ? '生成配音' : '重新生成'}
         </Button>
       </div>
+
+      {/* 改名没确认时，配音入口是灰的——说清为什么、去哪确认 */}
+      {renameGates(current) && (
+        <p className="mt-1.5 text-[11px] leading-relaxed text-accent">
+          先在「文案」里确认人名替换，才能生成配音（或在那里关掉人名替换）。
+        </p>
+      )}
 
       {/*
         自备这条路的说明【必须留在界面上】，不能只写在文档里：用户传完

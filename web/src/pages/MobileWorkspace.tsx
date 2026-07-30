@@ -5,6 +5,7 @@ import { useSubtitles } from '../store/subtitles'
 import { useLibrary } from '../store/library'
 import { useFilmStatus } from '../hooks/useFilmStatus'
 import { ScriptEditor } from '../components/ScriptEditor'
+import { NameReplacePanel } from '../components/NameReplacePanel'
 import { VoicePanel } from '../components/VoicePanel'
 import { SubtitleHeight } from '../components/SubtitleHeight'
 import { SubtitleList } from '../components/SubtitleList'
@@ -191,7 +192,9 @@ export function MobileWorkspace () {
 
       {/* ── 抽屉：装桌面版组件，一个不重写 ─────────────────────────── */}
       <BottomSheet open={sheet === 'script'} onClose={() => setSheet(null)} title={SHEET_TITLE.script}>
-        <div className="h-[48vh]"><ScriptEditor /></div>
+        <div className="h-[42vh]"><ScriptEditor /></div>
+        {/* 人名替换挂在文案下方（概念图定的位置）；只对文本项目显示 */}
+        <div className="mt-4 border-t border-line pt-3"><NameReplacePanel /></div>
       </BottomSheet>
 
       <BottomSheet open={sheet === 'voice'} onClose={() => setSheet(null)} title={SHEET_TITLE.voice}>

@@ -114,6 +114,11 @@ export interface Project {
   voiceRate: number
   voiceVolume: number
   voicePitch: number
+  /** 人名谐音替换（只对文本项目有意义）。与后端 user-db 同名字段一致。 */
+  renameEnabled: boolean
+  renameState: 'none' | 'analyzing' | 'proposed' | 'confirmed'
+  renameAnalysisJson: string | null
+  renameMapJson: string | null
   createdAt: string
   updatedAt: string
 }
