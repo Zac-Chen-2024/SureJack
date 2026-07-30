@@ -43,3 +43,19 @@ BUBBLEWRAP_KEYSTORE_PASSWORD=... BUBBLEWRAP_KEY_PASSWORD=... \
 产物 `app-release-signed.apk`（侧载用）、`app-release-bundle.aab`（上架
 Google Play 用）。首次构建若提示缺 `manifest-checksum.txt`，用
 `sha1(twa-manifest.json)` 写一个即可跳过交互。
+
+## App 内自检更新（发版流程）
+
+壳会把自己的 versionCode 通过 `?appVersion=N` 带给网页（见本目录的自定义
+`LauncherActivity.java`），网页比对 `/api/app-version`（内容来自
+`config/app-version.json`）决定是否提示更新。所以**每次发版**要三件一致：
+
+1. `twa-manifest.json` 的 `appVersionCode`（+`appVersionName`）↑。
+2. 生成项目后，用本目录的 `LauncherActivity.java` **覆盖**生成的那个
+   （AGP 8 不生成 BuildConfig，所以版本号走 PackageManager 读，不用改 gradle）。
+3. 构建、把 APK 传到 GitHub release，**资产名必须是 `SureJack.apk`**
+   （`config/app-version.json` 的 apkUrl 指向 `releases/latest/download/SureJack.apk`）。
+4. 把 `config/app-version.json` 的 `versionCode/versionName` 改成这次的值并部署。
+
+⚠️ 安卓侧载无法静默安装，"更新"= 打开下载链接、系统弹窗点确认。真·静默
+自动更新只有上 Google Play 才有。
