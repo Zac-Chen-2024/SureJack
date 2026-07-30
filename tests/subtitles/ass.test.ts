@@ -82,6 +82,31 @@ describe('buildKaraoke', () => {
     // {\kf50} 保持原样（合法标签）；词文本 {惊} 里的花括号被转义
     expect(buildKaraoke(line)).toBe('{\\kf50}\\{惊\\}')
   })
+
+  it('缺省照画标点——老行为不变（母带指纹那份就靠这个稳）', () => {
+    const line: SubtitleLine = {
+      startMs: 0, endMs: 1000,
+      words: [w('包子', 0, 500), w('，', 500, 200, true), w('震惊', 700, 300)],
+    }
+    expect(buildKaraoke(line)).toBe('{\\kf50}包子{\\kf20}，{\\kf30}震惊')
+  })
+
+  it('hidePunctuation：标点只留 \\kf 时长、不画字形；正文和节奏一字不差', () => {
+    const line: SubtitleLine = {
+      startMs: 0, endMs: 1000,
+      words: [w('包子', 0, 500), w('，', 500, 200, true), w('震惊', 700, 300)],
+    }
+    // 标点「，」的 {\kf20} 仍在（停顿/扫光节奏不变），只是后面不跟字形
+    expect(buildKaraoke(line, true)).toBe('{\\kf50}包子{\\kf20}{\\kf30}震惊')
+  })
+
+  it('hidePunctuation：行末标点也只留时长——该行在停顿期间继续停留', () => {
+    const line: SubtitleLine = {
+      startMs: 0, endMs: 700,
+      words: [w('包子', 0, 500), w('。', 500, 200, true)],
+    }
+    expect(buildKaraoke(line, true)).toBe('{\\kf50}包子{\\kf20}')
+  })
 })
 
 describe('buildAss', () => {

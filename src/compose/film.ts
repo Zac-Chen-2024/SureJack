@@ -284,8 +284,16 @@ export function resolveFilm (
   /*
    * ⚠️ 必须走共用的 buildAssForProject——预览接口调的是同一个函数，
    * 这是「预览即成片」的唯一保证。不要在这里另起一套构造逻辑。
+   *
+   * 【两份 ASS，各司其职】：
+   *  - ass（隐藏标点）→ 真正烧进视频、也是预览接口渲染的那份。断句仍按
+   *    标点、停顿时长仍保留，只是不画标点字形。
+   *  - assForHash（含标点，= 老行为）→ 只用来算母带指纹。这样【老项目
+   *    指纹逐字节不变】、开机补合扫不到、绝不因为这个改动被重烧；而新烧
+   *    的片子用的是隐藏版。指纹在这里退化成"变更信号"，不是产物校验和。
    */
-  const ass = buildAssForProject(project)
+  const ass = buildAssForProject(project, { hidePunctuation: true })
+  const assForHash = buildAssForProject(project)
 
   let clip: Clip
   let bgKey: string
@@ -312,7 +320,7 @@ export function resolveFilm (
 
   const bgmPath = libraryBgmPath ?? snap.bgms[0]?.path ?? null
   const fpInput = {
-    aspect, durationMs, bgKey, ass,
+    aspect, durationMs, bgKey, ass: assForHash,
     voicePath: voice.path,
     voiceParams: {
       voice: project.voiceName, rate: project.voiceRate,

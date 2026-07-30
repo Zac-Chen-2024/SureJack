@@ -117,7 +117,10 @@ export function deriveSubtitleLines (project: Project): SubtitleLine[] {
  * 项目的完整 ASS：字幕 + 标题 + 免责声明，同一个文件
  * （设计文档第 7 节：它们是同一个东西的不同填法）。
  */
-export function buildAssForProject (project: Project): string {
+export function buildAssForProject (
+  project: Project,
+  opts: { hidePunctuation?: boolean } = {},
+): string {
   const overlays: TextOverlay[] = [
     { content: DISCLAIMER, style: 'Disclaimer', startMs: null, endMs: null },
     { content: project.name, style: 'Title', startMs: null, endMs: null },
@@ -131,5 +134,6 @@ export function buildAssForProject (project: Project): string {
     // 只抬字幕。免责声明那一行是固定的合规标记不是内容，留在原地。
     subtitleMarginV: project.subtitleMarginV,
     subtitleFontSize: clampSubtitleFontSize(project.subtitleFontSize),
+    hidePunctuation: opts.hidePunctuation,
   })
 }

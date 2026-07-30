@@ -28,6 +28,15 @@ export interface BuildAssOptions {
   subtitleMarginV?: number
   /** 正文字幕字号，ASS 单位（PlayRes 坐标系）。缺省 DEFAULT_SUBTITLE_FONT_SIZE */
   subtitleFontSize?: number
+  /**
+   * 隐藏标点字形（karaoke 模式）：标点仍用来断句、其 \kf 时长仍保留（停顿
+   * 和扫光节奏一字不差），只是不把标点符号画出来。
+   *
+   * 缺省 false = 老行为（标点照画）。**这个开关只作用于【渲染】**——
+   * 母带指纹那份 ASS 仍按 false 计算，从而老项目指纹不变、不会被补合重烧
+   * （见 compose/film.ts：哈希用含标点版，烧录/预览用隐藏版）。
+   */
+  hidePunctuation?: boolean
 }
 
 /**
@@ -84,12 +93,19 @@ export function escapeAssText (s: string): string {
  * 点（例如给 SRT 路径加一个 karaoke 选项）时，务必先确认 words 真的是
  * 词级而非句级切分。
  */
-export function buildKaraoke (line: SubtitleLine): string {
+export function buildKaraoke (line: SubtitleLine, hidePunctuation = false): string {
   return line.words.map((word, i) => {
     const next = line.words[i + 1]
     const spanMs = next ? next.offsetMs - word.offsetMs : word.durationMs
     // {\kf..} 是我们自己生成的标签，不转义；word.text 是用户/ASR 来的文本，要转义
-    return `{\\kf${Math.round(spanMs / 10)}}${escapeAssText(word.text)}`   // ASS 的 \k 单位是厘秒
+    const tag = `{\\kf${Math.round(spanMs / 10)}}`   // ASS 的 \k 单位是厘秒
+    /*
+     * 隐藏标点：只留 \kf（时长照旧推进 → 停顿和扫光节奏一字不差），
+     * 不追加标点字形。行末的标点也照此处理，于是这一行会在停顿期间
+     * 继续停留，但屏幕上不显示那个标点。
+     */
+    if (hidePunctuation && word.isPunctuation) return tag
+    return `${tag}${escapeAssText(word.text)}`
   }).join('')
 }
 
@@ -127,7 +143,7 @@ export function buildAss (opts: BuildAssOptions): string {
 
   const dialogues = lines.map((line) => {
     const text = mode === 'karaoke'
-      ? buildKaraoke(line)
+      ? buildKaraoke(line, opts.hidePunctuation)
       : line.words.map((w) => escapeAssText(w.text)).join('')
     return `Dialogue: 0,${formatAssTime(line.startMs)},${formatAssTime(line.endMs)},Sub,,0,0,0,,${text}`
   })

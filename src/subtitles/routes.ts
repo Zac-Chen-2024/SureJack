@@ -43,6 +43,7 @@ export function registerSubtitleRoutes (app: FastifyInstance, deps: Deps): void 
       reply.header('Content-Type', 'text/plain; charset=utf-8')
       // 派生数据随文案/配音/画幅随时变，缓存住就会出现「改了没反应」
       reply.header('Cache-Control', 'no-store')
-      return reply.send(buildAssForProject(project))
+      // 预览必须和烧录一致：同样隐藏标点字形（断句/停顿不变）
+      return reply.send(buildAssForProject(project, { hidePunctuation: true }))
     })
 }
