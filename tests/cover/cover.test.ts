@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  escapeDrawtext, coverTitleOf, coverDrawtextFilter, coverClipArgs, COVER_FRAMES,
+  escapeDrawtext, coverTitleOf, coverDrawtextFilter, coverClipArgs, COVER_FRAMES, layoutTitle,
 } from '../../src/cover/cover.js'
 
 const ASPECT = { name: '9:16', width: 1080, height: 1920 }
@@ -60,6 +60,39 @@ describe('版式比例', () => {
     const f = coverDrawtextFilter('后续来啦', ASPECT)
     expect(f).toContain('fontsize=178')   // 1080 × 0.16508
     expect(f).toContain('borderw=7')      // 178 × 0.03846
+  })
+})
+
+describe('长标题排版', () => {
+  /*
+   * drawtext 【既不换行也不缩字号】——它只是把画不下的部分画到画布外面。
+   * 于是一个 9 字的项目名在成片封面上是"两头都被切掉的半截字"，而项目名
+   * 动辄七八个字，这是常态不是边角。下面几条守住换行 + 缩字号这两道防线。
+   */
+  it('参考图那种 4 字标题：一行，字号和拟合结果一致', () => {
+    expect(layoutTitle('后续来啦', 1260)).toEqual({ lines: ['后续来啦'], size: 208 })
+  })
+
+  it('6 字以内不换行', () => {
+    expect(layoutTitle('深夜食堂秘密', 1080).lines).toEqual(['深夜食堂秘密'])
+  })
+
+  it('超过 6 字均分两行，长的那半在上面', () => {
+    expect(layoutTitle('老宅里的第七个房间', 1080).lines).toEqual(['老宅里的第', '七个房间'])
+  })
+
+  it('两行还塞不下就缩字号，且绝不超过一行 90% 宽', () => {
+    const { lines, size } = layoutTitle('一二三四五六七八九十一二三四', 1080)
+    expect(lines).toHaveLength(2)
+    const longest = Math.max(...lines.map((l) => [...l].length))
+    expect(size * longest).toBeLessThanOrEqual(1080 * 0.9)
+    expect(size).toBeLessThan(Math.round(1080 * 0.16508))   // 确实缩了
+  })
+
+  it('长标题的滤镜串里带真的换行符，不是字母 n', () => {
+    const f = coverDrawtextFilter('老宅里的第七个房间', { name: 'x', width: 1080, height: 1920 })
+    expect(f).toContain('老宅里的第\n七个房间')
+    expect(f).not.toContain('\\n')
   })
 })
 

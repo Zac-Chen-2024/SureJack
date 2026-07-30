@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify'
-import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs'
+import { createReadStream, existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { spawn } from 'node:child_process'
 import { sendFileRange } from '../assets/storage.js'
@@ -7,7 +7,13 @@ import { openUserDb, type Project } from '../db/user-db.js'
 import { getSession, requireAuth } from '../auth/session.js'
 import { downloadableFilm, playableMaster, enqueueFilm, filmInfo, resolveFilm, FILM_STAMP_FILE, type FilmDeps } from '../compose/film.js'
 import { writeStamp } from '../compose/stamp.js'
-import { COVER_IMAGE } from '../cover/cover.js'
+import {
+  COVER_IMAGE, COVER_THUMB_FILE, COVER_THUMB_TITLE_FILE, COVER_THUMB_WIDTH,
+  coverTitleOf, renderCoverImage,
+} from '../cover/cover.js'
+import { aspectOf } from '../subtitles/project-ass.js'
+import { assetDir } from '../assets/storage.js'
+import { mkdir } from 'node:fs/promises'
 
 type Deps = FilmDeps
 
@@ -213,6 +219,45 @@ export function registerExportRoutes (app: FastifyInstance, deps: Deps): void {
       const versioned = typeof (req.query as { v?: string })?.v === 'string'
       reply.header('Cache-Control', versioned ? 'public, max-age=86400' : 'no-cache')
       return reply.type('image/jpeg').send(readFileSync(posterPath))
+    })
+
+  /**
+   * 这个项目的封面缩略图。项目列表每一行左边那块就是它——列表上看到的
+   * 必须就是这条片子发出去别人看到的第一眼，而不是一个占位色块。
+   *
+   * 【和成片有没有合好无关】：封面只由底图 + 标题决定，草稿状态的项目
+   * 也该有封面。所以这里不查母带、不查成片，直接画。
+   *
+   * 缓存：画完连标题一起存着，标题没变就直接回文件（画一张约 100ms，
+   * 列表每行都要，不缓存的话滚动一下就是十几次 ffmpeg）。
+   */
+  app.get<{ Params: { id: string } }>(
+    '/api/projects/:id/cover.jpg', { preHandler: requireAuth }, async (req, reply) => {
+      const name = getSession(req)!
+      const project = withUserDb(name, (db) => db.getProject(req.params.id))
+      if (!project) return reply.code(404).send({ error: '项目不存在' })
+
+      const dir = assetDir(name, deps.whitelist, req.params.id)
+      const title = coverTitleOf(project)
+      const thumb = join(dir, COVER_THUMB_FILE)
+      const titleFile = join(dir, COVER_THUMB_TITLE_FILE)
+      const cached = existsSync(thumb) && existsSync(titleFile)
+        && readFileSync(titleFile, 'utf-8') === title
+      if (!cached) {
+        const full = aspectOf(project)
+        const w = COVER_THUMB_WIDTH
+        const h = Math.round(w * full.height / full.width)
+        await mkdir(dir, { recursive: true })
+        await renderCoverImage({
+          imagePath: COVER_IMAGE, title,
+          aspect: { name: full.name, width: w, height: h },
+          outPath: thumb,
+        })
+        writeFileSync(titleFile, title, 'utf-8')
+      }
+      // 标题变了 URL 会带上新的 v=，所以这份可以放心长缓存
+      reply.header('Cache-Control', 'public, max-age=86400')
+      return reply.type('image/jpeg').send(readFileSync(thumb))
     })
 
   /**

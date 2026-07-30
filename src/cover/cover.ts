@@ -37,9 +37,21 @@ import type { AspectPreset } from '../types.js'
 const FPS = 30
 export const COVER_FRAMES = 2
 
-const SIZE_RATIO = 0.16508      // 字号 / 画布宽
+const SIZE_RATIO = 0.16508      // 字号 / 画布宽（参考图那种 4 字标题的字号）
 const STROKE_RATIO = 0.03846    // 描边 / 字号
 const BASELINE_RATIO = 0.0096   // 垂直微调 / 字号
+
+/**
+ * 一行最多几个字，以及一行能占画布宽的多少。
+ *
+ * 【为什么必须有这两条】：参考图是 4 个字，按 0.16508 的字号正好占 66% 宽。
+ * 同样的字号给一个 9 字的标题，会一路画到画外去——drawtext 既不换行也不缩，
+ * 它只是把字画到画布外面，成片上看到的是【两头都被切掉的半截字】。
+ * 项目名动辄七八个字，所以这不是边角情况，是常态。
+ */
+const MAX_CHARS_PER_LINE = 6
+const MAX_LINES = 2
+const LINE_WIDTH_BUDGET = 0.90   // 一行最宽占画布宽的比例，两侧各留 5%
 
 /** 固定封面图和封面字体都跟着代码走，部署即到位 */
 export const COVER_IMAGE = join(process.cwd(), 'assets/cover/default.jpg')
@@ -47,6 +59,13 @@ export const COVER_FONT = join(process.cwd(), 'assets/fonts/SourceHanSansCN-Medi
 
 /** 封面片段的文件名（放在项目目录里，和成片同级） */
 export const COVER_CLIP_FILE = 'cover.mp4'
+
+/** 列表缩略图用的封面静态图，和它对应的标题（标题变了要重画） */
+export const COVER_THUMB_FILE = 'cover-thumb.jpg'
+export const COVER_THUMB_TITLE_FILE = 'cover-thumb.txt'
+
+/** 缩略图宽度。列表里显示只有 52 逻辑像素宽，360 足够 3 倍屏 */
+export const COVER_THUMB_WIDTH = 360
 
 /**
  * drawtext 的 text 值要转义。
@@ -69,8 +88,33 @@ export function coverTitleOf (project: { name: string; coverTitle?: string | nul
   return t === '' ? project.name : t
 }
 
+/**
+ * 标题排版：先决定分几行，再决定字号。
+ *
+ * 分行：6 个字以内一行；超过就均分成两行（长的那半放上面，读起来是
+ * 「大标题 + 补充」而不是「补充 + 大标题」）。超过 12 字只能靠缩字号。
+ *
+ * 字号：取【参考字号】和【一行塞得下的字号】里小的那个。于是 4 字标题和
+ * 参考图逐像素一致，长标题自动缩到画得下——而不是被切掉两头。
+ */
+export function layoutTitle (title: string, width: number): { lines: string[]; size: number } {
+  const chars = [...title.trim()]
+  const lines = chars.length <= MAX_CHARS_PER_LINE
+    ? [chars.join('')]
+    : (() => {
+        const per = Math.ceil(chars.length / MAX_LINES)
+        return [chars.slice(0, per).join(''), chars.slice(per).join('')]
+      })()
+  const longest = Math.max(...lines.map((l) => [...l].length), 1)
+  // 中日韩方块字的步进就是一个字号，所以"一行的宽" ≈ 字数 × 字号
+  const fitted = (width * LINE_WIDTH_BUDGET) / longest
+  // 【floor 不是 round】：这是个上限。四舍五入会让长标题超出预算一两个像素，
+  // 而超出的那部分正好是最外侧的笔画，看着就是"边上少了一点点"
+  return { lines, size: Math.floor(Math.min(width * SIZE_RATIO, fitted)) }
+}
+
 export function coverDrawtextFilter (title: string, aspect: AspectPreset): string {
-  const size = Math.round(aspect.width * SIZE_RATIO)
+  const { lines, size } = layoutTitle(title, aspect.width)
   const border = Math.max(1, Math.round(size * STROKE_RATIO))
   const dy = Math.round(size * BASELINE_RATIO)
   return [
@@ -78,12 +122,15 @@ export function coverDrawtextFilter (title: string, aspect: AspectPreset): strin
     `crop=${aspect.width}:${aspect.height}`,
     [
       `drawtext=fontfile=${COVER_FONT}`,
-      `text='${escapeDrawtext(title)}'`,
+      // 换行用【真的换行符】。写成 \n 两个字符的话 drawtext 会当成字母 n 画出来
+      `text='${lines.map(escapeDrawtext).join('\n')}'`,
       `fontsize=${size}`,
       'fontcolor=white',
       `borderw=${border}`,
       'bordercolor=black',
+      `line_spacing=${Math.round(size * 0.08)}`,
       'x=(w-text_w)/2',
+      // text_h 是整块文字的高（两行也算在内），所以多行照样是整体居中
       `y=(h-text_h)/2+${dy}`,
     ].join(':'),
     `fps=${FPS}`,
@@ -147,6 +194,25 @@ export function coverClipArgs (opts: {
     '-movflags', '+faststart',
     opts.outPath,
   ]
+}
+
+/**
+ * 渲染一张封面【静态图】。列表里的缩略图用它——那儿要的是"这条片子发出去
+ * 别人看到的样子"，所以必须和成片最前面那两帧同一套版式、同一张底图。
+ *
+ * 尺寸按比例缩：drawtext 的字号/描边都是画布宽的比例，缩了照样对得上。
+ */
+export async function renderCoverImage (opts: {
+  imagePath: string; title: string; aspect: AspectPreset; outPath: string
+}): Promise<void> {
+  await run([
+    '-hide_banner', '-loglevel', 'error', '-y',
+    '-i', opts.imagePath,
+    '-vf', coverDrawtextFilter(opts.title, opts.aspect),
+    '-frames:v', '1',
+    '-q:v', '4',
+    opts.outPath,
+  ], '封面缩略图渲染')
 }
 
 function run (args: string[], what: string): Promise<void> {

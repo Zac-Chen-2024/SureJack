@@ -173,6 +173,28 @@ export function IconSubtitles (props: IconProps) {
   )
 }
 
+/** 图片——列表里"显示封面"的开关（开） */
+export function IconImage (props: IconProps) {
+  return (
+    <Svg {...props}>
+      <rect x="3" y="4.5" width="18" height="15" rx="2.5" />
+      <circle cx="8.5" cy="9.5" r="1.6" />
+      <path d="m4 16.5 4.5-4 3.5 3 3-2.5 5 4" />
+    </Svg>
+  )
+}
+
+/** 图片被划掉——"显示封面"的开关（关） */
+export function IconImageOff (props: IconProps) {
+  return (
+    <Svg {...props}>
+      <rect x="3" y="4.5" width="18" height="15" rx="2.5" />
+      <path d="m4 16.5 4.5-4 3.5 3 3-2.5 5 4" />
+      <path d="M4 20 20 4" />
+    </Svg>
+  )
+}
+
 /** 筛选——漏斗。列表页「最近」旁边那个按钮 */
 export function IconFilter (props: IconProps) {
   return (

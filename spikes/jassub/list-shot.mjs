@@ -8,6 +8,7 @@
  * 它会把前端自己的 /src/api/client.ts 也拦掉，页面直接白屏（踩过）。
  */
 import { chromium } from 'playwright'
+import { readFileSync } from 'node:fs'
 
 // 截图落在项目根的 screenshots/。台子本身放在 spikes/jassub/ 是因为
 // playwright 只装在那儿的 node_modules 里。
@@ -63,6 +64,11 @@ await page.route('**/*', async (route) => {
   const json = (body) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) })
   if (p === '/api/whoami') return json({ name: '陈梓昂', honorific: '主人' })
   if (p === '/api/projects') return json(PROJECTS)
+  if (p.endsWith('/cover.jpg')) {
+    // 真封面（1080x1920 的那张），让列表按"宽度铺满 + 纵向居中"去裁
+    return route.fulfill({ status: 200, contentType: 'image/jpeg',
+      body: readFileSync('/root/SureJack/screenshots/cover-repro.png') })
+  }
   const film = p.match(/^\/api\/projects\/([^/]+)\/film$/)
   if (film) return json(FILM[film[1]] ?? { state: 'ready', progress: 100, masterStale: false })
   return json({})
@@ -92,7 +98,7 @@ await page.screenshot({ path: OUT + 'list.png' })
 await page.getByLabel('下载队列').click()
 await page.waitForTimeout(400)
 await page.screenshot({ path: OUT + 'downloads.png' })
-await page.getByLabel('关闭').click()
+await page.getByLabel('关闭', { exact: true }).click()
 
 // 搜索胶囊拉开
 await page.getByLabel('打开搜索').click()

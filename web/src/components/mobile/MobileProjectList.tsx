@@ -4,7 +4,10 @@ import { usePipeline } from '../../store/pipeline'
 import { AccountMenu } from '../AccountMenu'
 import { PaletteToggle } from '../PaletteToggle'
 import { DownloadPanel } from './DownloadPanel'
-import { IconPlus, IconLoader, IconTrash, IconMore, IconFilter, IconSearch, IconClose } from '../ui/Icon'
+import {
+  IconPlus, IconLoader, IconTrash, IconMore, IconFilter, IconSearch, IconClose,
+  IconImage, IconImageOff,
+} from '../ui/Icon'
 
 /**
  * 手机版项目列表（概念图 Screen 0）：**我的项目 + 一步新建**。
@@ -60,6 +63,16 @@ function summaryOf (p: Project): string {
   return '空项目 · 从这里开始'
 }
 
+/*
+ * 【封面预览开关只存本地，不入库】。它回答的是"我现在想怎么看这个列表"，
+ * 不是项目的属性——换台设备各看各的，也不该因为改了个显示偏好就去写数据库。
+ */
+const COVER_PREF_KEY = 'sj.list.cover'
+
+function readCoverPref (): boolean {
+  try { return localStorage.getItem(COVER_PREF_KEY) !== '0' } catch { return true }
+}
+
 /** 下拉多远算"要刷新"，以及指示条最多长到多高 */
 const PULL_THRESHOLD = 56
 const PULL_MAX = 76
@@ -74,6 +87,7 @@ export function MobileProjectList ({ onOpen, onNew }: { onOpen: (id: string) => 
   const [query, setQuery] = useState('')
   const [searching, setSearching] = useState(false)
   const [filterHint, setFilterHint] = useState(false)
+  const [showCover, setShowCover] = useState(readCoverPref)
   const searchRef = useRef<HTMLInputElement>(null)
   useEffect(() => { if (searching) searchRef.current?.focus() }, [searching])
 
@@ -154,6 +168,26 @@ export function MobileProjectList ({ onOpen, onNew }: { onOpen: (id: string) => 
         >
           <IconFilter className="size-4" />
         </button>
+
+        {/* 封面预览开关：挨着漏斗。做成图标按钮而不是滑动开关——
+            这行只有 36px 高，塞一个 iOS 那种开关会把整行撑散。
+            只存本地，不入库（见 COVER_PREF_KEY 上面那段） */}
+        <button
+          type="button"
+          aria-label={showCover ? '关闭封面预览' : '显示封面预览'}
+          aria-pressed={showCover}
+          onClick={() => {
+            const next = !showCover
+            setShowCover(next)
+            try { localStorage.setItem(COVER_PREF_KEY, next ? '1' : '0') } catch { /* 无痕模式写不了，不影响本次 */ }
+          }}
+          className={`flex size-7 shrink-0 items-center justify-center rounded-lg transition-colors ${
+            showCover ? 'text-accent hover:bg-ink-850' : 'text-ink-400 hover:bg-ink-850 hover:text-ink-200'
+          }`}
+        >
+          {showCover ? <IconImage className="size-4" /> : <IconImageOff className="size-4" />}
+        </button>
+
         {filterHint && !searching && (
           <span className="truncate text-[11px] text-[#e0a82e]">我还没开发呢，以后再开发</span>
         )}
@@ -284,7 +318,15 @@ export function MobileProjectList ({ onOpen, onNew }: { onOpen: (id: string) => 
                     onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(p.id) } }}
                     className="group flex w-full cursor-pointer items-center gap-3.5 rounded-2xl border border-line bg-ink-900 p-3 text-left transition-colors hover:border-ink-600"
                   >
-                    {/* 竖向缩略图占位：两种冷/暖渐变交替，呼应 9:16 画面 */}
+                    {/*
+                     * 缩略图。开着封面预览时放【这条片子真正的封面】——
+                     * 列表上看到的就是它发出去以后别人看到的第一眼。
+                     *
+                     * 封面是 9:16，槽位是 52×72（更方）。按【宽度铺满 + 纵向
+                     * 居中裁切】：宽度顶满不裁、不变形，上下各裁掉一点。
+                     * 反过来按高度铺满的话左右会被切掉，而标题正在中间，
+                     * 切掉的就是字。
+                     */}
                     <span
                       className="relative h-[72px] w-[52px] shrink-0 overflow-hidden rounded-xl"
                       style={{
@@ -293,14 +335,24 @@ export function MobileProjectList ({ onOpen, onNew }: { onOpen: (id: string) => 
                           : 'linear-gradient(180deg,#3a2340,#1a1226)',
                       }}
                     >
-                      <span
-                        className="absolute bottom-2 left-1/2 h-9 w-5 -translate-x-1/2 rounded-lg"
-                        style={{
-                          background: i % 2 === 0
-                            ? 'linear-gradient(180deg,#ff7a59,#c0392b)'
-                            : 'linear-gradient(180deg,#e0a82e,#a06a12)',
-                        }}
-                      />
+                      {showCover ? (
+                        <img
+                          // v= 跟着标题走：改了标题 URL 就变，缓存自然失效
+                          src={`/api/projects/${p.id}/cover.jpg?v=${encodeURIComponent(p.coverTitle || p.name)}`}
+                          alt=""
+                          loading="lazy"
+                          className="absolute inset-0 size-full object-cover object-center"
+                        />
+                      ) : (
+                        <span
+                          className="absolute bottom-2 left-1/2 h-9 w-5 -translate-x-1/2 rounded-lg"
+                          style={{
+                            background: i % 2 === 0
+                              ? 'linear-gradient(180deg,#ff7a59,#c0392b)'
+                              : 'linear-gradient(180deg,#e0a82e,#a06a12)',
+                          }}
+                        />
+                      )}
                     </span>
 
                     <span className="min-w-0 flex-1">
