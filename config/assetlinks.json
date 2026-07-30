@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "win.zacchen.surejack",
+      "sha256_cert_fingerprints": [
+        "9B:45:D4:05:AB:FF:0A:3F:78:20:CF:4E:8A:D6:3A:D6:6D:07:F8:79:6D:BD:B0:D4:EA:6A:1D:53:CC:1B:37:6E"
+      ]
+    }
+  }
+]

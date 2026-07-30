@@ -247,6 +247,24 @@ export function buildServer (opts: BuildOpts = {}): FastifyInstance {
 
   app.addHook('onClose', async () => authDb.close())
 
+  /*
+   * 安卓 TWA(APK) 的数字资产关联。
+   *
+   * 证明「surejack.zacchen.win 这个域名授权了那个签名指纹的 App」——校验
+   * 通过后，装好的 APK 才会隐藏顶部地址栏、真正全屏运行（否则退化成带
+   * 地址栏的 Custom Tab）。内容 = APK 签名密钥的 SHA-256 指纹，构建 APK
+   * 时生成，放在 config/assetlinks.json。
+   *
+   * 单独写路由而不靠 @fastify/static：.well-known 是点开头的目录，
+   * @fastify/send 默认不吐 dotfiles。文件不存在就 404——纯网页/PWA
+   * 不依赖它，缺了也不影响。
+   */
+  app.get('/.well-known/assetlinks.json', async (_req, reply) => {
+    const p = join(__dirname, '..', 'config', 'assetlinks.json')
+    if (!existsSync(p)) return reply.code(404).send({ error: 'not found' })
+    return reply.type('application/json').send(readFileSync(p, 'utf8'))
+  })
+
   // 托管前端构建产物（同域，cookie 自动生效、无 CORS）。
   // public/ 由 `cd web && npm run build` 生成；开发时用 vite dev + proxy，不走这里。
   const publicDir = join(__dirname, '..', 'public')

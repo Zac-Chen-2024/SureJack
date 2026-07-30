@@ -1,0 +1,32 @@
+{
+  "packageId": "win.zacchen.surejack",
+  "host": "surejack.zacchen.win",
+  "name": "SureJack",
+  "launcherName": "SureJack",
+  "display": "standalone",
+  "themeColor": "#161A1E",
+  "themeColorDark": "#000000",
+  "navigationColor": "#000000",
+  "navigationColorDark": "#000000",
+  "navigationDividerColor": "#000000",
+  "navigationDividerColorDark": "#000000",
+  "backgroundColor": "#161A1E",
+  "enableNotifications": false,
+  "startUrl": "/",
+  "iconUrl": "https://surejack.zacchen.win/icon-512.png",
+  "maskableIconUrl": "https://surejack.zacchen.win/icon-maskable-512.png",
+  "splashScreenFadeOutDuration": 300,
+  "signingKey": {
+    "path": "./android.keystore",
+    "alias": "surejack"
+  },
+  "appVersionName": "1",
+  "appVersionCode": 1,
+  "shortcuts": [],
+  "webManifestUrl": "https://surejack.zacchen.win/manifest.webmanifest",
+  "fallbackType": "customtabs",
+  "fullScopeUrl": "https://surejack.zacchen.win/",
+  "minSdkVersion": 21,
+  "orientation": "portrait",
+  "appVersion": "1"
+}

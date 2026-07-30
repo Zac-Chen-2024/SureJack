@@ -73,3 +73,12 @@ data/library/
 
 # 子代理的临时 worktree，不入库
 .claude/worktrees/
+
+# 安卓构建产物 & 签名密钥（密钥必须离线保管，绝不入库）
+/SureJack.apk
+*.apk
+*.aab
+*.keystore
+apk-build/
+/android.keystore
+/android-signing-secret.txt
