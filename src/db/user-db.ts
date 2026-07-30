@@ -90,6 +90,17 @@ export interface Project {
   voiceRate: number
   voiceVolume: number
   voicePitch: number
+  /**
+   * 人名谐音替换（只对文本项目有意义）。
+   * renameEnabled：是否走"去章节+改名"链（新文本项目默认开；老项目迁移默认关，
+   *   不打扰它们）。renameState：none/analyzing/proposed/confirmed——未 confirmed
+   *   且 enabled 的文本项目会挡住配音（见 tts 路由的阻拦）。
+   * renameAnalysisJson：API-1 草案 + 关系图。renameMapJson：确认/编辑后要执行的映射。
+   */
+  renameEnabled: boolean
+  renameState: 'none' | 'analyzing' | 'proposed' | 'confirmed'
+  renameAnalysisJson: string | null
+  renameMapJson: string | null
   createdAt: string
   updatedAt: string
 }
@@ -108,6 +119,10 @@ export interface UserDb {
     subtitleMarginV?: number
     subtitleFontSize?: number
     voiceName?: string; voiceRate?: number; voiceVolume?: number; voicePitch?: number
+    renameEnabled?: boolean
+    renameState?: 'none' | 'analyzing' | 'proposed' | 'confirmed'
+    renameAnalysisJson?: string | null
+    renameMapJson?: string | null
   }): Project | null
   deleteProject (id: string): boolean
   addAsset (input: {
@@ -137,6 +152,10 @@ interface Row {
   voice_rate: number | null
   voice_volume: number | null
   voice_pitch: number | null
+  rename_enabled: number | null
+  rename_state: string | null
+  rename_analysis_json: string | null
+  rename_map_json: string | null
   created_at: string; updated_at: string
 }
 const toProject = (r: Row): Project => ({
@@ -154,6 +173,11 @@ const toProject = (r: Row): Project => ({
   voiceRate: r.voice_rate ?? RATE_RANGE.default,
   voiceVolume: r.voice_volume ?? VOLUME_RANGE.default,
   voicePitch: r.voice_pitch ?? PITCH_RANGE.default,
+  // 老行没有这几列时：改名关、none（老项目一律不进改名链，不被打扰）
+  renameEnabled: (r.rename_enabled ?? 0) === 1,
+  renameState: (r.rename_state ?? 'none') as 'none' | 'analyzing' | 'proposed' | 'confirmed',
+  renameAnalysisJson: r.rename_analysis_json ?? null,
+  renameMapJson: r.rename_map_json ?? null,
   createdAt: r.created_at, updatedAt: r.updated_at,
 })
 
@@ -203,6 +227,10 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
       voice_rate INTEGER NOT NULL DEFAULT ${RATE_RANGE.default},
       voice_volume INTEGER NOT NULL DEFAULT ${VOLUME_RANGE.default},
       voice_pitch INTEGER NOT NULL DEFAULT ${PITCH_RANGE.default},
+      rename_enabled INTEGER NOT NULL DEFAULT 0,
+      rename_state TEXT NOT NULL DEFAULT 'none',
+      rename_analysis_json TEXT,
+      rename_map_json TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -256,6 +284,12 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
   addCol('voice_rate', `voice_rate INTEGER NOT NULL DEFAULT ${RATE_RANGE.default}`)
   addCol('voice_volume', `voice_volume INTEGER NOT NULL DEFAULT ${VOLUME_RANGE.default}`)
   addCol('voice_pitch', `voice_pitch INTEGER NOT NULL DEFAULT ${PITCH_RANGE.default}`)
+  // 改名相关。默认【关 + none】回填老行——老项目不进改名链、不被阻拦、
+  // 指纹和成片一动不动；新项目的"默认开"由 createProject 显式写（见下）。
+  addCol('rename_enabled', 'rename_enabled INTEGER NOT NULL DEFAULT 0')
+  addCol('rename_state', "rename_state TEXT NOT NULL DEFAULT 'none'")
+  addCol('rename_analysis_json', 'rename_analysis_json TEXT')
+  addCol('rename_map_json', 'rename_map_json TEXT')
 
   return {
     raw: db,
@@ -281,18 +315,23 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
         subtitleFontSize: DEFAULT_SUBTITLE_FONT_SIZE,
         voiceName: DEFAULT_VOICE, voiceRate: DEFAULT_VOICE_RATE,
         voiceVolume: VOLUME_RANGE.default, voicePitch: PITCH_RANGE.default,
+        // 新项目默认走文本(karaoke)，改名默认开；自备路 adopt 时会关掉/不适用
+        renameEnabled: true, renameState: 'none',
+        renameAnalysisJson: null, renameMapJson: null,
         createdAt: now, updatedAt: now,
       }
       db.prepare(
         `INSERT INTO projects
-          (id, name, script_text, aspect_ratio, tts_state, tts_duration_ms, word_timings_json, bgm_volume, subtitle_mode, bgm_library_id, subtitle_margin_v, subtitle_font_size, voice_name, voice_rate, voice_volume, voice_pitch, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          (id, name, script_text, aspect_ratio, tts_state, tts_duration_ms, word_timings_json, bgm_volume, subtitle_mode, bgm_library_id, subtitle_margin_v, subtitle_font_size, voice_name, voice_rate, voice_volume, voice_pitch, rename_enabled, rename_state, rename_analysis_json, rename_map_json, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         project.id, project.name, project.scriptText, project.aspectRatio,
         project.ttsState, project.ttsDurationMs, project.wordTimingsJson,
         project.bgmVolume, project.subtitleMode, project.bgmLibraryId,
         project.subtitleMarginV, project.subtitleFontSize,
         project.voiceName, project.voiceRate, project.voiceVolume, project.voicePitch,
+        project.renameEnabled ? 1 : 0, project.renameState,
+        project.renameAnalysisJson, project.renameMapJson,
         now, now,
       )
       return project
@@ -309,7 +348,9 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
           tts_state = ?, tts_duration_ms = ?, word_timings_json = ?,
           bgm_volume = ?, subtitle_mode = ?, bgm_library_id = ?,
           subtitle_margin_v = ?, subtitle_font_size = ?,
-          voice_name = ?, voice_rate = ?, voice_volume = ?, voice_pitch = ?, updated_at = ?
+          voice_name = ?, voice_rate = ?, voice_volume = ?, voice_pitch = ?,
+          rename_enabled = ?, rename_state = ?, rename_analysis_json = ?, rename_map_json = ?,
+          updated_at = ?
           WHERE id = ?`
       ).run(
         patch.name ?? row.name,
@@ -335,6 +376,11 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
         patch.voiceRate !== undefined ? patch.voiceRate : row.voice_rate ?? RATE_RANGE.default,
         patch.voiceVolume !== undefined ? patch.voiceVolume : row.voice_volume ?? VOLUME_RANGE.default,
         patch.voicePitch !== undefined ? patch.voicePitch : row.voice_pitch ?? PITCH_RANGE.default,
+        patch.renameEnabled !== undefined ? (patch.renameEnabled ? 1 : 0) : (row.rename_enabled ?? 0),
+        patch.renameState !== undefined ? patch.renameState : (row.rename_state ?? 'none'),
+        // null 是有意义的值（清空分析/映射）→ 判 undefined 而非 ??
+        patch.renameAnalysisJson !== undefined ? patch.renameAnalysisJson : row.rename_analysis_json,
+        patch.renameMapJson !== undefined ? patch.renameMapJson : row.rename_map_json,
         now, id,
       )
       const updated = db.prepare('SELECT * FROM projects WHERE id = ?').get(id) as Row

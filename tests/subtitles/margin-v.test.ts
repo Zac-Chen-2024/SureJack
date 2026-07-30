@@ -25,6 +25,7 @@ function makeProject (patch: Partial<Project> = {}): Project {
     ]),
     bgmVolume: 0.1, bgmLibraryId: null, subtitleMode: 'karaoke',
     subtitleFontSize: 64, voiceName: 'zh-CN-XiaoxiaoNeural', voiceRate: 0, voiceVolume: 0, voicePitch: 0, subtitleMarginV: DEFAULT_SUBTITLE_MARGIN_V,
+    renameEnabled: false, renameState: 'none', renameAnalysisJson: null, renameMapJson: null,
     createdAt: '2026-07-19T00:00:00.000Z', updatedAt: '2026-07-19T00:00:00.000Z',
     ...patch,
   }
