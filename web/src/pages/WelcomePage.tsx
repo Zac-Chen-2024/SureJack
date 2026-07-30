@@ -2,44 +2,57 @@ import { useEffect, useState } from 'react'
 import { useSession } from '../store/session'
 import { AmbientBackdrop } from '../components/AmbientBackdrop'
 
-/** 停留多久。够读完一句短问候就走——这一页没有信息要消化，久了就是在等 */
-const DWELL_MS = 700
+/** 停留多久。做成有分量的开屏——不是一闪而过，也不至于让人等 */
+const DWELL_MS = 1300
 
 /**
- * 登录后的专属欢迎页。文案由后端按姓名给（config/welcome.json，不入库）。
+ * 登录后的专属欢迎开屏。问候语由后端按姓名给（config/welcome.json，
+ * 如「欢迎主人 / 欢迎老大」）。
  *
- * 【不需要点击】：这一页没有任何决策，只是一句问候。放一个「开始」按钮
- * 等于每次登录都多要一次点击，而那次点击不承载任何信息。淡入、停留、
- * 自动进入——用户看到了那句话，然后工作台就在那儿了。
- *
- * 淡出也做：直接切换会显得页面"跳"了一下，像出错。
+ * 这是这个 App 的"开屏"——所以做成一段有分量的动画：品牌标记先浮现、
+ * 问候语跟上、一条强调色线展开收尾，停留一会儿再淡出进工作台。全程无需
+ * 点击（这一页没有任何决策，多一次点击只是白等）。品牌标记用产品自己的
+ * 意象（竖屏画幅 + 底部字幕条），不是那只兔子。
  */
 export function WelcomePage ({ onEnter }: { onEnter: () => void }) {
   const { welcome } = useSession()
   const [shown, setShown] = useState(false)
+  const [leaving, setLeaving] = useState(false)
 
   useEffect(() => {
-    // 进场淡入
-    const t1 = setTimeout(() => setShown(true), 60)
-    // 停留后淡出
-    const t2 = setTimeout(() => setShown(false), 60 + DWELL_MS)
-    // 淡出动画走完再真的切页，否则会看到半透明状态被硬切掉
-    const t3 = setTimeout(onEnter, 60 + DWELL_MS + 300)
+    const t1 = setTimeout(() => setShown(true), 80)
+    const t2 = setTimeout(() => setLeaving(true), 80 + DWELL_MS)
+    const t3 = setTimeout(onEnter, 80 + DWELL_MS + 360)
     return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3) }
   }, [onEnter])
 
   return (
-    <div className="relative flex h-full items-center justify-center px-6">
-      {/* 欢迎页也铺同一套斜纹——两个页面用同一块布，切换时才不会像换了个产品 */}
+    <div className="relative flex h-full items-center justify-center overflow-hidden px-6">
       <AmbientBackdrop />
-      <div
-        className={`relative text-center transition-all duration-300 ${
-          shown ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-2'
-        }`}
-      >
-        <div className="text-[40px] font-semibold leading-tight tracking-[-0.02em] text-ink-50">
+      <div className={`relative flex flex-col items-center transition-all duration-[360ms] ${leaving ? 'scale-[1.04] opacity-0' : 'opacity-100'}`}>
+        {/* 品牌标记：竖屏画幅 + 琥珀字幕条。先浮现 */}
+        <svg
+          viewBox="0 0 32 32"
+          className="mb-6 size-14 transition-all duration-500"
+          style={{ opacity: shown ? 1 : 0, transform: shown ? 'scale(1)' : 'scale(0.8)' }}
+        >
+          <rect x="9" y="3" width="14" height="26" rx="3" fill="none" stroke="var(--color-accent)" strokeWidth="2.2" />
+          <rect x="12" y="21" width="8" height="2.6" rx="1.3" fill="#f0b429" />
+        </svg>
+
+        {/* 问候语：跟着浮现 */}
+        <div
+          className="text-center text-[40px] font-semibold leading-tight tracking-[-0.02em] text-ink-50 transition-all duration-500"
+          style={{ transitionDelay: '120ms', opacity: shown ? 1 : 0, transform: shown ? 'translateY(0)' : 'translateY(8px)' }}
+        >
           {welcome ?? '欢迎回来'}
         </div>
+
+        {/* 强调色线：最后展开收尾 */}
+        <div
+          className="mt-5 h-0.5 rounded-full bg-accent transition-all duration-[600ms]"
+          style={{ transitionDelay: '320ms', width: shown ? 72 : 0, opacity: shown ? 1 : 0 }}
+        />
       </div>
     </div>
   )
