@@ -77,6 +77,15 @@ export function shuffled<T> (items: readonly T[], rand: () => number): T[] {
 const VIDEO_BUCKETS = ['1-开头', '2-常规', '3-地铁跑酷'] as const
 
 /**
+ * 续集的背景【只用开头段 + 地铁跑酷】，跳过常规桶。
+ *
+ * 为什么不同：主片要靠常规素材撑起十分钟的观感变化；续集的观众是冲着
+ * "接着看"来的，前面几段开头素材做个过渡，剩下全程地铁跑酷压着，
+ * 注意力留在故事上就够了。这是内容策略，不是技术限制。
+ */
+export const SEQUEL_OPENING_CLIPS = 5
+
+/**
  * 素材库里到底有没有可用的背景视频。
  *
  * 供路由在算排布之前先问一句：**"库是空的"和"配音没好"是两回事**，
@@ -109,6 +118,7 @@ export function hasVideoMaterials (db: LibraryDb): boolean {
  */
 export function planProjectBackground (
   db: LibraryDb, projectId: string, ttsDurationMs: number | null,
+  opts: { sequel?: boolean } = {},
 ): BackgroundPlan {
   if (ttsDurationMs === null || ttsDurationMs <= 0) return { segments: [], totalMs: 0 }
 
@@ -125,15 +135,26 @@ export function planProjectBackground (
 
   const rand = rng(seedFrom(projectId))
   // 三个桶依次用同一条随机流打乱：流是确定的，所以整体仍然可复现
-  const [opening = [], regular = [], parkour = []] =
+  const [openingAll = [], regularAll = [], parkour = []] =
     VIDEO_BUCKETS.map((b) => shuffled(listBucket(db, b), rand))
+
+  /*
+   * 【续集换一套公式】：开头桶只取 5 段，常规桶整个不用，剩下的全给
+   * 地铁跑酷。实现上不需要新算法——比例给成 [1,0,0]，开头桶又只剩 5 段，
+   * planBackground 的"缺口顺延"会把填不满的部分一路推到地铁跑酷，
+   * 结果正好是"几段开头 + 全程跑酷"。那个纯函数一行都不用改。
+   */
+  const opening = opts.sequel ? openingAll.slice(0, SEQUEL_OPENING_CLIPS) : openingAll
+  const regular = opts.sequel ? [] : regularAll
 
   const byId = new Map<string, LibraryItem>()
   for (const it of [...opening, ...regular, ...parkour]) byId.set(it.id, it)
 
   // 素材库为空时 planBackground 会抛错——那是"库还没扫过"，
   // 和"配音没好"是两回事，不能都压成空排布，否则运维看不出该去扫库
-  const plan = planBackground(totalMs, { opening, regular, parkour })
+  const plan = opts.sequel
+    ? planBackground(totalMs, { opening, regular, parkour }, [1, 0, 0])
+    : planBackground(totalMs, { opening, regular, parkour })
 
   return {
     totalMs: plan.totalMs,

@@ -3,7 +3,8 @@ import { useProjects } from '../../store/projects'
 import { usePipeline } from '../../store/pipeline'
 import { useRename, renameGates } from '../../store/rename'
 import { NameReplacePanel } from '../NameReplacePanel'
-import { IconChevronLeft, IconUpload, IconLoader, IconEdit } from '../ui/Icon'
+import { IconChevronLeft, IconUpload, IconLoader, IconEdit, IconScissors} from '../ui/Icon'
+import { SplitPicker } from './SplitPicker'
 
 /**
  * 新建项目引导页（点「新建项目」进来）。一条线走完：
@@ -24,6 +25,13 @@ export function MobileNewProject ({ onBack, onGo }: { onBack: () => void; onGo: 
   const [script, setScript] = useState('')
   const [createdId, setCreatedId] = useState<string | null>(null)
   const [busy, setBusy] = useState<'analyze' | 'generate' | null>(null)
+  /*
+   * 【自动创建续集】。开着的话，确认人名之后先进断点选择，拆完再生成——
+   * 顺序不能反：拆分会改主片正文，配音必须在最终文本定下来之后才开始，
+   * 否则主片的配音里还念着已经被砍掉的结局。
+   */
+  const [autoSequel, setAutoSequel] = useState(false)
+  const [splitting, setSplitting] = useState(false)
   const fileInput = useRef<HTMLInputElement>(null)
 
   /**
@@ -91,6 +99,24 @@ export function MobileNewProject ({ onBack, onGo }: { onBack: () => void; onGo: 
           />
         </div>
 
+        {/* 自动创建续集：新建时就要定，因为它决定确认之后走哪条路 */}
+        <label className="flex items-start gap-2.5 rounded-xl border border-line bg-ink-900 p-3">
+          <input
+            type="checkbox"
+            checked={autoSequel}
+            onChange={(e) => setAutoSequel(e.target.checked)}
+            disabled={createdId !== null && splitting}
+            className="mt-0.5 size-4 shrink-0 accent-[var(--color-accent)]"
+          />
+          <span className="min-w-0">
+            <span className="block text-[13px] font-bold text-ink-50">自动创建续集</span>
+            <span className="mt-0.5 block text-[11px] leading-relaxed text-ink-400">
+              把这条长文拆成主片和续集两条视频。主片在悬念处收尾，续集从「引子 +
+              周周提醒你…」开始接着讲。断点由 AI 推荐，你可以滚轮微调。
+            </span>
+          </span>
+        </label>
+
         {/* 文案：粘贴 + 上传 txt */}
         <div>
           <div className="mb-1.5 flex items-center justify-between">
@@ -138,12 +164,36 @@ export function MobileNewProject ({ onBack, onGo }: { onBack: () => void; onGo: 
             {/* 已建项目：复用替换面板（开关/重新分析/可编辑表/关系图/确认都在里面） */}
             <NameReplacePanel />
 
-            <button
-              type="button" onClick={() => void onGenerate()} disabled={!canGenerate}
-              className="flex w-full items-center justify-center gap-1.5 rounded-xl bg-accent px-4 py-3 text-sm font-extrabold text-ink-950 transition-colors hover:bg-accent-dim disabled:opacity-40"
-            >
-              {busy === 'generate' ? <><IconLoader className="size-4 animate-spin" />提交中…</> : '生成配音并合成视频'}
-            </button>
+            {/*
+              * 开了续集开关：把「生成」换成「选断点」。中间隔着用户的确认，
+              * 因为拆下去会改主片正文并新建一个项目，这两件事都不该在他
+              * 还没看清楚的时候发生。
+              */}
+            {autoSequel && !splitting && (
+              <button
+                type="button" onClick={() => setSplitting(true)} disabled={!canGenerate}
+                className="flex w-full items-center justify-center gap-1.5 rounded-xl bg-accent px-4 py-3 text-sm font-extrabold text-ink-950 transition-colors hover:bg-accent-dim disabled:opacity-40"
+              >
+                <IconScissors className="size-4" />选择断点并拆成两集
+              </button>
+            )}
+
+            {autoSequel && splitting && createdId && (
+              <SplitPicker
+                projectId={createdId}
+                onCancel={() => setSplitting(false)}
+                onDone={() => { setSplitting(false); setAutoSequel(false); void onGenerate() }}
+              />
+            )}
+
+            {!autoSequel && (
+              <button
+                type="button" onClick={() => void onGenerate()} disabled={!canGenerate}
+                className="flex w-full items-center justify-center gap-1.5 rounded-xl bg-accent px-4 py-3 text-sm font-extrabold text-ink-950 transition-colors hover:bg-accent-dim disabled:opacity-40"
+              >
+                {busy === 'generate' ? <><IconLoader className="size-4 animate-spin" />提交中…</> : '生成配音并合成视频'}
+              </button>
+            )}
             {gated && <p className="text-center text-[11px] text-accent">先在上面确认人名替换（或关掉人名替换），才能生成。</p>}
           </>
         )}

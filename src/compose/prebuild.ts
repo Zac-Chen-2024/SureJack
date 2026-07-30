@@ -123,7 +123,8 @@ function currentPlan (
   try {
     if (!hasVideoMaterials(lib)) return null
     const aspect = aspectOf(project)
-    const plan = planProjectBackground(lib, project.id, project.ttsDurationMs)
+    const plan = planProjectBackground(lib, project.id, project.ttsDurationMs,
+      { sequel: project.parentProjectId !== null })
     if (plan.segments.length === 0) return null
     return { segments: plan.segments, fingerprint: planFingerprint(plan.segments, aspect), aspect }
   } finally {

@@ -6,7 +6,7 @@ import { PaletteToggle } from '../PaletteToggle'
 import { DownloadPanel } from './DownloadPanel'
 import {
   IconPlus, IconLoader, IconTrash, IconMore, IconFilter, IconSearch, IconClose,
-  IconImage, IconImageOff,
+  IconImage, IconImageOff, IconFolder,
 } from '../ui/Icon'
 
 /**
@@ -98,6 +98,42 @@ export function MobileProjectList ({ onOpen, onNew }: { onOpen: (id: string) => 
     return items.filter((p) => p.name.toLowerCase().includes(q)
       || (p.scriptText ?? '').toLowerCase().includes(q))
   }, [items, query])
+
+  /*
+   * 【按母文件夹分组】。主片和续集是两个独立项目（各有各的配音、成片、
+   * 下载），但用户心里它们是"同一个故事的两集"。所以列表上折成一组：
+   * 组头是项目名，下面挂第 1 集、第 2 集。
+   *
+   * 排序仍然按主片的时间——续集是从主片派生出来的，让它自己去争列表顶端
+   * 只会把同一个故事拆散在列表两头。
+   */
+  const grouped = useMemo(() => {
+    const byParent = new Map<string, Project[]>()
+    const mains: Project[] = []
+    for (const p of shown) {
+      if (p.parentProjectId) {
+        const arr = byParent.get(p.parentProjectId) ?? []
+        arr.push(p)
+        byParent.set(p.parentProjectId, arr)
+      } else {
+        mains.push(p)
+      }
+    }
+    const groups = mains.map((m) => ({
+      main: m,
+      episodes: (byParent.get(m.id) ?? []).sort((a, b) => a.episodeIndex - b.episodeIndex),
+    }))
+    /*
+     * 搜索命中了续集、但主片被过滤掉时，续集会没有归属。别把它丢了——
+     * 让它自己当一组的组头，总好过"搜得到却不显示"。
+     */
+    const orphans = [...byParent.entries()]
+      .filter(([id]) => !mains.some((m) => m.id === id))
+      .flatMap(([, arr]) => arr)
+      .map((o) => ({ main: o, episodes: [] as Project[] }))
+    return [...groups, ...orphans]
+  }, [shown])
+
 
   /*
    * 【下拉刷新】。列表本来每 5 秒自动刷，但用户想"立刻知道现在怎么样了"时
@@ -298,86 +334,145 @@ export function MobileProjectList ({ onOpen, onNew }: { onOpen: (id: string) => 
           else setPull(0)
         }}
       >
-        {shown.length === 0 ? (
+        {grouped.length === 0 ? (
           <p className="px-1 py-8 text-center text-sm text-ink-400">
             {query.trim() ? `没有匹配「${query.trim()}」的项目` : '还没有项目，点上面新建一个。'}
           </p>
         ) : (
           <ul className="space-y-3">
-            {shown.map((p, i) => {
-              const film = filmProgress[p.id]
-              const st = STATUS_STYLE[statusOf(p, film)]
-              return (
-                <li key={p.id}>
-                  {/* 行本身是可点的 div（不用 <button>）——里头还要放菜单按钮，
-                      button 套 button 是非法结构 */}
-                  <div
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => onOpen(p.id)}
-                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(p.id) } }}
-                    className="group flex w-full cursor-pointer items-center gap-3.5 rounded-2xl border border-line bg-ink-900 p-3 text-left transition-colors hover:border-ink-600"
-                  >
-                    {/*
-                     * 缩略图。开着封面预览时放【这条片子真正的封面】——
-                     * 列表上看到的就是它发出去以后别人看到的第一眼。
-                     *
-                     * 封面是 9:16，槽位是 52×72（更方）。按【宽度铺满 + 纵向
-                     * 居中裁切】：宽度顶满不裁、不变形，上下各裁掉一点。
-                     * 反过来按高度铺满的话左右会被切掉，而标题正在中间，
-                     * 切掉的就是字。
-                     */}
-                    <span
-                      className="relative h-[72px] w-[52px] shrink-0 overflow-hidden rounded-xl"
-                      style={{
-                        background: i % 2 === 0
-                          ? 'linear-gradient(180deg,#122a52,#0f2338)'
-                          : 'linear-gradient(180deg,#3a2340,#1a1226)',
-                      }}
-                    >
-                      {showCover ? (
-                        <img
-                          // v= 跟着标题走：改了标题 URL 就变，缓存自然失效
-                          src={`/api/projects/${p.id}/cover.jpg?v=${encodeURIComponent(p.coverTitle || p.name)}`}
-                          alt=""
-                          loading="lazy"
-                          className="absolute inset-0 size-full object-cover object-center"
-                        />
-                      ) : (
-                        <span
-                          className="absolute bottom-2 left-1/2 h-9 w-5 -translate-x-1/2 rounded-lg"
-                          style={{
-                            background: i % 2 === 0
-                              ? 'linear-gradient(180deg,#ff7a59,#c0392b)'
-                              : 'linear-gradient(180deg,#e0a82e,#a06a12)',
-                          }}
-                        />
-                      )}
-                    </span>
-
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-base font-bold text-ink-50">{p.name}</span>
-                      <span className="mt-1 block truncate text-xs text-ink-400">
-                        {film?.composing
-                          ? <span className="inline-flex items-center gap-1 text-[#e0a82e]"><IconLoader className="size-3 animate-spin" />视频合成中 {film.progress}%</span>
-                          : p.ttsState === 'generating'
-                            ? <span className="inline-flex items-center gap-1 text-[#e0a82e]"><IconLoader className="size-3 animate-spin" />配音生成中…</span>
-                            : summaryOf(p)}
+            {grouped.map((g, i) => (
+              <li key={g.main.id}>
+                {g.episodes.length === 0 ? (
+                  // 没有续集的项目就是原来那一行，一个字都不变
+                  <Row
+                    p={g.main} i={i} showCover={showCover}
+                    film={filmProgress[g.main.id]} onOpen={onOpen}
+                    onDelete={() => void remove(g.main.id)}
+                  />
+                ) : (
+                  /*
+                   * 有续集 → 母文件夹。组头写项目名和集数，下面挂两集。
+                   * 【组头本身不可点】：点它该打开哪一集？没有答案的按钮
+                   * 比没有按钮更糟。要打开就点具体那一集。
+                   */
+                  <div className="overflow-hidden rounded-2xl border border-line bg-ink-900">
+                    <div className="flex items-center gap-2 px-3.5 pb-1 pt-2.5">
+                      <IconFolder className="size-3.5 shrink-0 text-ink-400" />
+                      <span className="min-w-0 flex-1 truncate text-[13px] font-bold text-ink-100">
+                        {g.main.name}
                       </span>
-                    </span>
-
-                    <span className={`shrink-0 rounded-md px-2.5 py-1 text-[11px] font-bold ${st.cls}`}>
-                      {st.label}
-                    </span>
-
-                    <RowMenu name={p.name} onDelete={() => void remove(p.id)} />
+                      <span className="shrink-0 text-[11px] text-ink-500">
+                        {g.episodes.length + 1} 集
+                      </span>
+                    </div>
+                    <div className="space-y-1.5 p-1.5">
+                      {[g.main, ...g.episodes].map((ep, j) => (
+                        <Row
+                          key={ep.id} p={ep} i={j} showCover={showCover} inGroup
+                          film={filmProgress[ep.id]} onOpen={onOpen}
+                          onDelete={() => void remove(ep.id)}
+                        />
+                      ))}
+                    </div>
                   </div>
-                </li>
-              )
-            })}
+                )}
+              </li>
+            ))}
           </ul>
         )}
       </div>
+    </div>
+  )
+}
+
+/**
+ * 列表里的一行。主片、续集、没有续集的独立项目共用它——三者在这一行上
+ * 要显示的东西完全一样，分开写只会让"改一处忘一处"。
+ */
+function Row ({ p, i, showCover, film, onOpen, onDelete, inGroup }: {
+  p: Project
+  i: number
+  showCover: boolean
+  film?: { composing: boolean; progress: number; state: string }
+  onOpen: (id: string) => void
+  onDelete: () => void
+  inGroup?: boolean
+}) {
+  const st = STATUS_STYLE[statusOf(p, film)]
+  return (
+    /* 行本身是可点的 div（不用 <button>）——里头还要放菜单按钮，
+       button 套 button 是非法结构 */
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={() => onOpen(p.id)}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(p.id) } }}
+      className={`group flex w-full cursor-pointer items-center gap-3.5 text-left transition-colors ${
+        inGroup
+          ? 'rounded-xl bg-ink-850/60 p-2 hover:bg-ink-850'
+          : 'rounded-2xl border border-line bg-ink-900 p-3 hover:border-ink-600'
+      }`}
+    >
+      {/*
+       * 缩略图。开着封面预览时放【这条片子真正的封面】——列表上看到的
+       * 就是它发出去以后别人看到的第一眼。
+       *
+       * 封面是 9:16，槽位是 52×72（更方）。按【宽度铺满 + 纵向居中裁切】：
+       * 宽度顶满不裁、不变形，上下各裁掉一点。反过来按高度铺满的话左右会
+       * 被切掉，而标题正在中间，切掉的就是字。
+       */}
+      <span
+        className="relative h-[72px] w-[52px] shrink-0 overflow-hidden rounded-xl"
+        style={{
+          background: i % 2 === 0
+            ? 'linear-gradient(180deg,#122a52,#0f2338)'
+            : 'linear-gradient(180deg,#3a2340,#1a1226)',
+        }}
+      >
+        {showCover ? (
+          <img
+            // v= 跟着标题走：改了标题 URL 就变，缓存自然失效
+            src={`/api/projects/${p.id}/cover.jpg?v=${encodeURIComponent(p.coverTitle || p.name)}`}
+            alt=""
+            loading="lazy"
+            className="absolute inset-0 size-full object-cover object-center"
+          />
+        ) : (
+          <span
+            className="absolute bottom-2 left-1/2 h-9 w-5 -translate-x-1/2 rounded-lg"
+            style={{
+              background: i % 2 === 0
+                ? 'linear-gradient(180deg,#ff7a59,#c0392b)'
+                : 'linear-gradient(180deg,#e0a82e,#a06a12)',
+            }}
+          />
+        )}
+      </span>
+
+      <span className="min-w-0 flex-1">
+        <span className="flex items-center gap-1.5">
+          {/* 组里的行前面挂一个集数徽标，一眼能看出这是第几集 */}
+          {inGroup && (
+            <span className="shrink-0 rounded bg-ink-800 px-1.5 py-0.5 text-[10px] font-bold text-ink-300">
+              第 {p.episodeIndex} 集
+            </span>
+          )}
+          <span className="min-w-0 truncate text-base font-bold text-ink-50">{p.name}</span>
+        </span>
+        <span className="mt-1 block truncate text-xs text-ink-400">
+          {film?.composing
+            ? <span className="inline-flex items-center gap-1 text-[#e0a82e]"><IconLoader className="size-3 animate-spin" />视频合成中 {film.progress}%</span>
+            : p.ttsState === 'generating'
+              ? <span className="inline-flex items-center gap-1 text-[#e0a82e]"><IconLoader className="size-3 animate-spin" />配音生成中…</span>
+              : summaryOf(p)}
+        </span>
+      </span>
+
+      <span className={`shrink-0 rounded-md px-2.5 py-1 text-[11px] font-bold ${st.cls}`}>
+        {st.label}
+      </span>
+
+      <RowMenu name={p.name} onDelete={onDelete} />
     </div>
   )
 }

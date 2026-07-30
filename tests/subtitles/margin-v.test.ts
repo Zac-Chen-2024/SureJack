@@ -24,7 +24,7 @@ function makeProject (patch: Partial<Project> = {}): Project {
       { text: '包子', offsetMs: 0, durationMs: 500, isPunctuation: false },
     ]),
     bgmVolume: 0.1, bgmLibraryId: null, subtitleMode: 'karaoke',
-    subtitleFontSize: 64, coverTitle: '', voiceName: 'zh-CN-XiaoxiaoNeural', voiceRate: 0, voiceVolume: 0, voicePitch: 0, subtitleMarginV: DEFAULT_SUBTITLE_MARGIN_V,
+    subtitleFontSize: 64, coverTitle: '', inVideoTitle: '', parentProjectId: null, episodeIndex: 1, voiceName: 'zh-CN-XiaoxiaoNeural', voiceRate: 0, voiceVolume: 0, voicePitch: 0, subtitleMarginV: DEFAULT_SUBTITLE_MARGIN_V,
     renameEnabled: false, renameState: 'none', renameAnalysisJson: null, renameMapJson: null,
     createdAt: '2026-07-19T00:00:00.000Z', updatedAt: '2026-07-19T00:00:00.000Z',
     ...patch,

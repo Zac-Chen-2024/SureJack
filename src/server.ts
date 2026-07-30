@@ -13,6 +13,7 @@ import { registerAssetRoutes } from './assets/routes.js'
 import { registerTtsRoutes } from './tts/routes.js'
 import { registerSubtitleRoutes } from './subtitles/routes.js'
 import { registerRenameRoutes } from './rename/routes.js'
+import { registerEpisodeRoutes } from './episodes/routes.js'
 import { registerLibraryRoutes } from './library/routes.js'
 import { ExportQueue } from './queue/queue.js'
 import { registerExportRoutes } from './queue/routes.js'
@@ -173,6 +174,8 @@ interface BuildOpts {
   analyzeNovel?: Parameters<typeof registerRenameRoutes>[1]['analyze']
   /** 同上，第二层清理复查（API-2） */
   reviewNovel?: Parameters<typeof registerRenameRoutes>[1]['review']
+  /** 同上，分集断点分析。生产不传 */
+  planSplit?: Parameters<typeof registerEpisodeRoutes>[1]['plan']
   /**
    * 启动后扫一遍，把"该有成片却没有"的项目补上队。
    *
@@ -221,6 +224,7 @@ export function buildServer (opts: BuildOpts = {}): FastifyInstance {
     registerProjectRoutes(scope, { whitelist, libraryDataDir, queue })
     registerSubtitleRoutes(scope, { whitelist })
     registerRenameRoutes(scope, { whitelist, analyze: opts.analyzeNovel, review: opts.reviewNovel })
+    registerEpisodeRoutes(scope, { whitelist, plan: opts.planSplit })
     registerLibraryRoutes(scope, { dataDir: libraryDataDir })
 
     // 背景视频可能很大；nginx 侧已放开到 500M

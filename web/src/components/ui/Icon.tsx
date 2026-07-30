@@ -195,6 +195,26 @@ export function IconImageOff (props: IconProps) {
   )
 }
 
+/** 文件夹——列表里"一个故事的两集"折在一起时的组头 */
+export function IconFolder (props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M3 7.5a2 2 0 0 1 2-2h3.6l1.8 2.2H19a2 2 0 0 1 2 2v7.8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
+    </Svg>
+  )
+}
+
+/** 剪刀——把一条长文拆成主片和续集 */
+export function IconScissors (props: IconProps) {
+  return (
+    <Svg {...props}>
+      <circle cx="6" cy="6" r="2.6" />
+      <circle cx="6" cy="18" r="2.6" />
+      <path d="M8.2 7.6 20 18M8.2 16.4 20 6" />
+    </Svg>
+  )
+}
+
 /** 筛选——漏斗。列表页「最近」旁边那个按钮 */
 export function IconFilter (props: IconProps) {
   return (

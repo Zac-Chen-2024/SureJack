@@ -57,14 +57,14 @@ export function registerProjectRoutes (app: FastifyInstance, deps: Deps): void {
     name?: unknown; scriptText?: unknown; aspectRatio?: unknown
     bgmLibraryId?: unknown; bgmVolume?: unknown; subtitleMarginV?: unknown; subtitleFontSize?: unknown
     voiceName?: unknown; voiceRate?: unknown; voiceVolume?: unknown; voicePitch?: unknown
-    coverTitle?: unknown
+    coverTitle?: unknown; inVideoTitle?: unknown
   } }>(
     '/api/projects/:id', { preHandler: requireAuth }, async (req, reply) => {
       const patch: {
         name?: string; scriptText?: string; aspectRatio?: string
         bgmLibraryId?: string | null; bgmVolume?: number; subtitleMarginV?: number; subtitleFontSize?: number
         voiceName?: string; voiceRate?: number; voiceVolume?: number; voicePitch?: number
-        coverTitle?: string
+        coverTitle?: string; inVideoTitle?: string
       } = {}
       if (typeof req.body?.name === 'string') patch.name = req.body.name
       if (typeof req.body?.scriptText === 'string') patch.scriptText = req.body.scriptText
@@ -76,6 +76,10 @@ export function registerProjectRoutes (app: FastifyInstance, deps: Deps): void {
        */
       if (typeof req.body?.coverTitle === 'string') {
         patch.coverTitle = req.body.coverTitle.trim().slice(0, 20)
+      }
+      // 片内标题同理。它渲染在顶部一行里，太长会顶到画面外
+      if (typeof req.body?.inVideoTitle === 'string') {
+        patch.inVideoTitle = req.body.inVideoTitle.trim().slice(0, 20)
       }
       /*
        * bgmLibraryId 的 null 是【有意义的值】——"不要 BGM"。所以不能像上面
@@ -182,7 +186,9 @@ export function registerProjectRoutes (app: FastifyInstance, deps: Deps): void {
         if (project.ttsDurationMs !== null && project.ttsDurationMs > 0 && !hasVideoMaterials(lib)) {
           return reply.code(409).send({ error: '素材库里没有可用的视频素材，请先扫描素材库' })
         }
-        return planProjectBackground(lib, project.id, project.ttsDurationMs)
+        // 续集用另一套素材公式（几段开头 + 全程跑酷），见 background.ts
+        return planProjectBackground(lib, project.id, project.ttsDurationMs,
+          { sequel: project.parentProjectId !== null })
       } finally {
         lib.close()
       }

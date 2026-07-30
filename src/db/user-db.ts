@@ -90,6 +90,16 @@ export interface Project {
    * 空串 = 用项目名（老项目一律如此，见 coverTitleOf）。
    */
   coverTitle: string
+  /**
+   * 片内标题——顶部常驻那行大字。空串 = 用项目名。
+   * 【和封面标题是两个东西】：封面是给平台抓缩略图看的，片内是看片的人
+   * 全程都在看的那行，作者会想给它们写不一样的话。
+   */
+  inVideoTitle: string
+  /** 续集指向它的主片；主片自己是 null。两条片子的关联全靠它 */
+  parentProjectId: string | null
+  /** 第几集。主片 1，续集 2。列表按它在母文件夹下排序 */
+  episodeIndex: number
   /** 配音音色/语速/音量/音调。只对文本配音路有意义，见 tts/voices.ts */
   voiceName: string
   voiceRate: number
@@ -124,6 +134,9 @@ export interface UserDb {
     subtitleMarginV?: number
     subtitleFontSize?: number
     coverTitle?: string
+    inVideoTitle?: string
+    parentProjectId?: string | null
+    episodeIndex?: number
     voiceName?: string; voiceRate?: number; voiceVolume?: number; voicePitch?: number
     renameEnabled?: boolean
     renameState?: 'none' | 'analyzing' | 'proposed' | 'confirmed'
@@ -155,6 +168,9 @@ interface Row {
   subtitle_margin_v: number | null
   subtitle_font_size: number | null
   cover_title: string | null
+  in_video_title: string | null
+  parent_project_id: string | null
+  episode_index: number | null
   voice_name: string | null
   voice_rate: number | null
   voice_volume: number | null
@@ -176,6 +192,9 @@ const toProject = (r: Row): Project => ({
   subtitleMarginV: r.subtitle_margin_v ?? DEFAULT_SUBTITLE_MARGIN_V,
   subtitleFontSize: r.subtitle_font_size ?? DEFAULT_SUBTITLE_FONT_SIZE,
   coverTitle: r.cover_title ?? '',
+  inVideoTitle: r.in_video_title ?? '',
+  parentProjectId: r.parent_project_id ?? null,
+  episodeIndex: r.episode_index ?? 1,
   // 老行没有这几列时回落到「老默认」——晓晓+中性，正是它们的事实值
   voiceName: r.voice_name ?? LEGACY_VOICE,
   voiceRate: r.voice_rate ?? RATE_RANGE.default,
@@ -232,6 +251,9 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
       subtitle_margin_v INTEGER NOT NULL DEFAULT ${DEFAULT_SUBTITLE_MARGIN_V},
       subtitle_font_size INTEGER NOT NULL DEFAULT ${DEFAULT_SUBTITLE_FONT_SIZE},
       cover_title TEXT NOT NULL DEFAULT '',
+      in_video_title TEXT NOT NULL DEFAULT '',
+      parent_project_id TEXT,
+      episode_index INTEGER NOT NULL DEFAULT 1,
       voice_name TEXT NOT NULL DEFAULT '${LEGACY_VOICE}',
       voice_rate INTEGER NOT NULL DEFAULT ${RATE_RANGE.default},
       voice_volume INTEGER NOT NULL DEFAULT ${VOLUME_RANGE.default},
@@ -292,6 +314,14 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
    * 于是老项目自动拿到以项目名为标题的封面，一行迁移代码都不用写。
    */
   addCol('cover_title', "cover_title TEXT NOT NULL DEFAULT ''")
+  addCol('in_video_title', "in_video_title TEXT NOT NULL DEFAULT ''")
+  /*
+   * parent_project_id 【不能】NOT NULL——老项目全是独立的主片，null 就是
+   * "我没有上一集"这个事实本身。给它填个空串当默认值只会让"没有上一集"
+   * 和"上一集的 id 是空串"混成一件事。
+   */
+  addCol('parent_project_id', 'parent_project_id TEXT')
+  addCol('episode_index', 'episode_index INTEGER NOT NULL DEFAULT 1')
   // ⚠️ 配音列的默认值填【老默认晓晓】不是晓辰：ALTER TABLE 会把这个默认回填进
   // 所有老行，回填成晓晓才是它们的事实，母带指纹才不变、才不会被重烧。
   // 新项目的晓辰由 createProject 显式写（见下）。
@@ -329,6 +359,9 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
         bgmLibraryId: null, subtitleMarginV: DEFAULT_SUBTITLE_MARGIN_V,
         subtitleFontSize: DEFAULT_SUBTITLE_FONT_SIZE,
         coverTitle: '',      // 空 = 跟着项目名走
+        inVideoTitle: '',    // 同上
+        parentProjectId: null,
+        episodeIndex: 1,
         voiceName: DEFAULT_VOICE, voiceRate: DEFAULT_VOICE_RATE,
         voiceVolume: VOLUME_RANGE.default, voicePitch: PITCH_RANGE.default,
         // 新项目默认走文本(karaoke)，改名默认开；自备路 adopt 时会关掉/不适用
@@ -338,13 +371,14 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
       }
       db.prepare(
         `INSERT INTO projects
-          (id, name, script_text, aspect_ratio, tts_state, tts_duration_ms, word_timings_json, bgm_volume, subtitle_mode, bgm_library_id, subtitle_margin_v, subtitle_font_size, cover_title, voice_name, voice_rate, voice_volume, voice_pitch, rename_enabled, rename_state, rename_analysis_json, rename_map_json, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          (id, name, script_text, aspect_ratio, tts_state, tts_duration_ms, word_timings_json, bgm_volume, subtitle_mode, bgm_library_id, subtitle_margin_v, subtitle_font_size, cover_title, in_video_title, parent_project_id, episode_index, voice_name, voice_rate, voice_volume, voice_pitch, rename_enabled, rename_state, rename_analysis_json, rename_map_json, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         project.id, project.name, project.scriptText, project.aspectRatio,
         project.ttsState, project.ttsDurationMs, project.wordTimingsJson,
         project.bgmVolume, project.subtitleMode, project.bgmLibraryId,
         project.subtitleMarginV, project.subtitleFontSize, project.coverTitle,
+        project.inVideoTitle, project.parentProjectId, project.episodeIndex,
         project.voiceName, project.voiceRate, project.voiceVolume, project.voicePitch,
         project.renameEnabled ? 1 : 0, project.renameState,
         project.renameAnalysisJson, project.renameMapJson,
@@ -364,6 +398,7 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
           tts_state = ?, tts_duration_ms = ?, word_timings_json = ?,
           bgm_volume = ?, subtitle_mode = ?, bgm_library_id = ?,
           subtitle_margin_v = ?, subtitle_font_size = ?, cover_title = ?,
+          in_video_title = ?, parent_project_id = ?, episode_index = ?,
           voice_name = ?, voice_rate = ?, voice_volume = ?, voice_pitch = ?,
           rename_enabled = ?, rename_state = ?, rename_analysis_json = ?, rename_map_json = ?,
           updated_at = ?
@@ -389,6 +424,9 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
           ? patch.subtitleFontSize
           : row.subtitle_font_size ?? DEFAULT_SUBTITLE_FONT_SIZE,
         patch.coverTitle !== undefined ? patch.coverTitle : row.cover_title ?? '',
+        patch.inVideoTitle !== undefined ? patch.inVideoTitle : row.in_video_title ?? '',
+        patch.parentProjectId !== undefined ? patch.parentProjectId : row.parent_project_id ?? null,
+        patch.episodeIndex !== undefined ? patch.episodeIndex : row.episode_index ?? 1,
         patch.voiceName !== undefined ? patch.voiceName : row.voice_name ?? LEGACY_VOICE,
         patch.voiceRate !== undefined ? patch.voiceRate : row.voice_rate ?? RATE_RANGE.default,
         patch.voiceVolume !== undefined ? patch.voiceVolume : row.voice_volume ?? VOLUME_RANGE.default,

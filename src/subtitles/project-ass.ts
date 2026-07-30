@@ -141,13 +141,21 @@ export function deriveSubtitleLines (
  * 项目的完整 ASS：字幕 + 标题 + 免责声明，同一个文件
  * （设计文档第 7 节：它们是同一个东西的不同填法）。
  */
+/** 片内标题：填了用填的，没填用项目名 */
+export function inVideoTitleOf (p: { name: string; inVideoTitle?: string | null }): string {
+  const t = (p.inVideoTitle ?? '').trim()
+  return t === '' ? p.name : t
+}
+
 export function buildAssForProject (
   project: Project,
   opts: { hidePunctuation?: boolean; maxChars?: number; wrapStyle?: number } = {},
 ): string {
   const overlays: TextOverlay[] = [
     { content: DISCLAIMER, style: 'Disclaimer', startMs: null, endMs: null },
-    { content: project.name, style: 'Title', startMs: null, endMs: null },
+    // 片内标题：作者自己填的优先，没填就用项目名。**不是封面标题**——
+    // 封面是给平台抓缩略图的一帧，这行是看片的人全程都在看的
+    { content: inVideoTitleOf(project), style: 'Title', startMs: null, endMs: null },
   ]
   return buildAss({
     lines: deriveSubtitleLines(project, opts.maxChars ?? SUBTITLE_MAX_CHARS),

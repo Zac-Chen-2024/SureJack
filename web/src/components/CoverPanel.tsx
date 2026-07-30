@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useProjects } from '../store/projects'
 import { IconFrame } from './ui/Icon'
+import { ApplyNameButton } from './mobile/SplitPicker'
 
 /**
  * 封面标题。
@@ -47,7 +48,9 @@ export function CoverPanel () {
     <section className="space-y-3">
       <div className="flex items-center gap-2">
         <IconFrame className="size-4 text-ink-400" />
-        <h3 className="text-sm font-bold text-ink-50">封面标题</h3>
+        <h3 className="text-sm font-bold text-ink-50">标题</h3>
+        {/* 一键把项目名铺到两个标题上；有续集的话自动加「2」 */}
+        <span className="ml-auto"><ApplyNameButton projectId={project.id} onDone={() => setDraft(null)} /></span>
       </div>
 
       {/* 预览：底图 + 标题，比例和成片一致（9:16），字号按同一个比例缩 */}
@@ -100,6 +103,71 @@ export function CoverPanel () {
           )}
         </div>
       </div>
+
+      <InVideoTitleRow />
     </section>
+  )
+}
+
+/**
+ * 片内标题——顶部常驻那行大字。
+ *
+ * 【和封面标题分开】：封面是给平台抓缩略图看的一帧，片内是看片的人全程
+ * 都在看的那行。作者会想给它们写不一样的话（封面写钩子、片内写剧名），
+ * 所以它们是两个字段，不是一个字段两处用。
+ *
+ * ⚠️ 改它【会重烧母带】——它写在 ASS 里，ASS 进母带指纹。所以这一栏的
+ * 代价提示和封面那栏完全不同，别把两句话写成一样的。
+ */
+function InVideoTitleRow () {
+  const project = useProjects((s) => s.current())
+  const patch = useProjects((s) => s.patchProject)
+  const [draft, setDraft] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  if (!project) return null
+
+  const stored = project.inVideoTitle ?? ''
+  const value = draft ?? stored
+  const dirty = value.trim() !== stored.trim()
+
+  return (
+    <div className="space-y-2 border-t border-line pt-3">
+      <h3 className="text-sm font-bold text-ink-50">片内标题</h3>
+      <input
+        value={value}
+        onChange={(e) => setDraft(e.target.value.slice(0, 20))}
+        placeholder={project.name}
+        className="w-full rounded-lg border border-line bg-ink-800 px-3 py-2 text-sm text-ink-50 outline-none placeholder:text-ink-600"
+      />
+      <p className="text-[11px] leading-relaxed text-ink-400">
+        画面顶部常驻的那行字，留空就用项目名。
+      </p>
+      {dirty && (
+        <>
+          <div className="flex gap-2">
+            <button
+              type="button" disabled={busy}
+              onClick={async () => {
+                setBusy(true)
+                try { await patch({ inVideoTitle: value.trim() }); setDraft(null) } finally { setBusy(false) }
+              }}
+              className="rounded-lg bg-accent px-3 py-1.5 text-xs font-bold text-ink-950 disabled:opacity-50"
+            >
+              {busy ? '保存中…' : '确认'}
+            </button>
+            <button
+              type="button" disabled={busy} onClick={() => setDraft(null)}
+              className="rounded-lg border border-line px-3 py-1.5 text-xs font-medium text-ink-300 disabled:opacity-50"
+            >
+              取消
+            </button>
+          </div>
+          {/* 这行字烧在画面上，改它要整条重烧——代价和封面完全不是一个量级 */}
+          <p className="text-[11px] leading-relaxed text-[#e0a82e]">
+            片内标题烧在画面里，确认后要重新合成整条视频（十几分钟）。
+          </p>
+        </>
+      )}
+    </div>
   )
 }

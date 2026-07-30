@@ -271,7 +271,8 @@ export function resolveFilm (
         if (!hasVideoMaterials(lib)) {
           return { ok: false, code: 'blocked', error: '素材库里没有可用的视频素材，请先扫描素材库' }
         }
-        plan = planProjectBackground(lib, project.id, durationMs)
+        plan = planProjectBackground(lib, project.id, durationMs,
+          { sequel: project.parentProjectId !== null })
         if (plan.segments.length === 0) {
           return { ok: false, code: 'blocked', error: '算不出背景排布，请确认配音时长和素材库' }
         }
