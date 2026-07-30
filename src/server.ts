@@ -284,12 +284,32 @@ export function buildServer (opts: BuildOpts = {}): FastifyInstance {
   // public/ 由 `cd web && npm run build` 生成；开发时用 vite dev + proxy，不走这里。
   const publicDir = join(__dirname, '..', 'public')
   if (existsSync(publicDir)) {
+    /*
+     * 缓存策略（对安卓 TWA 尤其关键）：
+     *  - index.html【每次都要重新校验】（no-cache）——它引用带哈希的 JS 文件名，
+     *    要是被缓存住，App 就一直加载旧版 JS（"我改了没生效/挽留不弹"多半是这个）。
+     *  - /assets/* 是带内容哈希的文件名，内容不变、可【长期强缓存 immutable】。
+     */
     app.register(fastifyStatic, { root: publicDir })
+    /*
+     * 缓存策略（对安卓 TWA 尤其关键）：
+     *  - index.html / 前端路由（无扩展名的路径）【每次重新校验】(no-cache)——
+     *    它引用带哈希的 JS 文件名，被缓存住 App 就一直加载旧版 JS（"改了没生效"）。
+     *  - /assets/* 是带内容哈希的文件名，可【长期强缓存 immutable】。
+     * 用 onSend 钩子统一贴，避开 @fastify/static setHeaders 的类型/运行时分歧。
+     */
+    app.addHook('onSend', async (req, reply) => {
+      const url = req.url.split('?')[0]!
+      if (url.startsWith('/api/')) return
+      if (url.includes('/assets/')) reply.header('Cache-Control', 'public, max-age=31536000, immutable')
+      else if (url === '/' || !url.slice(1).includes('.')) reply.header('Cache-Control', 'no-cache, must-revalidate')
+    })
     // SPA fallback：非 /api 的未知路径一律回 index.html，交给前端路由
     app.setNotFoundHandler((req, reply) => {
       if (req.url.startsWith('/api/')) {
         return reply.code(404).send({ error: '接口不存在' })
       }
+      reply.header('Cache-Control', 'no-cache, must-revalidate')
       return reply.sendFile('index.html')
     })
   }

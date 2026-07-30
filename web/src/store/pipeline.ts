@@ -426,7 +426,9 @@ export const usePipeline = create<PipelineState>((set, get) => ({
       try {
         const f = await api.get<Film>(`/api/projects/${id}/film`)
         return [id, {
-          composing: f.state === 'building' && f.masterStale === true,
+          // 【只看 building】：首次合成还没有母带、masterStale=false，若加上它，
+          // 首合的项目在列表上会被漏成"已完成"。合成中就是合成中。
+          composing: f.state === 'building',
           progress: f.progress,
         }] as const
       } catch { return null }
