@@ -17,6 +17,7 @@ export function MobileNewProject ({ onBack, onGo }: { onBack: () => void; onGo: 
   const { create, updateScript } = useProjects()
   const project = useProjects((s) => s.current())
   const analyze = useRename((s) => s.analyze)
+  const renameError = useRename((s) => s.error)
   const generateVoice = usePipeline((s) => s.generateVoice)
 
   const [name, setName] = useState('')
@@ -108,7 +109,23 @@ export function MobileNewProject ({ onBack, onGo }: { onBack: () => void; onGo: 
           >
             {busy === 'analyze' ? <><IconLoader className="size-4 animate-spin" />分析中…</> : <><IconEdit className="size-4" />分析人名并继续</>}
           </button>
-        ) : (
+        ) : null}
+
+        {/* 分析失败要在【这一页】就说清楚并能重试——之前失败了这页什么都不显示，
+            用户只看到按钮弹回去，完全不知道发生了什么 */}
+        {renameError && (
+          <div className="rounded-xl border border-danger/40 bg-danger/10 p-3">
+            <p className="text-xs leading-relaxed text-danger">{renameError}</p>
+            <button
+              type="button" onClick={() => void onAnalyze()} disabled={busy !== null}
+              className="mt-2 rounded-lg border border-danger/50 px-3 py-1.5 text-xs font-medium text-danger disabled:opacity-50"
+            >
+              重试分析
+            </button>
+          </div>
+        )}
+
+        {createdId === null ? null : (
           <>
             {/* 已建项目：复用替换面板（开关/重新分析/可编辑表/关系图/确认都在里面） */}
             <NameReplacePanel />

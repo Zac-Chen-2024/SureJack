@@ -69,6 +69,7 @@ export function FilmPlayer ({ onTimeChange, seek }: Props) {
         <video
           ref={pb.videoRef}
           src={src}
+          poster={pb.poster ?? undefined}
           playsInline
           preload="metadata"
           className="absolute inset-0 size-full object-contain"

@@ -121,16 +121,67 @@ export function extractJson (content: string): unknown {
   return JSON.parse(body.slice(s, e + 1))
 }
 
-/** 有没有"名字原样没换"的违规——replacement 等于 original，或任一 pair 的 to 等于 from。 */
-export function hasIdentityViolation (a: RenameAnalysis): boolean {
-  return a.characters.some((c) => c.replacement === c.original || c.pairs.some((p) => p.to === p.from))
+/** 常见复姓。判"姓占几个字"用——姓要保留，名必须逐字换掉。 */
+const COMPOUND_SURNAMES = [
+  '欧阳', '司马', '上官', '夏侯', '诸葛', '闻人', '东方', '赫连', '皇甫', '尉迟',
+  '公羊', '澹台', '公孙', '轩辕', '令狐', '宇文', '长孙', '慕容', '司徒', '司空',
+  '独孤', '南宫', '万俟', '拓跋', '第五', '呼延',
+]
+
+/** "名"从第几个字开始（姓之后）。复姓算 2 字，否则 1 字。 */
+export function givenNameStart (name: string): number {
+  return COMPOUND_SURNAMES.some((s) => name.startsWith(s)) ? 2 : 1
 }
 
-/** 追加纠正语，专治"把名字原样返回"这个偷懒。 */
-const RETRY_NUDGE =
-  '\n\n【纠正】上一次你把某些名字（尤其配角）原样返回了，这是错误的。这一次务必把每个角色' +
-  '（含配角）名字里的【每一个字】都换成读音相同的谐音字，replacement 与每个 pair 的 to 都' +
-  '绝不能等于原字。'
+/**
+ * 找出"名字没换干净"的字：姓之后【同一位置仍是同一个字】的都算。
+ *
+ * 这条是必需的——线上翻车过：模型返回 沈砚之 → 沈砚知，只换了最后一个字，
+ * 中间的"砚"原样留着。而旧的校验只比整串是否相等（沈砚之 ≠ 沈砚知 → 通过），
+ * 于是这种半吊子改名被放过去了。必须逐字比。
+ */
+export function unchangedGivenChars (original: string, replacement: string): string[] {
+  const a = [...original], b = [...replacement]
+  const out: string[] = []
+  for (let i = givenNameStart(original); i < a.length && i < b.length; i++) {
+    if (a[i] === b[i]) out.push(a[i]!)
+  }
+  return out
+}
+
+/**
+ * 有没有违规：① 整名原样；② 任一 pair 的 to 等于 from；
+ * ③ 名里有字没换（逐字比，见上）。返回具体条目，好在重试时点名批评。
+ */
+export function findIdentityViolations (a: RenameAnalysis): string[] {
+  const out: string[] = []
+  for (const c of a.characters) {
+    if (c.replacement === c.original) {
+      out.push(`${c.original} 原样没换`)
+      continue
+    }
+    const stuck = unchangedGivenChars(c.original, c.replacement)
+    if (stuck.length > 0) {
+      out.push(`${c.original} → ${c.replacement}（"${stuck.join('""')}"没换）`)
+    }
+    for (const p of c.pairs) {
+      if (p.to === p.from) out.push(`${p.from} 原样没换`)
+    }
+  }
+  return out
+}
+
+export function hasIdentityViolation (a: RenameAnalysis): boolean {
+  return findIdentityViolations(a).length > 0
+}
+
+/** 纠正语：把上一轮的具体违规点名列出来，比泛泛地说"要全换"有效得多。 */
+function retryNudge (violations: string[]): string {
+  return '\n\n【纠正】上一次这些名字没有改干净：\n' +
+    violations.map((v) => `  · ${v}`).join('\n') +
+    '\n这一次务必做到：姓保留，姓之后【每一个字】都换成读音相同的另一个字（谐音字）。' +
+    '同一位置绝不能出现和原字相同的字。配角也一样，不许偷懒。'
+}
 
 async function callDeepSeek (novel: string, extraSystem: string, deps: AnalyzeDeps): Promise<RenameAnalysis> {
   const apiKey = deps.apiKey ?? process.env.DEEPSEEK_API_KEY
@@ -239,8 +290,14 @@ export async function reviewCleanup (text: string, deps: AnalyzeDeps = {}): Prom
 
 export async function analyzeNovel (novel: string, deps: AnalyzeDeps = {}): Promise<RenameAnalysis> {
   const first = await callDeepSeek(novel, '', deps)
-  // 模型偶尔把名字（尤其配角）原样返回——发现违规就带纠正语重试一次。
-  // 二次仍有极个别改不动的，前端替换表可手工兜底。
-  if (!hasIdentityViolation(first)) return first
-  return callDeepSeek(novel, RETRY_NUDGE, deps)
+  /*
+   * 模型常见两种偷懒：整名原样返回、或只换一个字（沈砚之→沈砚知，中间那个
+   * "砚"没动）。两种都算违规，带上【具体哪几个字没换】重试一次——点名比
+   * 泛泛要求有效得多。二次仍有个别改不动的，前端替换表可手工兜底。
+   */
+  const v1 = findIdentityViolations(first)
+  if (v1.length === 0) return first
+  const second = await callDeepSeek(novel, retryNudge(v1), deps)
+  // 二次更差就退回一次（比较"没换干净"的条目数，取少的）
+  return findIdentityViolations(second).length <= v1.length ? second : first
 }

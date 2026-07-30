@@ -1,5 +1,8 @@
 import { describe, it, expect, vi } from 'vitest'
-import { analyzeNovel, coerceAnalysis, extractJson, SYSTEM_PROMPT, hasIdentityViolation } from '../../src/rename/deepseek.js'
+import {
+  analyzeNovel, coerceAnalysis, extractJson, SYSTEM_PROMPT,
+  hasIdentityViolation, findIdentityViolations, unchangedGivenChars, givenNameStart,
+} from '../../src/rename/deepseek.js'
 
 describe('extractJson', () => {
   it('抠出 ```json fence 里的对象', () => {
@@ -52,13 +55,13 @@ describe('SYSTEM_PROMPT', () => {
 describe('analyzeNovel', () => {
   it('带 Bearer key 调用、解析返回', async () => {
     const fakeFetch = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) => new Response(JSON.stringify({
-      choices: [{ message: { content: '{"chapterHeadings":[],"characters":[{"original":"沈砚之","replacement":"沈屿之","role":"protagonist","pairs":[{"from":"沈砚之","to":"沈屿之","global":true}]}],"relationships":[]}' } }],
+      choices: [{ message: { content: '{"chapterHeadings":[],"characters":[{"original":"沈砚之","replacement":"沈彦知","role":"protagonist","pairs":[{"from":"沈砚之","to":"沈彦知","global":true}]}],"relationships":[]}' } }],
     }), { status: 200 }))
     const a = await analyzeNovel('沈砚之走来。', { apiKey: 'k', fetch: fakeFetch as unknown as typeof fetch })
     expect(fakeFetch).toHaveBeenCalledOnce()
     const init = fakeFetch.mock.calls[0]![1]!
     expect((init.headers as Record<string, string>).authorization).toBe('Bearer k')
-    expect(a.characters[0]!.replacement).toBe('沈屿之')
+    expect(a.characters[0]!.replacement).toBe('沈彦知')
   })
   it('没 key 抛错', async () => {
     const prev = process.env.DEEPSEEK_API_KEY
@@ -75,6 +78,28 @@ describe('analyzeNovel', () => {
     const a = await analyzeNovel('赵德海来了。', { apiKey: 'k', fetch: fakeFetch as unknown as typeof fetch })
     expect(fakeFetch).toHaveBeenCalledTimes(2)   // 第一次违规 → 重试
     expect(a.characters[0]!.replacement).toBe('赵得嗨')   // 取第二次
+  })
+})
+
+describe('逐字校验（半吊子改名必须被抓出来）', () => {
+  it('只换了一个字、中间那个原样 → 算违规（线上翻车的那种）', () => {
+    // 沈砚之 → 沈屿之："之"没换。旧的整串比较会放过它，逐字比才抓得到。
+    expect(unchangedGivenChars('沈砚之', '沈屿之')).toEqual(['之'])
+    expect(hasIdentityViolation({ chapterHeadings: [], relationships: [], characters: [
+      { original: '沈砚之', replacement: '沈屿之', role: 'protagonist', pairs: [] }] })).toBe(true)
+  })
+  it('姓之后每个字都换了 → 合规', () => {
+    expect(unchangedGivenChars('沈砚之', '沈彦知')).toEqual([])
+  })
+  it('复姓：姓占两个字，只有名要换', () => {
+    expect(givenNameStart('欧阳修')).toBe(2)
+    expect(unchangedGivenChars('欧阳修', '欧阳秀')).toEqual([])   // 姓保留、名换了
+    expect(unchangedGivenChars('欧阳修', '欧阳修')).toEqual(['修'])
+  })
+  it('违规条目会点名具体哪个字没换（重试时喂给模型）', () => {
+    const v = findIdentityViolations({ chapterHeadings: [], relationships: [], characters: [
+      { original: '赵德海', replacement: '赵德亥', role: 'minor', pairs: [] }] })
+    expect(v[0]).toContain('德')
   })
 })
 

@@ -49,6 +49,7 @@ export function MobileFilmPlayer ({ onBack }: { onBack: () => void }) {
       <video
         ref={pb.videoRef}
         src={pb.src}
+        poster={pb.poster ?? undefined}
         playsInline
         // auto：连第一帧一起拿到（配合 src 的 #t=0.001），未播放时显示画面本身
         preload="auto"

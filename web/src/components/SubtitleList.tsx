@@ -22,7 +22,7 @@ import { VoicePanel } from './VoicePanel'
  */
 const ANCHOR_RATIO = 0.25
 
-export function SubtitleList () {
+export function SubtitleList ({ withVoicePanel = true }: { withVoicePanel?: boolean } = {}) {
   const lines = useSubtitles((s) => s.lines)
   const currentMs = useSubtitles((s) => s.currentMs)
   const loading = useSubtitles((s) => s.loading)
@@ -60,7 +60,7 @@ export function SubtitleList () {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <VoicePanel />
+      {withVoicePanel && <VoicePanel />}
 
       <div className="flex items-center gap-1.5 px-3 py-2 text-[11px] uppercase tracking-wider text-ink-400">
         <IconSubtitles className="size-3.5" />

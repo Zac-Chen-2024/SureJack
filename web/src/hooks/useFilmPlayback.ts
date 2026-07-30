@@ -39,6 +39,9 @@ export interface FilmPlayback {
   src: string | null
   /** 选中的库 BGM，没选就 null */
   bgmSrc: string | null
+  /** 首帧封面（服务端 ffmpeg 抓的）。给 <video poster> 用——进页面立刻是画面，
+   *  而不是安卓 WebView 那个丑的默认播放键占位图 */
+  poster: string | null
   /** 母带正在重烧（改了文案/字幕/语速）+ 进度，给"合成中"蒙层用 */
   composing: boolean
   progress: number
@@ -155,6 +158,8 @@ export function useFilmPlayback (
    */
   const src = project ? `/api/projects/${project.id}/film/master/stream?v=${encodeURIComponent(ver)}#t=0.001` : null
   const bgmSrc = project?.bgmLibraryId ? `/api/library/items/${project.bgmLibraryId}` : null
+  // 键在母带版本上：母带重烧才换新封面，否则长缓存命中、瞬开
+  const poster = project ? `/api/projects/${project.id}/film/poster.jpg?v=${encodeURIComponent(ver)}` : null
 
   const toggle = (): void => {
     const v = videoRef.current, b = bgmRef.current
@@ -200,7 +205,7 @@ export function useFilmPlayback (
   }
 
   return {
-    videoRef, bgmRef, playing, cur, dur, src, bgmSrc, composing, progress,
+    videoRef, bgmRef, playing, cur, dur, src, bgmSrc, poster, composing, progress,
     toggle, seekTo, onLoadedMeta: setDur, onTimeUpdate,
     handlePlay, handleStop, handleWaiting, handlePlaying, onBgmReady,
   }

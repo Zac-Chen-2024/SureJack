@@ -67,8 +67,8 @@ export function WelcomePage ({ onEnter }: { onEnter: () => void }) {
     timers.current.forEach(clearTimeout)
     timers.current = [
       setTimeout(() => setLeaving(true), dwell),
-      // 等整层淡完（620ms）再卸载，避免最后一帧被硬切掉
-      setTimeout(onEnter, dwell + 660),
+      // 等整层淡完（1000ms）再卸载，避免最后一帧被硬切掉
+      setTimeout(onEnter, dwell + 1060),
     ]
   }, [onEnter])
 
@@ -93,7 +93,7 @@ export function WelcomePage ({ onEnter }: { onEnter: () => void }) {
     <div
       className="sj-fade fixed inset-0 z-[100] flex items-center justify-center overflow-hidden bg-ink-950 px-8"
       style={{
-        transition: `opacity 620ms ${EASE}`,
+        transition: `opacity 1000ms ${EASE}`,
         opacity: leaving ? 0 : 1,
         pointerEvents: leaving ? 'none' : undefined,
       }}

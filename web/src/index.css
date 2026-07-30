@@ -184,15 +184,15 @@ button, input, textarea, a, [role="button"], .interactive {
     transition-duration: 0.01ms !important;
   }
   /*
-   * 【豁免纯淡入淡出】。安卓上打开"移除动画/关闭动画缩放"后，系统会报
-   * prefers-reduced-motion: reduce，上面那条会把开屏的淡出也压成 0.01ms
-   * ——于是欢迎页是"闪没了"而不是淡出（真机上就是这么翻车的）。
-   * 而 reduce 要防的是位移/缩放引起的眩晕，opacity 渐变不在其列，
-   * 所以标了 .sj-fade 的元素保留它自己的时长。
+   * 【豁免淡入淡出与"正在忙"的转圈】。安卓上打开"移除动画/关闭动画缩放"后
+   * 系统会报 prefers-reduced-motion: reduce，上面那条会把它们一起压成
+   * 0.01ms——于是开屏是"闪没了"而不是淡出、加载圈完全不转（真机上就是这么
+   * 翻车的，连着被当成两个 bug 报了）。
+   * reduce 要防的是位移/缩放引起的眩晕；opacity 渐变和一个小转圈不在其列，
+   * 而"是否在忙"是必须传达的状态信息，不能被静音。
    */
-  .sj-fade {
-    transition-duration: revert !important;
-  }
+  .sj-fade { transition-duration: revert !important; }
+  .animate-spin { animation-duration: 1s !important; }
 }
 
 /* 滚动条也要克制——默认的亮色滚动条会破坏深色沉浸感 */

@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { useProjects } from '../../store/projects'
 import { usePipeline } from '../../store/pipeline'
 import { IconChevronLeft, IconLoader, IconCheck } from '../ui/Icon'
@@ -10,6 +11,12 @@ import { IconChevronLeft, IconLoader, IconCheck } from '../ui/Icon'
  * 后台跑，不占着这个页面。
  */
 export function MobileGenerating ({ onBack, projectName }: { onBack: () => void; projectName: string }) {
+  // 计时器：配音阶段没有百分比可显示，用已用时表明"确实在跑"
+  const [elapsed, setElapsed] = useState(0)
+  useEffect(() => {
+    const t = setInterval(() => setElapsed((n) => n + 1), 1000)
+    return () => clearInterval(t)
+  }, [])
   const ttsState = useProjects((s) => s.current()?.ttsState ?? 'none')
   const filmState = usePipeline((s) => s.film?.state ?? null)
   const progress = usePipeline((s) => s.film?.progress ?? 0)
@@ -17,6 +24,13 @@ export function MobileGenerating ({ onBack, projectName }: { onBack: () => void;
   const voiceReady = ttsState === 'ready'
   const composing = filmState === 'building'
   const errored = ttsState === 'error' || filmState === 'error'
+  /*
+   * 【为什么"很久不动然后突然跳一下"】：成片任务在队列里【排在"拼背景"
+   * 任务后面】，排队期间进度恒为 0，轮到它才开始爬。之前统一显示 0% →
+   * 看着像卡死。现在 0% 明说"排队中"，真正开始烧才显示百分比，
+   * 用户看到的每一步都对得上实际发生的事。
+   */
+  const queued = composing && progress === 0
 
   return (
     <div className="absolute inset-0 bg-ink-950">
@@ -45,14 +59,15 @@ export function MobileGenerating ({ onBack, projectName }: { onBack: () => void;
             <Step
               n={1} title="配音生成"
               state={voiceReady ? 'done' : 'active'}
-              hint={voiceReady ? '已完成' : '正在用 AI 合成配音…'}
+              // Azure 不回进度，用"已用时"代替一个假的百分比——至少是真的在动
+              hint={voiceReady ? '已完成' : `正在用 AI 合成配音…已用时 ${elapsed}s`}
             />
             <div className="ml-[15px] h-5 w-px bg-line" />
             <Step
               n={2} title="视频合成"
-              state={composing ? 'active' : voiceReady ? 'active' : 'wait'}
-              hint={composing ? undefined : voiceReady ? '排队中…' : '等配音好了自动开始'}
-              percent={composing ? progress : undefined}
+              state={composing || voiceReady ? 'active' : 'wait'}
+              hint={queued ? '排队中，先拼背景…' : composing ? undefined : voiceReady ? '排队中…' : '等配音好了自动开始'}
+              percent={composing && !queued ? progress : undefined}
             />
             <p className="mt-7 text-center text-[11px] leading-relaxed text-ink-500">
               合成要几分钟。可以返回列表继续建别的项目，进度在列表上也看得到；好了这里会自动出现成片。

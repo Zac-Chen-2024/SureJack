@@ -209,8 +209,11 @@ export function MobileWorkspace () {
       </BottomSheet>
 
       <BottomSheet open={sheet === 'subtitle'} onClose={back} title={SHEET_TITLE.subtitle}>
-        <SubtitleHeight />
-        <div className="mt-4 h-[42vh] border-t border-line pt-2"><SubtitleList /></div>
+        {/* 「字幕」抽屉只管字幕：预览将烧录的每一行 + 时间轴 + 高度/字号。
+            withVoicePanel={false} ——配音有它自己的抽屉，别把同一块面板
+            在两个入口里各显示一次（之前两个抽屉长得一模一样就是这个原因）。 */}
+        <div className="h-[46vh]"><SubtitleList withVoicePanel={false} /></div>
+        <div className="mt-3 border-t border-line pt-3"><SubtitleHeight /></div>
       </BottomSheet>
 
       <BottomSheet open={sheet === 'background'} onClose={back} title={SHEET_TITLE.background}>

@@ -1,5 +1,7 @@
 import type { FastifyInstance } from 'fastify'
-import { createReadStream } from 'node:fs'
+import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { spawn } from 'node:child_process'
 import { sendFileRange } from '../assets/storage.js'
 import { openUserDb, type Project } from '../db/user-db.js'
 import { getSession, requireAuth } from '../auth/session.js'
@@ -121,6 +123,49 @@ export function registerExportRoutes (app: FastifyInstance, deps: Deps): void {
       // 母带按版本区分 URL（前端带 ?v=masterVersion），同版本可缓存
       reply.header('Cache-Control', 'no-store')
       return sendFileRange(reply, path, req.headers.range, 'video/mp4')
+    })
+
+  /**
+   * 【成片首帧封面】。给 <video poster> 用。
+   *
+   * 为什么要这个：不给 poster 的话，安卓 WebView 在视频真正解出第一帧之前会
+   * 画一个又大又丑的默认播放键占位图——点进项目先看到那个，非常不专业。
+   * 有了 poster，进页面【立刻】就是画面本身。
+   *
+   * 首次请求用 ffmpeg 从母带抓一帧存成 jpg，之后直接命中磁盘缓存。
+   * 文件名带母带版本，母带重烧后自然换新（旧的留着无妨，下次不会被引用）。
+   */
+  app.get<{ Params: { id: string } }>(
+    '/api/projects/:id/film/poster.jpg', { preHandler: requireAuth }, async (req, reply) => {
+      const name = getSession(req)!
+      const project = withUserDb(name, (db) => db.getProject(req.params.id))
+      if (!project) return reply.code(404).send({ error: '项目不存在' })
+
+      const master = await playableMaster(deps, name, req.params.id)
+      if (master === null) return reply.code(404).send({ error: '母带还没合好' })
+
+      const posterPath = join(dirname(master), 'poster.jpg')
+      // 封面比母带旧就重抓（母带重烧过）
+      const fresh = existsSync(posterPath)
+        && statSync(posterPath).mtimeMs >= statSync(master).mtimeMs
+      if (!fresh) {
+        try {
+          await new Promise<void>((resolve, reject) => {
+            const p = spawn('ffmpeg', [
+              '-y', '-ss', '0', '-i', master, '-frames:v', '1',
+              '-q:v', '3', posterPath,
+            ])
+            p.on('error', reject)
+            p.on('close', (code) => (code === 0 ? resolve() : reject(new Error(`ffmpeg ${code}`))))
+          })
+        } catch (e) {
+          req.log.warn({ err: e }, '抓封面失败')
+          return reply.code(404).send({ error: '封面暂不可用' })
+        }
+      }
+      // 内容随母带版本变，前端 URL 带 ?v=，可以放心长缓存
+      reply.header('Cache-Control', 'public, max-age=86400')
+      return reply.type('image/jpeg').send(readFileSync(posterPath))
     })
 
   /**
