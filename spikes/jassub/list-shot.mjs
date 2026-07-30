@@ -19,6 +19,7 @@ const BASE = 'http://127.0.0.1:8809'
 const now = new Date('2026-07-30T10:00:00Z').toISOString()
 const project = (id, name, extra = {}) => ({
   id, name, createdAt: now, updatedAt: now,
+  coverTitle: '', inVideoTitle: '', parentProjectId: null, episodeIndex: 1,
   scriptText: '他站在楼下等了整整三个小时，直到那扇窗户的灯终于灭了',
   ttsState: 'ready', ttsDurationMs: 92000, subtitleMode: 'word',
   ...extra,
@@ -26,6 +27,12 @@ const project = (id, name, extra = {}) => ({
 
 const PROJECTS = [
   project('p1', '周周撸铁'),
+  // 母文件夹：主片 + 续集（续集靠 parentProjectId 挂上去）
+  project('m1', '分集验收', { coverTitle: '分集验收', inVideoTitle: '分集验收' }),
+  project('m2', '分集验收2', {
+    parentProjectId: 'm1', episodeIndex: 2,
+    coverTitle: '分集验收2', inVideoTitle: '分集验收2',
+  }),
   project('p2', '深夜食堂的秘密', { ttsState: 'generating', ttsDurationMs: null }),
   project('p3', '老宅里的第七个房间'),
   project('p4', '写了一半的稿子', { ttsState: 'idle', ttsDurationMs: null }),
