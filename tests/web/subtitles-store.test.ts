@@ -74,7 +74,12 @@ describe('findCurrentLineIndex', () => {
 })
 
 describe('lineText', () => {
-  it('把词顺序拼回可读文本（标点本身也是词）', () => {
+  /*
+   * 【预览必须等于烧录】。成片里字幕不显示任何标点（见 src/subtitles/ass.ts
+   * 的 stripPunctuation），所以这里拼出来的预览文本也不能带标点——否则用户
+   * 按预览判断"这行断得对不对/会不会太长"就判错了。断句仍然是按标点切的。
+   */
+  it('拼回可读文本时剔掉标点——和烧进视频的一致', () => {
     expect(lineText({
       startMs: 0, endMs: 900,
       words: [
@@ -82,7 +87,7 @@ describe('lineText', () => {
         { text: '很好', offsetMs: 400, durationMs: 400, isPunctuation: false },
         { text: '。', offsetMs: 800, durationMs: 100, isPunctuation: true },
       ],
-    })).toBe('今天很好。')
+    })).toBe('今天很好')
   })
 })
 

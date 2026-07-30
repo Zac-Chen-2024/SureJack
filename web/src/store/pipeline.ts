@@ -262,6 +262,8 @@ interface PipelineState {
   loadFilm: (projectId: string) => Promise<void>
   /** 手动强制重合一遍。用户偶尔需要不问指纹重来 */
   recomposeFilm: (projectId: string) => Promise<void>
+  /** 中断正在进行的合成（排队中就摘掉，正在烧就杀 ffmpeg） */
+  cancelFilm: (projectId: string) => Promise<void>
   /** 所有项目的合成进度，projectId → {合成中, 进度}。给项目列表显示进度 */
   filmProgress: Record<string, { composing: boolean; progress: number }>
   /** 轮询一批项目的合成状态，刷 filmProgress。永远不抛 */
@@ -413,6 +415,16 @@ export const usePipeline = create<PipelineState>((set, get) => ({
         error: e instanceof ApiError ? e.message : '重新合成失败',
         film: null,   // 拉回未知态，让下一轮轮询问出真相
       })
+    }
+  },
+
+  async cancelFilm (projectId) {
+    try {
+      await api.post(`/api/projects/${projectId}/film/cancel`)
+      await get().loadFilm(projectId)
+      await useProjects.getState().load()
+    } catch (e) {
+      set({ error: e instanceof ApiError ? e.message : '中断失败' })
     }
   },
 

@@ -41,7 +41,7 @@ import { openLibraryDb } from '../library/library-db.js'
 import { getLibraryItem } from '../library/scan.js'
 import { libraryItemPath } from '../library/paths.js'
 import { hasVideoMaterials, planProjectBackground, type BackgroundPlan } from '../library/background.js'
-import { buildAssForProject, aspectOf } from '../subtitles/project-ass.js'
+import { buildAssForProject, aspectOf, LEGACY_SUBTITLE_MAX_CHARS } from '../subtitles/project-ass.js'
 import { render } from '../render/index.js'
 import { buildBackgroundTrack } from './build.js'
 import { mixBgm } from './mix.js'
@@ -292,8 +292,9 @@ export function resolveFilm (
    *    指纹逐字节不变】、开机补合扫不到、绝不因为这个改动被重烧；而新烧
    *    的片子用的是隐藏版。指纹在这里退化成"变更信号"，不是产物校验和。
    */
-  const ass = buildAssForProject(project, { hidePunctuation: true })
-  const assForHash = buildAssForProject(project)
+  const ass = buildAssForProject(project, { hidePunctuation: true, wrapStyle: 0 })
+  // 指纹那份钉在【老配置】上（14 字上限 + 含标点）→ 已有项目指纹不变、不重烧
+  const assForHash = buildAssForProject(project, { maxChars: LEGACY_SUBTITLE_MAX_CHARS })
 
   let clip: Clip
   let bgKey: string
@@ -362,6 +363,7 @@ function registerFilmAsset (
 async function buildFilm (
   deps: FilmDeps, userName: string, projectId: string, jobId: string,
   onProgress: (pct: number) => void,
+  signal?: AbortSignal,
 ): Promise<string> {
   const r = resolveFilm(deps, userName, projectId)
   if (!r.ok) throw new Error(r.error)
@@ -440,7 +442,9 @@ async function buildFilm (
     }, f.plan === null
       ? (p) => onProgress(p * MASTER_SHARE)
       // 背景轨已经吃掉前 BG_TRACK_SHARE，烧录只推进剩下那一段
-      : (p) => onProgress((BG_TRACK_SHARE * 100 + p * (1 - BG_TRACK_SHARE)) * MASTER_SHARE))
+      : (p) => onProgress((BG_TRACK_SHARE * 100 + p * (1 - BG_TRACK_SHARE)) * MASTER_SHARE),
+    // 用户点「中断」→ signal abort → ffmpeg 被杀，不再白烧十几分钟
+    signal)
     await rename(partial, masterPath)
     await writeStamp(f.dir, MASTER_STAMP_FILE, { fingerprint: f.masterFingerprint, status: 'done', jobId })
   } else {
@@ -478,10 +482,11 @@ async function buildFilm (
 async function runFilmBuild (
   deps: FilmDeps, userName: string, projectId: string, jobId: string,
   onProgress: (pct: number) => void,
+  signal?: AbortSignal,
 ): Promise<string> {
   const dir = assetDir(userName, deps.whitelist, projectId)
   try {
-    return await buildFilm(deps, userName, projectId, jobId, onProgress)
+    return await buildFilm(deps, userName, projectId, jobId, onProgress, signal)
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e)
     /*
@@ -566,8 +571,17 @@ export async function enqueueFilm (
     }
   })
 
-  deps.queue.enqueue(jobId, (onProgress) =>
-    runFilmBuild(deps, userName, projectId, jobId, onProgress))
+  /*
+   * 【只差混音的活走 light 道】。母带已经在盘上、只是换了 BGM/音量时，
+   * 这次要做的只有 9 秒的混音（-c:v copy）——不该排在十几分钟的烧录后面
+   * 干等。判据：盘上母带的指纹和这次要的母带指纹一致。
+   */
+  const masterFresh = await reusableOutput(
+    dir, MASTER_STAMP_FILE, FILM_MASTER_FILE, r.film.masterFingerprint,
+  ) !== null
+  deps.queue.enqueue(jobId, (onProgress, signal) =>
+    runFilmBuild(deps, userName, projectId, jobId, onProgress, signal),
+  masterFresh ? 'light' : 'heavy')
   return jobId
 }
 

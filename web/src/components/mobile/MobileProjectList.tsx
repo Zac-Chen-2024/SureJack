@@ -3,6 +3,7 @@ import { useProjects, type Project } from '../../store/projects'
 import { usePipeline } from '../../store/pipeline'
 import { AccountMenu } from '../AccountMenu'
 import { PaletteToggle } from '../PaletteToggle'
+import { DownloadPanel } from './DownloadPanel'
 import { IconPlus, IconLoader, IconTrash, IconMore } from '../ui/Icon'
 
 /**
@@ -50,7 +51,26 @@ function summaryOf (p: Project): string {
 export function MobileProjectList ({ onOpen, onNew }: { onOpen: (id: string) => void; onNew: () => void }) {
   const items = useProjects((s) => s.items)
   const remove = useProjects((s) => s.remove)
+  const reload = useProjects((s) => s.load)
   const filmProgress = usePipeline((s) => s.filmProgress)
+
+  /*
+   * 【下拉刷新】。列表本来每 5 秒自动刷，但用户想"立刻知道现在怎么样了"时
+   * 需要一个自己能触发的动作——干等着刷新是最让人不安的状态。
+   * 只在已经滚到最顶(scrollTop<=0)时起手，否则会和正常的向下滚动打架。
+   */
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const pullStart = useRef<number | null>(null)
+  const [pull, setPull] = useState(0)
+  const [refreshing, setRefreshing] = useState(false)
+
+  async function doRefresh () {
+    setRefreshing(true)
+    try { await reload() } finally {
+      setRefreshing(false)
+      setPull(0)
+    }
+  }
 
   return (
     <div
@@ -61,12 +81,43 @@ export function MobileProjectList ({ onOpen, onNew }: { onOpen: (id: string) => 
       <div className="flex shrink-0 items-center justify-between px-5 pb-4">
         <h2 className="text-2xl font-extrabold tracking-tight text-ink-50">我的项目</h2>
         <div className="flex items-center gap-1">
+          {/* 下载队列：挨着账户头像，点开是进度悬浮框（只在安卓 App 里出现） */}
+          <DownloadPanel />
           <PaletteToggle />
           <AccountMenu align="down-right" />
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-6">
+      {/* 下拉刷新的提示条：跟着手指下拉长出来 */}
+      {(pull > 0 || refreshing) && (
+        <div
+          className="flex shrink-0 items-center justify-center gap-1.5 overflow-hidden text-[11px] text-ink-400 transition-[height]"
+          style={{ height: refreshing ? 28 : Math.min(pull, 56) }}
+        >
+          {refreshing
+            ? <><IconLoader className="size-3.5 animate-spin" />正在刷新…</>
+            : pull > 48 ? '松手刷新' : '下拉刷新'}
+        </div>
+      )}
+
+      <div
+        ref={scrollRef}
+        className="min-h-0 flex-1 overflow-y-auto px-5 pb-6"
+        onTouchStart={(e) => {
+          if ((scrollRef.current?.scrollTop ?? 0) <= 0) pullStart.current = e.touches[0]!.clientY
+        }}
+        onTouchMove={(e) => {
+          if (pullStart.current === null) return
+          const d = e.touches[0]!.clientY - pullStart.current
+          setPull(d > 0 ? d * 0.5 : 0)
+        }}
+        onTouchEnd={() => {
+          const shouldRefresh = pull > 48
+          pullStart.current = null
+          if (shouldRefresh) void doRefresh()
+          else setPull(0)
+        }}
+      >
         {/* ── 新建：进引导页（填名+文案→分析人名→确认→生成）─────────── */}
         <button
           type="button"

@@ -20,9 +20,26 @@ export interface SubtitleLine {
   words: WordTiming[]
 }
 
-/** 把一行的词拼回可读文本。标点本身就是 word，直接顺序拼接即可。 */
+/**
+ * 剔掉所有标点，只留可读内容。**必须和后端 src/subtitles/ass.ts 的
+ * stripPunctuation 逐字一致**——字幕预览要和真正烧进视频的一模一样，
+ * 两边规则若不同，用户在这里看到的就不是他将拿到的东西。
+ * 豁免 % / # & @ _ ~（它们在 Unicode 里算标点，但删了会丢信息：100% → 100）。
+ */
+const KEEP_PUNCT = new Set(['%', '％', '/', '#', '&', '@', '_', '~'])
+export function stripPunctuation (text: string): string {
+  return [...text].filter((ch) => KEEP_PUNCT.has(ch) || !/\p{P}/u.test(ch)).join('')
+}
+
+/**
+ * 把一行的词拼回可读文本。
+ *
+ * 【和烧录一致：不显示标点】。断句仍然是按标点切的（segmentLines 干的活），
+ * 但显示出来的每一行都不含标点——正式成片就是这样，预览必须一致，
+ * 否则用户按预览判断"这行会不会太长/断得对不对"就判错了。
+ */
 export function lineText (line: SubtitleLine): string {
-  return line.words.map((w) => w.text).join('')
+  return stripPunctuation(line.words.map((w) => w.text).join(''))
 }
 
 /**

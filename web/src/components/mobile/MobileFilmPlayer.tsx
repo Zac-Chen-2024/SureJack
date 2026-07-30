@@ -34,7 +34,13 @@ export function MobileFilmPlayer ({ onBack }: { onBack: () => void }) {
   const setCurrentMs = useSubtitles((s) => s.setCurrentMs)
   const lines = useSubtitles((s) => s.lines)
   const currentMs = useSubtitles((s) => s.currentMs)
-  const pb = useFilmPlayback(setCurrentMs, null)
+  const seekNonce = useSubtitles((s) => s.seekNonce)
+  /*
+   * 第二个参数【必须接上 seekNonce】：点字幕列表某一行要跳到那个时间点。
+   * 原来这里传 null，于是手机上点字幕毫无反应（桌面版一直是接着的）。
+   * 只认 nonce 变化——否则播放中每帧 currentMs 都在变，会被当成跳转指令。
+   */
+  const pb = useFilmPlayback(setCurrentMs, seekNonce > 0 ? { ms: currentMs, nonce: seekNonce } : null)
 
   if (!project || !pb.src) return null
 

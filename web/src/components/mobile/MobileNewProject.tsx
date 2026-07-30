@@ -26,9 +26,16 @@ export function MobileNewProject ({ onBack, onGo }: { onBack: () => void; onGo: 
   const [busy, setBusy] = useState<'analyze' | 'generate' | null>(null)
   const fileInput = useRef<HTMLInputElement>(null)
 
-  /** 确保项目已建、且文案已写入；返回项目 id */
+  /**
+   * 建项目并把【页面上这份原始文案】写进去。只在"分析"那一步调。
+   *
+   * ⚠️【绝不能在"生成"时再调一次】。踩过：原来 onGenerate 也走 ensureProject，
+   * 而它里面 updateScript(script) 会用页面上那份【原始粘贴文本】把后端刚写好的
+   * "已去章节/数字行 + 已改名"的文案覆盖回去 → 配音和字幕全是拿原文做的：
+   * 数字行还在、人名也没换。表现就是"周周撸铁"那条片子字幕里还念着 1 2 3。
+   */
   async function ensureProject (): Promise<string> {
-    if (createdId) { await updateScript(script); return createdId }
+    if (createdId) return createdId
     await create(name.trim() || '未命名项目')
     const id = useProjects.getState().currentId!
     await updateScript(script)
@@ -43,7 +50,8 @@ export function MobileNewProject ({ onBack, onGo }: { onBack: () => void; onGo: 
   async function onGenerate () {
     setBusy('generate')
     try {
-      const id = await ensureProject()
+      // 不再碰 scriptText——此刻库里那份是"确认替换"后的成品，动它就等于回退
+      const id = createdId ?? await ensureProject()
       // 【不等配音跑完】：立刻开跑 + 立刻进编辑器看进度蒙层（配音中→合成中）。
       // 配音/合成都在后台，这期间能返回列表继续建别的项目。
       void generateVoice(id)

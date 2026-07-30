@@ -1,6 +1,6 @@
 {
-  "versionCode": 6,
-  "versionName": "2.1.0",
+  "versionCode": 7,
+  "versionName": "2.2.0",
   "apkUrl": "https://github.com/Zac-Chen-2024/SureJack/releases/latest/download/SureJack.apk",
-  "notes": "应用内自动更新（App 内下载+安装，不用再去 GitHub）；字幕彻底不显示标点；清理复查可重试；视频封面显示第一帧。"
+  "notes": "下载队列（进度悬浮框，文件名=项目名）；合成可中断；混音不再排队等烧录；字幕自动换行不再腰斩句子；人名逐字校验重试。"
 }

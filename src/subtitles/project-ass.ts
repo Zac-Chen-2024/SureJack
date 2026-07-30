@@ -18,8 +18,29 @@ import type { WordTiming, SubtitleLine, TextOverlay, AspectPreset } from '../typ
  * 字幕行每次现算。词表几千条、segmentLines 是 O(n)，开销可忽略。
  */
 
-/** 竖屏一行的字数上限。竖屏 1080 宽、64 号字，超过这个数会顶到边 */
-export const SUBTITLE_MAX_CHARS = 14
+/**
+ * 一条字幕的字数上限（兜底）。
+ *
+ * 【断句由标点决定，长了靠换行而不是切断】。原来 14 太紧：637 行里 27 行
+ * 撞上限被硬断，把"大力出奇迹"劈成"大力出 / 奇迹"这种明显不对的地方。
+ *
+ * 但也不能放太宽——那样一条字幕会长到糊满屏幕。正解是【两条一起改】：
+ *   · 上限适度放到 24（约两行显示的量）；
+ *   · 渲染时把 WrapStyle 从 2（完全不自动换行）改成 0（智能均分换行），
+ *     超过一行的自动折成两行。当初把上限压到 14，正是因为 WrapStyle=2
+ *     根本不换行、长了就溢出屏幕。
+ * 于是绝大多数换行落在标点上，偶尔的长句折成两行、而不是被腰斩。
+ */
+export const SUBTITLE_MAX_CHARS = 24
+
+/**
+ * 【旧的上限，只用于算母带指纹】。
+ *
+ * 和"隐藏标点"同一套 carve-out：指纹按老配置（14 字 + 含标点）计算，于是
+ * 已有项目的指纹逐字节不变、开机补合扫不到、绝不因为这次调整被重烧；
+ * 而新烧的片子用上面的新配置。见 compose/film.ts。
+ */
+export const LEGACY_SUBTITLE_MAX_CHARS = 14
 
 export const DISCLAIMER = '小说内容纯属虚构，无不良引导'
 
@@ -101,7 +122,10 @@ export function clampSubtitleMarginV (value: number, aspectRatio: string): numbe
  * 将来若要给 AI 配音路径加一个「整句显示」的渲染选项，**不能复用这个
  * 值**，否则词级时间轴会被当成句级，每个词各成一行。那种需求要另加字段。
  */
-export function deriveSubtitleLines (project: Project): SubtitleLine[] {
+export function deriveSubtitleLines (
+  project: Project,
+  maxChars: number = SUBTITLE_MAX_CHARS,
+): SubtitleLine[] {
   const words: WordTiming[] = JSON.parse(project.wordTimingsJson ?? '[]')
   if (project.subtitleMode === 'line') {
     return words.map((w) => ({
@@ -110,7 +134,7 @@ export function deriveSubtitleLines (project: Project): SubtitleLine[] {
       words: [w],
     }))
   }
-  return segmentLines(words, SUBTITLE_MAX_CHARS)
+  return segmentLines(words, maxChars)
 }
 
 /**
@@ -119,14 +143,14 @@ export function deriveSubtitleLines (project: Project): SubtitleLine[] {
  */
 export function buildAssForProject (
   project: Project,
-  opts: { hidePunctuation?: boolean } = {},
+  opts: { hidePunctuation?: boolean; maxChars?: number; wrapStyle?: number } = {},
 ): string {
   const overlays: TextOverlay[] = [
     { content: DISCLAIMER, style: 'Disclaimer', startMs: null, endMs: null },
     { content: project.name, style: 'Title', startMs: null, endMs: null },
   ]
   return buildAss({
-    lines: deriveSubtitleLines(project),
+    lines: deriveSubtitleLines(project, opts.maxChars ?? SUBTITLE_MAX_CHARS),
     overlays,
     aspect: aspectOf(project),
     durationMs: project.ttsDurationMs ?? 0,
@@ -135,5 +159,6 @@ export function buildAssForProject (
     subtitleMarginV: project.subtitleMarginV,
     subtitleFontSize: clampSubtitleFontSize(project.subtitleFontSize),
     hidePunctuation: opts.hidePunctuation,
+    wrapStyle: opts.wrapStyle,
   })
 }

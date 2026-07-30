@@ -5,6 +5,7 @@ import android.app.DownloadManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageInfo;
+import android.database.Cursor;
 import android.hardware.Sensor;
 import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
@@ -25,7 +26,12 @@ import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.webkit.JavascriptInterface;
 import android.widget.Toast;
+
+import java.net.URLDecoder;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
@@ -57,6 +63,8 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
     private boolean pageReady = false;
     private ValueCallback<Uri[]> fileCallback;
 
+    /** 本次会话发起过的下载 id，供 Bridge.downloads() 查询进度 */
+    private final java.util.List<Long> downloadIds = new java.util.ArrayList<>();
     private SensorManager sensors;
     private long lastShakeAt = 0;
     private float lastX, lastY, lastZ;
@@ -87,6 +95,8 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
         s.setUserAgentString(s.getUserAgentString() + " SureJackApp/" + versionCode());
         CookieManager.getInstance().setAcceptCookie(true);
         CookieManager.getInstance().setAcceptThirdPartyCookies(web, true);
+        // 下载队列桥：网页调 SJNative.downloads() 拿进度画悬浮框
+        web.addJavascriptInterface(new Bridge(), "SJNative");
 
         web.setWebViewClient(new WebViewClient() {
             @Override
@@ -136,7 +146,7 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
             public void onDownloadStart(String url, String userAgent, String contentDisposition,
                                         String mimeType, long contentLength) {
                 try {
-                    String name = URLUtil.guessFileName(url, contentDisposition, mimeType);
+                    String name = fileNameFrom(contentDisposition, url, mimeType);
                     DownloadManager.Request r = new DownloadManager.Request(Uri.parse(url));
                     r.addRequestHeader("Cookie", CookieManager.getInstance().getCookie(url));
                     r.addRequestHeader("User-Agent", userAgent);
@@ -145,7 +155,10 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
                     r.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
                     r.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, name);
                     DownloadManager dm = (DownloadManager) getSystemService(Context.DOWNLOAD_SERVICE);
-                    if (dm != null) dm.enqueue(r);
+                    if (dm != null) {
+                        long id = dm.enqueue(r);
+                        synchronized (downloadIds) { downloadIds.add(id); }
+                    }
                     Toast.makeText(MainActivity.this, "开始下载：" + name, Toast.LENGTH_SHORT).show();
                 } catch (Exception e) {
                     Toast.makeText(MainActivity.this, "下载失败", Toast.LENGTH_SHORT).show();
@@ -168,6 +181,88 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
             web.restoreState(savedInstanceState);
             pageReady = true;
         }
+    }
+
+    /**
+     * 从 Content-Disposition 解析文件名。
+     *
+     * 【为什么不能只用 URLUtil.guessFileName】：后端发的是 RFC 5987 的
+     * `filename*=UTF-8''%E8%B1%AA%E9%97%A8.mp4`（中文项目名必须这么发），
+     * 而 guessFileName 不认这种扩展形式 → 退化成 URL 路径里的名字，
+     * 于是下载下来的文件叫 "download" 而不是项目名。这里自己解一遍。
+     */
+    static String fileNameFrom(String contentDisposition, String url, String mimeType) {
+        if (contentDisposition != null) {
+            try {
+                // 优先 filename*=charset''pct-encoded（带中文时后端用这个）
+                Matcher m = Pattern.compile("filename\\*\\s*=\\s*([^']*)'[^']*'([^;]+)",
+                        Pattern.CASE_INSENSITIVE).matcher(contentDisposition);
+                if (m.find()) {
+                    String cs = m.group(1).trim();
+                    String v = URLDecoder.decode(m.group(2).trim(),
+                            cs.isEmpty() ? "UTF-8" : cs);
+                    if (!v.isEmpty()) return v;
+                }
+                // 退一步：普通 filename="..."
+                m = Pattern.compile("filename\\s*=\\s*\"?([^\";]+)\"?",
+                        Pattern.CASE_INSENSITIVE).matcher(contentDisposition);
+                if (m.find()) {
+                    String v = m.group(1).trim();
+                    if (!v.isEmpty()) return v;
+                }
+            } catch (Exception ignored) { }
+        }
+        return URLUtil.guessFileName(url, contentDisposition, mimeType);
+    }
+
+    /**
+     * 给网页用的下载查询桥：返回当前这些下载的 JSON
+     * [{title, total, done, status}]，网页据此画"下载队列"悬浮框。
+     * 系统通知栏本来也有进度，但用户要在 App 里看得见。
+     */
+    public class Bridge {
+        @JavascriptInterface
+        public String downloads() {
+            DownloadManager dm = (DownloadManager) getSystemService(Context.DOWNLOAD_SERVICE);
+            if (dm == null) return "[]";
+            long[] ids;
+            synchronized (downloadIds) {
+                ids = new long[downloadIds.size()];
+                for (int i = 0; i < ids.length; i++) ids[i] = downloadIds.get(i);
+            }
+            if (ids.length == 0) return "[]";
+            StringBuilder sb = new StringBuilder("[");
+            try (Cursor c = dm.query(new DownloadManager.Query().setFilterById(ids))) {
+                boolean first = true;
+                while (c != null && c.moveToNext()) {
+                    String title = c.getString(c.getColumnIndexOrThrow(DownloadManager.COLUMN_TITLE));
+                    long total = c.getLong(c.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES));
+                    long done = c.getLong(c.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR));
+                    int st = c.getInt(c.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS));
+                    String status = st == DownloadManager.STATUS_SUCCESSFUL ? "done"
+                            : st == DownloadManager.STATUS_FAILED ? "error"
+                            : st == DownloadManager.STATUS_PAUSED ? "paused" : "running";
+                    if (!first) sb.append(',');
+                    first = false;
+                    sb.append("{\"title\":").append(jsonStr(title))
+                      .append(",\"total\":").append(total)
+                      .append(",\"done\":").append(done)
+                      .append(",\"status\":\"").append(status).append("\"}");
+                }
+            } catch (Exception ignored) { }
+            return sb.append(']').toString();
+        }
+    }
+
+    private static String jsonStr(String s) {
+        if (s == null) return "\"\"";
+        StringBuilder b = new StringBuilder("\"");
+        for (char ch : s.toCharArray()) {
+            if (ch == '"' || ch == '\\') b.append('\\').append(ch);
+            else if (ch < 0x20) b.append(' ');
+            else b.append(ch);
+        }
+        return b.append('"').toString();
     }
 
     private long versionCode() {

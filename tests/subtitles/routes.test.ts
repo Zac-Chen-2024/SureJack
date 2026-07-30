@@ -190,7 +190,7 @@ describe('字幕派生接口 —— ASS', { timeout: 30_000 }, () => {
     const preview = (await app.inject({ method: 'GET', url: `/api/projects/${id}/subtitles.ass`, cookies: { sj_session: cookie } })).body
     // 预览和烧录都用【隐藏标点】那份（断句/停顿不变，只是不画标点字形）——
     // 这才是"所见即所得"的那份 ASS；含标点的那份只用来算指纹、不烧不预览。
-    const exported = buildAssForProject(project, { hidePunctuation: true })
+    const exported = buildAssForProject(project, { hidePunctuation: true, wrapStyle: 0 })
     expect(preview).toBe(exported)
   })
 

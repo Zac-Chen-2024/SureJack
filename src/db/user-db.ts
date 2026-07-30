@@ -28,7 +28,7 @@ import { LEGACY_VOICE, DEFAULT_VOICE, DEFAULT_VOICE_RATE, RATE_RANGE, VOLUME_RAN
 export const DEFAULT_BGM_VOLUME = 0.15
 
 export type AssetKind = 'video' | 'bgm' | 'voice' | 'srt' | 'bgtrack' | 'export'
-export type JobStatus = 'queued' | 'running' | 'done' | 'error'
+export type JobStatus = 'queued' | 'running' | 'done' | 'error' | 'cancelled'
 export type TtsState = 'none' | 'generating' | 'ready' | 'stale' | 'error'
 
 export interface Asset {

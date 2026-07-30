@@ -100,9 +100,19 @@ export function buildArgs (job: RenderJob): string[] {
 }
 
 /** 跑 ffmpeg。失败时把 stderr 完整带出来——否则排查等于瞎猜。 */
-export function render (job: RenderJob, onProgress?: (pct: number) => void): Promise<void> {
+export function render (job: RenderJob, onProgress?: (pct: number) => void, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     const proc = spawn('ffmpeg', buildArgs(job))
+    /*
+     * 用户点了「中断」：直接杀 ffmpeg。用 SIGKILL 而不是 SIGTERM——
+     * ffmpeg 收到 TERM 会尝试把已写的部分收尾（moov 之类），那会多花时间，
+     * 而这条产物我们本来就不要了。杀完让 close 分支带着 aborted 走。
+     */
+    const onAbort = (): void => { try { proc.kill('SIGKILL') } catch { /* 已退出 */ } }
+    if (signal) {
+      if (signal.aborted) onAbort()
+      else signal.addEventListener('abort', onAbort, { once: true })
+    }
     let stderr = ''
     const parser = onProgress ? createProgressParser(job.durationMs, onProgress) : null
 

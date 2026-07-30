@@ -126,6 +126,26 @@ export function registerExportRoutes (app: FastifyInstance, deps: Deps): void {
     })
 
   /**
+   * 【中断正在进行的合成】。
+   *
+   * 一条片子要烧十几分钟，跑错了必须能立刻叫停：既省 CPU（四核机器上一条
+   * 烧录会把一切都拖慢），也不让用户干等一条自己已经不要的片子。
+   * 还在排队 → 从队列摘掉；正在跑 → 杀掉 ffmpeg（见 queue.cancel）。
+   */
+  app.post<{ Params: { id: string } }>(
+    '/api/projects/:id/film/cancel', { preHandler: requireAuth }, async (req, reply) => {
+      const name = getSession(req)!
+      const job = withUserDb(name, (db) => db.latestJob(req.params.id))
+      if (!job) return reply.code(404).send({ error: '这个项目没有在合成' })
+      const stopped = queue.cancel(job.id)
+      if (stopped) {
+        withUserDb(name, (db) => db.updateJob(job.id, { status: 'cancelled', progress: 0 }))
+      }
+      // 没停到什么也回 200：用户想要的结果（现在没有在跑）已经成立
+      return { cancelled: stopped, jobId: job.id }
+    })
+
+  /**
    * 【成片首帧封面】。给 <video poster> 用。
    *
    * 为什么要这个：不给 poster 的话，安卓 WebView 在视频真正解出第一帧之前会

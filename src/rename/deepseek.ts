@@ -176,11 +176,13 @@ export function hasIdentityViolation (a: RenameAnalysis): boolean {
 }
 
 /** 纠正语：把上一轮的具体违规点名列出来，比泛泛地说"要全换"有效得多。 */
-function retryNudge (violations: string[]): string {
-  return '\n\n【纠正】上一次这些名字没有改干净：\n' +
+function retryNudge (violations: string[], attempt: number): string {
+  return `\n\n【第 ${attempt} 次纠正】上一次这些名字没有改干净：\n` +
     violations.map((v) => `  · ${v}`).join('\n') +
-    '\n这一次务必做到：姓保留，姓之后【每一个字】都换成读音相同的另一个字（谐音字）。' +
-    '同一位置绝不能出现和原字相同的字。配角也一样，不许偷懒。'
+    '\n规则重申：姓保留；姓之后【每一个字】都必须换成读音相同的【另一个】字。' +
+    '同一位置出现和原字相同的字就是错的。' +
+    '\n举例：顾文渊 → 顾闻缘（文wén→闻、渊yuān→缘）；不要只换最后一个字变成"顾文远"。' +
+    '\n请对上面列出的每个字逐一给出不同的同音字，配角也一样。'
 }
 
 async function callDeepSeek (novel: string, extraSystem: string, deps: AnalyzeDeps): Promise<RenameAnalysis> {
@@ -289,15 +291,21 @@ export async function reviewCleanup (text: string, deps: AnalyzeDeps = {}): Prom
 }
 
 export async function analyzeNovel (novel: string, deps: AnalyzeDeps = {}): Promise<RenameAnalysis> {
-  const first = await callDeepSeek(novel, '', deps)
   /*
-   * 模型常见两种偷懒：整名原样返回、或只换一个字（沈砚之→沈砚知，中间那个
-   * "砚"没动）。两种都算违规，带上【具体哪几个字没换】重试一次——点名比
-   * 泛泛要求有效得多。二次仍有个别改不动的，前端替换表可手工兜底。
+   * 模型常见两种偷懒：整名原样返回、或只换一个字（顾文渊→顾文远，"文"没动）。
+   * 两种都算违规 → 带上【具体哪几个字没换】重试，最多再试两次，每次都把
+   * 上一轮的违规点名列出来。始终保留"目前最好的那一份"，最后返回它——
+   * 逐字校验很严，多试两次的收益远大于一次 DeepSeek 调用的成本。
+   *
+   * 极个别怎么都改不动的，前端替换表会把它标出来让用户手改（见 web 端）。
    */
-  const v1 = findIdentityViolations(first)
-  if (v1.length === 0) return first
-  const second = await callDeepSeek(novel, retryNudge(v1), deps)
-  // 二次更差就退回一次（比较"没换干净"的条目数，取少的）
-  return findIdentityViolations(second).length <= v1.length ? second : first
+  let best = await callDeepSeek(novel, '', deps)
+  let bestBad = findIdentityViolations(best)
+  for (let attempt = 1; attempt <= 2 && bestBad.length > 0; attempt++) {
+    const next = await callDeepSeek(novel, retryNudge(bestBad, attempt), deps)
+    const bad = findIdentityViolations(next)
+    if (bad.length < bestBad.length) { best = next; bestBad = bad }
+    if (bad.length === 0) break
+  }
+  return best
 }

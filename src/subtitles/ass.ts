@@ -37,6 +37,12 @@ export interface BuildAssOptions {
    * （见 compose/film.ts：哈希用含标点版，烧录/预览用隐藏版）。
    */
   hidePunctuation?: boolean
+  /**
+   * ASS 的 WrapStyle。缺省 2 = 完全不自动换行（老行为，指纹那份要保持它）。
+   * 渲染传 0 = 智能均分换行：一条字幕超过一行时自动折成两行，
+   * 而不是靠"提前把句子切断"来避免溢出。
+   */
+  wrapStyle?: number
 }
 
 /**
@@ -187,7 +193,7 @@ export function buildAss (opts: BuildAssOptions): string {
 ScriptType: v4.00+
 PlayResX: ${aspect.width}
 PlayResY: ${aspect.height}
-WrapStyle: 2
+WrapStyle: ${opts.wrapStyle ?? 2}
 ScaledBorderAndShadow: yes
 
 [V4+ Styles]

@@ -11,6 +11,9 @@ import { IconChevronLeft, IconLoader, IconCheck } from '../ui/Icon'
  * 后台跑，不占着这个页面。
  */
 export function MobileGenerating ({ onBack, projectName }: { onBack: () => void; projectName: string }) {
+  const projectId = useProjects((s) => s.current()?.id ?? null)
+  const cancelFilm = usePipeline((s) => s.cancelFilm)
+  const cancel = async () => { if (projectId) await cancelFilm(projectId) }
   // 计时器：配音阶段没有百分比可显示，用已用时表明"确实在跑"
   const [elapsed, setElapsed] = useState(0)
   useEffect(() => {
@@ -72,6 +75,15 @@ export function MobileGenerating ({ onBack, projectName }: { onBack: () => void;
             <p className="mt-7 text-center text-[11px] leading-relaxed text-ink-500">
               合成要几分钟。可以返回列表继续建别的项目，进度在列表上也看得到；好了这里会自动出现成片。
             </p>
+
+            {/* 中断：烧一条要十几分钟，发现搞错了必须能立刻叫停（省 CPU、也不用干等） */}
+            <button
+              type="button"
+              onClick={() => { if (confirm('中断这次生成？已经烧好的部分会作废。')) void cancel() }}
+              className="mx-auto mt-4 block rounded-lg border border-line px-4 py-2 text-xs text-ink-400 transition-colors hover:border-danger hover:text-danger"
+            >
+              中断生成
+            </button>
           </div>
         )}
       </div>
