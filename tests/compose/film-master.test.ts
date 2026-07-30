@@ -27,6 +27,7 @@ const BASE: FilmFingerprintInput = {
   voiceParams: { voice: 'zh-CN-XiaoxiaoNeural', rate: 0, volume: 0, pitch: 0 },
   bgmPath: '/data/library/背景音乐/一笑倾城.mp3',
   bgmVolume: 0.15,
+  coverTitle: '后续来啦',
 }
 
 describe('配音参数进母带指纹（carve-out 保护老项目）', () => {

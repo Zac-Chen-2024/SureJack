@@ -85,6 +85,11 @@ export interface Project {
   subtitleMarginV: number
   /** 正文字幕字号，ASS 单位 */
   subtitleFontSize: number
+  /**
+   * 封面标题——插在成片最前面那两帧上的字。
+   * 空串 = 用项目名（老项目一律如此，见 coverTitleOf）。
+   */
+  coverTitle: string
   /** 配音音色/语速/音量/音调。只对文本配音路有意义，见 tts/voices.ts */
   voiceName: string
   voiceRate: number
@@ -118,6 +123,7 @@ export interface UserDb {
     bgmLibraryId?: string | null
     subtitleMarginV?: number
     subtitleFontSize?: number
+    coverTitle?: string
     voiceName?: string; voiceRate?: number; voiceVolume?: number; voicePitch?: number
     renameEnabled?: boolean
     renameState?: 'none' | 'analyzing' | 'proposed' | 'confirmed'
@@ -148,6 +154,7 @@ interface Row {
   bgm_volume: number; subtitle_mode: string; bgm_library_id: string | null
   subtitle_margin_v: number | null
   subtitle_font_size: number | null
+  cover_title: string | null
   voice_name: string | null
   voice_rate: number | null
   voice_volume: number | null
@@ -168,6 +175,7 @@ const toProject = (r: Row): Project => ({
   subtitleMode: (r.subtitle_mode ?? 'karaoke') as 'line' | 'karaoke',
   subtitleMarginV: r.subtitle_margin_v ?? DEFAULT_SUBTITLE_MARGIN_V,
   subtitleFontSize: r.subtitle_font_size ?? DEFAULT_SUBTITLE_FONT_SIZE,
+  coverTitle: r.cover_title ?? '',
   // 老行没有这几列时回落到「老默认」——晓晓+中性，正是它们的事实值
   voiceName: r.voice_name ?? LEGACY_VOICE,
   voiceRate: r.voice_rate ?? RATE_RANGE.default,
@@ -223,6 +231,7 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
       bgm_library_id TEXT,
       subtitle_margin_v INTEGER NOT NULL DEFAULT ${DEFAULT_SUBTITLE_MARGIN_V},
       subtitle_font_size INTEGER NOT NULL DEFAULT ${DEFAULT_SUBTITLE_FONT_SIZE},
+      cover_title TEXT NOT NULL DEFAULT '',
       voice_name TEXT NOT NULL DEFAULT '${LEGACY_VOICE}',
       voice_rate INTEGER NOT NULL DEFAULT ${RATE_RANGE.default},
       voice_volume INTEGER NOT NULL DEFAULT ${VOLUME_RANGE.default},
@@ -277,6 +286,12 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
   // 写死在 Sub 样式行里的那个数，所以老项目的观感一动不动。
   addCol('subtitle_margin_v', `subtitle_margin_v INTEGER NOT NULL DEFAULT ${DEFAULT_SUBTITLE_MARGIN_V}`)
   addCol('subtitle_font_size', `subtitle_font_size INTEGER NOT NULL DEFAULT ${DEFAULT_SUBTITLE_FONT_SIZE}`)
+  /*
+   * 【默认空串而不是项目名】。ALTER TABLE 的默认值会回填进所有老行，
+   * 填不进"每行各自的项目名"；而空串的语义正好就是"用项目名"，
+   * 于是老项目自动拿到以项目名为标题的封面，一行迁移代码都不用写。
+   */
+  addCol('cover_title', "cover_title TEXT NOT NULL DEFAULT ''")
   // ⚠️ 配音列的默认值填【老默认晓晓】不是晓辰：ALTER TABLE 会把这个默认回填进
   // 所有老行，回填成晓晓才是它们的事实，母带指纹才不变、才不会被重烧。
   // 新项目的晓辰由 createProject 显式写（见下）。
@@ -313,6 +328,7 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
         wordTimingsJson: null, bgmVolume: DEFAULT_BGM_VOLUME, subtitleMode: 'karaoke',
         bgmLibraryId: null, subtitleMarginV: DEFAULT_SUBTITLE_MARGIN_V,
         subtitleFontSize: DEFAULT_SUBTITLE_FONT_SIZE,
+        coverTitle: '',      // 空 = 跟着项目名走
         voiceName: DEFAULT_VOICE, voiceRate: DEFAULT_VOICE_RATE,
         voiceVolume: VOLUME_RANGE.default, voicePitch: PITCH_RANGE.default,
         // 新项目默认走文本(karaoke)，改名默认开；自备路 adopt 时会关掉/不适用
@@ -322,13 +338,13 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
       }
       db.prepare(
         `INSERT INTO projects
-          (id, name, script_text, aspect_ratio, tts_state, tts_duration_ms, word_timings_json, bgm_volume, subtitle_mode, bgm_library_id, subtitle_margin_v, subtitle_font_size, voice_name, voice_rate, voice_volume, voice_pitch, rename_enabled, rename_state, rename_analysis_json, rename_map_json, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          (id, name, script_text, aspect_ratio, tts_state, tts_duration_ms, word_timings_json, bgm_volume, subtitle_mode, bgm_library_id, subtitle_margin_v, subtitle_font_size, cover_title, voice_name, voice_rate, voice_volume, voice_pitch, rename_enabled, rename_state, rename_analysis_json, rename_map_json, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         project.id, project.name, project.scriptText, project.aspectRatio,
         project.ttsState, project.ttsDurationMs, project.wordTimingsJson,
         project.bgmVolume, project.subtitleMode, project.bgmLibraryId,
-        project.subtitleMarginV, project.subtitleFontSize,
+        project.subtitleMarginV, project.subtitleFontSize, project.coverTitle,
         project.voiceName, project.voiceRate, project.voiceVolume, project.voicePitch,
         project.renameEnabled ? 1 : 0, project.renameState,
         project.renameAnalysisJson, project.renameMapJson,
@@ -347,7 +363,7 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
           name = ?, script_text = ?, aspect_ratio = ?,
           tts_state = ?, tts_duration_ms = ?, word_timings_json = ?,
           bgm_volume = ?, subtitle_mode = ?, bgm_library_id = ?,
-          subtitle_margin_v = ?, subtitle_font_size = ?,
+          subtitle_margin_v = ?, subtitle_font_size = ?, cover_title = ?,
           voice_name = ?, voice_rate = ?, voice_volume = ?, voice_pitch = ?,
           rename_enabled = ?, rename_state = ?, rename_analysis_json = ?, rename_map_json = ?,
           updated_at = ?
@@ -372,6 +388,7 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
         patch.subtitleFontSize !== undefined
           ? patch.subtitleFontSize
           : row.subtitle_font_size ?? DEFAULT_SUBTITLE_FONT_SIZE,
+        patch.coverTitle !== undefined ? patch.coverTitle : row.cover_title ?? '',
         patch.voiceName !== undefined ? patch.voiceName : row.voice_name ?? LEGACY_VOICE,
         patch.voiceRate !== undefined ? patch.voiceRate : row.voice_rate ?? RATE_RANGE.default,
         patch.voiceVolume !== undefined ? patch.voiceVolume : row.voice_volume ?? VOLUME_RANGE.default,

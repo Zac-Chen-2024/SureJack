@@ -7,6 +7,7 @@ import { openUserDb, type Project } from '../db/user-db.js'
 import { getSession, requireAuth } from '../auth/session.js'
 import { downloadableFilm, playableMaster, enqueueFilm, filmInfo, resolveFilm, FILM_STAMP_FILE, type FilmDeps } from '../compose/film.js'
 import { writeStamp } from '../compose/stamp.js'
+import { COVER_IMAGE } from '../cover/cover.js'
 
 type Deps = FilmDeps
 
@@ -213,6 +214,15 @@ export function registerExportRoutes (app: FastifyInstance, deps: Deps): void {
       reply.header('Cache-Control', versioned ? 'public, max-age=86400' : 'no-cache')
       return reply.type('image/jpeg').send(readFileSync(posterPath))
     })
+
+  /**
+   * 固定封面底图。给前端画「封面标题」那个小预览用——它要和成片里
+   * 真正用的那张是同一张，否则预览就是在骗人。
+   */
+  app.get('/api/cover/preview.jpg', { preHandler: requireAuth }, async (_req, reply) => {
+    reply.header('Cache-Control', 'public, max-age=86400')
+    return reply.type('image/jpeg').send(readFileSync(COVER_IMAGE))
+  })
 
   /**
    * SSE 进度流。用 SSE 而非 WebSocket：进度只需服务器单向推，

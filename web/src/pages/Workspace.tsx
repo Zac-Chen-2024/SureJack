@@ -9,6 +9,7 @@ import { NameReplacePanel } from '../components/NameReplacePanel'
 import { SubtitleList } from '../components/SubtitleList'
 import { AssetPanel } from '../components/AssetPanel'
 import { SubtitleHeight } from '../components/SubtitleHeight'
+import { CoverPanel } from '../components/CoverPanel'
 import { Preview } from '../components/Preview'
 import { FilmPlayer } from '../components/FilmPlayer'
 import { useFilmStatus } from '../hooks/useFilmStatus'
@@ -214,6 +215,7 @@ export function Workspace () {
         {project ? (
           <div className="min-h-0 flex-1 overflow-y-auto p-4">
             <SubtitleHeight />
+            <CoverPanel />
             <div className="mt-4 border-t border-line pt-4">
               <AssetPanel />
             </div>

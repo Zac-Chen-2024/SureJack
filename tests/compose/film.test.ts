@@ -13,6 +13,7 @@ const BASE: FilmFingerprintInput = {
   voiceParams: { voice: 'zh-CN-XiaoxiaoNeural', rate: 0, volume: 0, pitch: 0 },
   bgmPath: '/data/library/4-BGM/雨.mp3',
   bgmVolume: 0.15,
+  coverTitle: '后续来啦',
 }
 
 /** 换一个字段，其余原样 */

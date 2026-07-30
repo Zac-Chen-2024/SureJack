@@ -46,6 +46,9 @@ import { render } from '../render/index.js'
 import { buildBackgroundTrack } from './build.js'
 import { mixBgm } from './mix.js'
 import {
+  COVER_CLIP_FILE, COVER_IMAGE, coverTitleOf, prependCover, probeAudio, renderCoverClip,
+} from '../cover/cover.js'
+import {
   BG_TRACK_FILE, enqueueBgTrack, planFingerprint, reusableBgTrack,
   writeStamp as writeBgStamp, type PrebuildDeps,
 } from './prebuild.js'
@@ -113,6 +116,11 @@ export interface FilmFingerprintInput {
   voiceParams: VoiceParams
   bgmPath: string | null
   bgmVolume: number
+  /**
+   * 封面标题。**成片层，不进母带层**——改标题只要重跑几秒的拼接，
+   * 绝不能让它把十几分钟的烧录也带着重来。
+   */
+  coverTitle: string
 }
 
 /**
@@ -165,7 +173,7 @@ export function masterFingerprint (
  */
 export function filmFingerprint (i: FilmFingerprintInput): string {
   return createHash('sha256').update(JSON.stringify([
-    masterFingerprint(i), i.bgmPath, i.bgmVolume,
+    masterFingerprint(i), i.bgmPath, i.bgmVolume, i.coverTitle,
   ])).digest('hex')
 }
 
@@ -186,6 +194,8 @@ export interface FilmPlan {
   masterFingerprint: string
   /** 这个项目的素材目录。成片、母带、背景轨、字幕、指纹都落在这儿 */
   dir: string
+  /** 插在最前面那两帧上的标题。空项目名兜底见 coverTitleOf */
+  coverTitle: string
 }
 
 export type FilmResolution =
@@ -328,13 +338,14 @@ export function resolveFilm (
       volume: project.voiceVolume, pitch: project.voicePitch,
     },
     bgmPath, bgmVolume: project.bgmVolume,
+    coverTitle: coverTitleOf(project),
   }
 
   return {
     ok: true,
     film: {
       project, clip, plan, voicePath: voice.path, bgmPath, ass,
-      aspect, durationMs, dir,
+      aspect, durationMs, dir, coverTitle: coverTitleOf(project),
       fingerprint: filmFingerprint(fpInput),
       masterFingerprint: masterFingerprint(fpInput),
     },
@@ -460,12 +471,33 @@ async function buildFilm (
    * 一个字节相同的文件，纯浪费磁盘和时间。下载/播放那两个接口会问
    * downloadableFilm 要路径，它知道该给哪一个。
    */
+  const mixedPath = join(f.dir, 'mixed.mp4')
   if (f.bgmPath !== null) {
     await mixBgm({
       masterPath, bgmPath: f.bgmPath,
-      bgmVolume: f.project.bgmVolume, outPath,
+      bgmVolume: f.project.bgmVolume, outPath: mixedPath,
     })
   }
+  const body = f.bgmPath !== null ? mixedPath : masterPath
+
+  /*
+   * ── 第三段：把封面拼到最前面（也便宜）──────────────────────────
+   * 两帧封面图 + 标题，让平台抓缩略图时拿到我们设计过的那一帧。
+   * 拼接走 concat + `-c copy`，十几分钟的片子一两秒；封面本身只有两帧，
+   * 编码代价可以忽略。
+   *
+   * 【封面必须在混音之后】：混音是 -c:v copy，它不动视频流；要是先拼封面
+   * 再混音，混音那步会把封面帧一起重新封装，白搭一次 IO。反过来则是纯增量。
+   *
+   * 【音频参数照抄正片】：见 cover.ts 的 probeAudio——写死 44100/stereo
+   * 遇上 Azure 的 24000/mono 会拼出没声音的后半段。
+   */
+  const coverPath = join(f.dir, COVER_CLIP_FILE)
+  await renderCoverClip({
+    imagePath: COVER_IMAGE, title: f.coverTitle, aspect: f.aspect,
+    outPath: coverPath, audio: await probeAudio(body),
+  })
+  await prependCover({ coverPath, filmPath: body, outPath })
   onProgress(100)
 
   /*
@@ -473,9 +505,13 @@ async function buildFilm (
    * "指纹对得上但文件是半个"的状态，而那正是最难发现的一类坏数据。
    */
   await writeStamp(f.dir, FILM_STAMP_FILE, { fingerprint: f.fingerprint, status: 'done', jobId })
-  const final = f.bgmPath !== null ? outPath : masterPath
-  registerFilmAsset(deps, userName, projectId, final, f.durationMs, `${f.project.name}.mp4`)
-  return final
+  /*
+   * 【成片一定是 outPath】。加封面之前，没有 BGM 时会把母带直接当成片
+   * （省一次 500MB 的复制）；现在成片一定比母带多两帧，两者不再是同一个
+   * 文件，必须回到 outPath。
+   */
+  registerFilmAsset(deps, userName, projectId, outPath, f.durationMs, `${f.project.name}.mp4`)
+  return outPath
 }
 
 /** 合 + 把失败原因写进指纹文件。失败照旧往上抛，队列要据此置 error。 */
@@ -689,23 +725,13 @@ async function judgeFilm (
   }
 
   /*
-   * 【没选 BGM 时，成片就是母带，这里也要认】。
+   * ⚠️【这里【不能】再有"没选 BGM 时成片就是母带"那条捷径】。
    *
-   * buildFilm 在没有 BGM 时不会复制一份 export.mp4（省 500MB），成片直接
-   * 用 master.mp4——downloadableFilm 有这条回落，但上面那句只查 export.mp4，
-   * 于是 judgeFilm 永远判「缺」，filmInfo 每次轮询都重排一条，UI 卡在
-   * 「合成中」。这个雷是母带/成片拆分那次埋的，一直被老项目遗留的
-   * export.mp4 挡着，直到第一个全新的无-BGM 项目才引爆。
-   *
-   * 条件：成片戳 done 且指纹对得上（= 当前输入没变），且母带在盘上。
+   * 加封面之前它是对的：无 BGM 时 buildFilm 不复制 export.mp4，成片直接
+   * 用 master.mp4。现在成片一定比母带多两帧封面，两者不再是同一个文件——
+   * 留着那条判断，所有无-BGM 的项目都会被判成"已就绪"，于是永远不去拼封面，
+   * 用户永远看不到这个功能生效。删掉它，让它们照常走一次几秒的拼接。
    */
-  if (r.film.bgmPath === null
-    && stamp !== null
-    && (stamp.status === undefined || stamp.status === 'done')
-    && stamp.fingerprint === fingerprint
-    && await reusableOutput(dir, MASTER_STAMP_FILE, FILM_MASTER_FILE, r.film.masterFingerprint) !== null) {
-    return { kind: 'ready', jobId }
-  }
 
   // 失败的正是【当前这份输入】→ 停在这儿等用户重试
   if (stamp?.status === 'error' && stamp.fingerprint === fingerprint) {
@@ -836,12 +862,13 @@ export async function downloadableFilm (
   if (mixed !== null) return mixed
 
   /*
-   * 【没选背景音乐时，成片就是母带】。那种情况下 buildFilm 不会去复制
-   * 一份字节完全相同的 export.mp4——500MB 的无谓拷贝。所以这里退一步
-   * 去问母带：只要母带的戳是 done，那份文件就是用户该拿到的成片。
+   * 【回落到母带】。加封面之前，没选 BGM 的项目不会复制一份 export.mp4
+   * （省 500MB），成片直接就是母带。现在成片一定带封面、一定是 export.mp4，
+   * 但盘上还留着一批那时候的项目——在它们重拼出带封面的成片之前，
+   * 这条回落让"下载"仍然可用（拿到的是没有封面的老片子，总好过 404）。
    *
-   * ⚠️ 顺序不能反：先问 export.mp4。有 BGM 的项目两个文件都在，
-   * 先问母带的话用户下到的是一条没有背景音乐的片子。
+   * ⚠️ 顺序不能反：先问 export.mp4。两个文件都在时，先问母带的话
+   * 用户下到的是一条没有背景音乐、也没有封面的片子。
    */
   const masterStamp = await readStamp(dir, MASTER_STAMP_FILE)
   if (masterStamp === null) return null

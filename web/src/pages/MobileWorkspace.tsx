@@ -10,6 +10,7 @@ import { ScriptEditor } from '../components/ScriptEditor'
 import { NameReplacePanel } from '../components/NameReplacePanel'
 import { VoicePanel } from '../components/VoicePanel'
 import { SubtitleHeight } from '../components/SubtitleHeight'
+import { CoverPanel } from '../components/CoverPanel'
 import { SubtitleList } from '../components/SubtitleList'
 import { BackgroundPanel, MusicPanel } from '../components/AssetPanel'
 import { BottomSheet } from '../components/mobile/BottomSheet'
@@ -225,6 +226,9 @@ export function MobileWorkspace () {
             在两个入口里各显示一次（之前两个抽屉长得一模一样就是这个原因）。 */}
         <div className="h-[46vh]"><SubtitleList withVoicePanel={false} /></div>
         <div className="mt-3 border-t border-line pt-3"><SubtitleHeight /></div>
+        {/* 封面标题也放「字幕」抽屉——它俩都是"片子上的字"，用户会在同一个
+            心智里找它；单开一个抽屉只会让底栏多一个用一次的图标 */}
+        <div className="mt-3 border-t border-line pt-3"><CoverPanel /></div>
       </BottomSheet>
 
       <BottomSheet open={sheet === 'background'} onClose={back} title={SHEET_TITLE.background}>

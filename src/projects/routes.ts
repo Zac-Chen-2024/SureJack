@@ -57,16 +57,26 @@ export function registerProjectRoutes (app: FastifyInstance, deps: Deps): void {
     name?: unknown; scriptText?: unknown; aspectRatio?: unknown
     bgmLibraryId?: unknown; bgmVolume?: unknown; subtitleMarginV?: unknown; subtitleFontSize?: unknown
     voiceName?: unknown; voiceRate?: unknown; voiceVolume?: unknown; voicePitch?: unknown
+    coverTitle?: unknown
   } }>(
     '/api/projects/:id', { preHandler: requireAuth }, async (req, reply) => {
       const patch: {
         name?: string; scriptText?: string; aspectRatio?: string
         bgmLibraryId?: string | null; bgmVolume?: number; subtitleMarginV?: number; subtitleFontSize?: number
         voiceName?: string; voiceRate?: number; voiceVolume?: number; voicePitch?: number
+        coverTitle?: string
       } = {}
       if (typeof req.body?.name === 'string') patch.name = req.body.name
       if (typeof req.body?.scriptText === 'string') patch.scriptText = req.body.scriptText
       if (typeof req.body?.aspectRatio === 'string') patch.aspectRatio = req.body.aspectRatio
+      /*
+       * 封面标题。空串是【有意义的值】——"跟着项目名走"，所以不过滤空。
+       * 截到 20 个字：再长的标题在 1080 宽的画面上会挤成一条看不清的线，
+       * 而 drawtext 不会自动换行（它只会把字画到画外去）。
+       */
+      if (typeof req.body?.coverTitle === 'string') {
+        patch.coverTitle = req.body.coverTitle.trim().slice(0, 20)
+      }
       /*
        * bgmLibraryId 的 null 是【有意义的值】——"不要 BGM"。所以不能像上面
        * 几个字段那样只认字符串就完事：null 必须原样传下去清库，而其余类型

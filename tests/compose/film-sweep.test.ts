@@ -206,33 +206,36 @@ describe('开机补合扫描', () => {
   })
 })
 
-describe('无 BGM 的成片 = 母带，filmInfo 必须认它', () => {
+describe('成片一定是 export.mp4（封面让它和母带不再是同一个文件）', () => {
   /*
-   * 母带/成片拆分之后，没选 BGM 的项目【不会】生成 export.mp4——成片就是
-   * master.mp4（省一份 500MB 拷贝）。downloadableFilm 有这条回落，但
-   * judgeFilm 一度只查 export.mp4，于是这类项目 filmInfo 永远报「合成中」、
-   * 每次轮询还重排一条，UI 卡死、队列空转。
+   * ⚠️ 这条断言【翻过一次面】，两次都是对的，只是前提变了。
    *
-   * 这个雷被所有老项目遗留的 export.mp4 挡着，直到第一个全新的无-BGM
-   * 项目（豪门Textest）才引爆。这条测试守住修复：无 export.mp4、只有母带，
-   * filmInfo 要报 ready，且【不能重排】。
+   * 加封面之前：没选 BGM 的项目不生成 export.mp4，成片就是 master.mp4
+   * （省一份 500MB 拷贝）。那时 judgeFilm 必须认这个回落，否则 filmInfo
+   * 永远报「合成中」、每次轮询还重排一条。
+   *
+   * 加封面之后：成片 = 封面两帧 + 正片，比母带多两帧，两者不可能是同一个
+   * 文件。要是还认那条回落，所有无-BGM 的项目都会被判成"已就绪"，于是
+   * 永远不去拼封面，用户永远看不到这个功能生效。
+   *
+   * 所以现在：只有母带、没有 export.mp4 → 必须去合（拼封面，几秒钟）。
    */
-  it('【只有母带、没有 export.mp4 → ready 且不重排】', async () => {
+  it('【只有母带、没有 export.mp4 → 要去拼封面】', async () => {
     const deps = q.deps(dataDir)
     const id = await makeReadyProject('无BGM成片')
     const dir = assetDir(USER, LIST, id)
     const r = resolveFilm(deps, USER, id)
     if (!r.ok) throw new Error('前置不成立：' + r.error)
 
-    // 造出 buildFilm 在无-BGM 时留下的盘面：母带 + 两个 done 戳，没有 export.mp4
     await writeFile(join(dir, FILM_MASTER_FILE), 'master-bytes')
     await writeStamp(dir, MASTER_STAMP_FILE, { fingerprint: r.film.masterFingerprint, status: 'done', jobId: 'j-m' })
     await writeStamp(dir, FILM_STAMP_FILE, { fingerprint: r.film.fingerprint, status: 'done', jobId: 'j-f' })
 
     const info = await filmInfo(deps, USER, id)
-    expect(info.state).toBe('ready')
-    // 【关键】没有触发重排——之前的 bug 就是每次都排一条
-    expect(q.enqueued).toEqual([])
+    expect(info.state).toBe('building')
+    // 2 条：背景轨预拼 + 成片本身（和这个文件里其它用例一致）。
+    // 成片那条会走【轻队列】——母带现成，只剩封面渲染 + concat copy。
+    expect(q.enqueued).toHaveLength(2)
   })
 
   it('【有 BGM 的项目仍认 export.mp4，不被母带回落误判】', async () => {
