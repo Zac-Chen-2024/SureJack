@@ -264,8 +264,12 @@ interface PipelineState {
   recomposeFilm: (projectId: string) => Promise<void>
   /** 中断正在进行的合成（排队中就摘掉，正在烧就杀 ffmpeg） */
   cancelFilm: (projectId: string) => Promise<void>
-  /** 所有项目的合成进度，projectId → {合成中, 进度}。给项目列表显示进度 */
-  filmProgress: Record<string, { composing: boolean; progress: number }>
+  /**
+   * 所有项目的成片状态，projectId → {合成中, 进度, 状态}。给项目列表用。
+   * state 必须带上——否则列表只能看配音状态，于是"合成被取消/失败"的项目
+   * 因为配音是好的就显示成「已完成」，和事实相反。
+   */
+  filmProgress: Record<string, { composing: boolean; progress: number; state: Film['state'] | 'cancelled' }>
   /** 轮询一批项目的合成状态，刷 filmProgress。永远不抛 */
   pollFilmProgress: (projectIds: string[]) => Promise<void>
   generateVoice: (projectId: string) => Promise<void>
@@ -442,10 +446,11 @@ export const usePipeline = create<PipelineState>((set, get) => ({
           // 首合的项目在列表上会被漏成"已完成"。合成中就是合成中。
           composing: f.state === 'building',
           progress: f.progress,
+          state: f.state,
         }] as const
       } catch { return null }
     }))
-    const next: Record<string, { composing: boolean; progress: number }> = {}
+    const next: Record<string, { composing: boolean; progress: number; state: Film['state'] | 'cancelled' }> = {}
     for (const e of entries) if (e) next[e[0]] = e[1]
     set({ filmProgress: next })
   },

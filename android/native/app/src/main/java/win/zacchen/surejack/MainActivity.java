@@ -216,9 +216,10 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
     }
 
     /**
-     * 给网页用的下载查询桥：返回当前这些下载的 JSON
-     * [{title, total, done, status}]，网页据此画"下载队列"悬浮框。
-     * 系统通知栏本来也有进度，但用户要在 App 里看得见。
+     * 给网页用的下载桥：查询进度 + 中断/删除。
+     *
+     * downloads() 返回 [{id, title, total, done, status}]，网页据此画
+     * "下载队列"悬浮框。系统通知栏本来也有进度，但用户要在 App 里看得见。
      */
     public class Bridge {
         @JavascriptInterface
@@ -242,15 +243,40 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
                     String status = st == DownloadManager.STATUS_SUCCESSFUL ? "done"
                             : st == DownloadManager.STATUS_FAILED ? "error"
                             : st == DownloadManager.STATUS_PAUSED ? "paused" : "running";
+                    long id = c.getLong(c.getColumnIndexOrThrow(DownloadManager.COLUMN_ID));
                     if (!first) sb.append(',');
                     first = false;
-                    sb.append("{\"title\":").append(jsonStr(title))
+                    sb.append("{\"id\":").append(id)
+                      .append(",\"title\":").append(jsonStr(title))
                       .append(",\"total\":").append(total)
                       .append(",\"done\":").append(done)
                       .append(",\"status\":\"").append(status).append("\"}");
                 }
             } catch (Exception ignored) { }
             return sb.append(']').toString();
+        }
+
+        /**
+         * 中断 / 删除一条下载。**连带文件一起删**。
+         *
+         * DownloadManager.remove() 一个方法把两件事都办了：正在下的会被停掉、
+         * 已下完的连文件一起删——因为这个文件本来就是它替我们创建的，它是主人。
+         * 我们只多做一步：把 id 从会话列表里摘掉，否则悬浮框还会一直查它。
+         *
+         * 【为什么不自己去 File.delete()】：Android 10 起是分区存储，
+         * 下载目录里的文件轮不到我们直接删；绕过 DownloadManager 只会拿到
+         * 一个权限异常，而它自己删是名正言顺的。
+         */
+        @JavascriptInterface
+        public boolean removeDownload(String idStr) {
+            long id;
+            try { id = Long.parseLong(idStr); } catch (Exception e) { return false; }
+            DownloadManager dm = (DownloadManager) getSystemService(Context.DOWNLOAD_SERVICE);
+            if (dm == null) return false;
+            boolean ok;
+            try { ok = dm.remove(id) > 0; } catch (Exception e) { ok = false; }
+            synchronized (downloadIds) { downloadIds.remove(Long.valueOf(id)); }
+            return ok;
         }
     }
 

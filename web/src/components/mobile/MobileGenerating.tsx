@@ -72,7 +72,7 @@ export function MobileGenerating ({ onBack, projectName }: { onBack: () => void;
               hint={queued ? '排队中，先拼背景…' : composing ? undefined : voiceReady ? '排队中…' : '等配音好了自动开始'}
               percent={composing && !queued ? progress : undefined}
             />
-            <p className="mt-7 text-center text-[11px] leading-relaxed text-ink-500">
+            <p className="mt-7 text-center text-[11px] leading-relaxed text-ink-400">
               合成要几分钟。可以返回列表继续建别的项目，进度在列表上也看得到；好了这里会自动出现成片。
             </p>
 
@@ -109,7 +109,7 @@ function Step ({ n, title, state, hint, percent }: {
       </span>
       <div className="min-w-0 flex-1 pt-1">
         <div className="flex items-baseline justify-between">
-          <span className={`text-sm font-semibold ${state === 'wait' ? 'text-ink-500' : 'text-ink-100'}`}>{title}</span>
+          <span className={`text-sm font-semibold ${state === 'wait' ? 'text-ink-400' : 'text-ink-100'}`}>{title}</span>
           {percent !== undefined && <span className="text-sm font-bold tabular-nums text-accent">{percent}%</span>}
         </div>
         {percent !== undefined ? (

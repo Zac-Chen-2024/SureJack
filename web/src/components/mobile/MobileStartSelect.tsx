@@ -52,7 +52,7 @@ export function MobileStartSelect ({ onBack, onPick }: {
         >
           <IconChevronLeft className="size-4" strokeWidth={2.2} />
         </button>
-        <span className="text-[13px] font-semibold text-ink-500">步骤 1 / 4</span>
+        <span className="text-[13px] font-semibold text-ink-400">步骤 1 / 4</span>
       </div>
 
       <h2 className="text-2xl font-extrabold tracking-tight text-ink-50">怎么开始？</h2>

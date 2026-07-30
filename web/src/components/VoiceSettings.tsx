@@ -229,7 +229,7 @@ function ParamSlider ({ label, value, range, onChange, ticks }: {
         style={{ accentColor: 'var(--color-accent)' }}
       />
       {ticks && (
-        <div className="mt-1.5 flex justify-between text-[10px] text-ink-500">
+        <div className="mt-1.5 flex justify-between text-[10px] text-ink-400">
           {ticks.map((t) => <span key={t}>{t}</span>)}
         </div>
       )}

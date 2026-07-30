@@ -5,7 +5,8 @@ import { spawn } from 'node:child_process'
 import { sendFileRange } from '../assets/storage.js'
 import { openUserDb, type Project } from '../db/user-db.js'
 import { getSession, requireAuth } from '../auth/session.js'
-import { downloadableFilm, playableMaster, enqueueFilm, filmInfo, resolveFilm, type FilmDeps } from '../compose/film.js'
+import { downloadableFilm, playableMaster, enqueueFilm, filmInfo, resolveFilm, FILM_STAMP_FILE, type FilmDeps } from '../compose/film.js'
+import { writeStamp } from '../compose/stamp.js'
 
 type Deps = FilmDeps
 
@@ -71,6 +72,15 @@ export function registerExportRoutes (app: FastifyInstance, deps: Deps): void {
       reply.header('Content-Type', 'video/mp4')
       reply.header('Content-Disposition',
         `attachment; filename*=UTF-8''${encodeURIComponent(`${project.name}.mp4`)}`)
+      /*
+       * 【必须带 Content-Length】。只丢一个流出去的话 Fastify 走 chunked，
+       * 响应里没有总长度 → 安卓 DownloadManager 把 total 记成 -1 →
+       * 下载队列里"已下 30MB / —"、进度条永远 0%（真机上就是这样）。
+       * 文件就躺在盘上，长度是白拿的，没有不给的理由。
+       * Accept-Ranges 顺手给上：断了能续传，不用整条重来。
+       */
+      reply.header('Content-Length', statSync(path).size)
+      reply.header('Accept-Ranges', 'bytes')
       return reply.send(createReadStream(path))
     })
 
@@ -140,6 +150,17 @@ export function registerExportRoutes (app: FastifyInstance, deps: Deps): void {
       const stopped = queue.cancel(job.id)
       if (stopped) {
         withUserDb(name, (db) => db.updateJob(job.id, { status: 'cancelled', progress: 0 }))
+        /*
+         * 【必须把"已取消"写进指纹文件】。只停队列不落盘的话，下一次状态
+         * 轮询发现"该有成片却没有"，立刻又排一条——取消等于没点。
+         * 指纹一起写：用户改了任何输入就会重排，符合直觉。
+         */
+        const r = resolveFilm(deps, name, req.params.id)
+        if (r.ok) {
+          await writeStamp(r.film.dir, FILM_STAMP_FILE, {
+            fingerprint: r.film.fingerprint, status: 'cancelled', jobId: job.id,
+          })
+        }
       }
       // 没停到什么也回 200：用户想要的结果（现在没有在跑）已经成立
       return { cancelled: stopped, jobId: job.id }
@@ -155,7 +176,7 @@ export function registerExportRoutes (app: FastifyInstance, deps: Deps): void {
    * 首次请求用 ffmpeg 从母带抓一帧存成 jpg，之后直接命中磁盘缓存。
    * 文件名带母带版本，母带重烧后自然换新（旧的留着无妨，下次不会被引用）。
    */
-  app.get<{ Params: { id: string } }>(
+  app.get<{ Params: { id: string }; Querystring: { v?: string } }>(
     '/api/projects/:id/film/poster.jpg', { preHandler: requireAuth }, async (req, reply) => {
       const name = getSession(req)!
       const project = withUserDb(name, (db) => db.getProject(req.params.id))
@@ -183,8 +204,13 @@ export function registerExportRoutes (app: FastifyInstance, deps: Deps): void {
           return reply.code(404).send({ error: '封面暂不可用' })
         }
       }
-      // 内容随母带版本变，前端 URL 带 ?v=，可以放心长缓存
-      reply.header('Cache-Control', 'public, max-age=86400')
+      /*
+       * 带 ?v=<母带版本> 的请求可以放心长缓存（内容随版本变，版本变 URL 就变）。
+       * 【不带 v 的不能缓存】：预览过渡屏在还不知道版本时就要先把第一帧显示
+       * 出来，只能请求裸 URL——那条要是也缓存一天，重烧之后它会拿旧封面。
+       */
+      const versioned = typeof (req.query as { v?: string })?.v === 'string'
+      reply.header('Cache-Control', versioned ? 'public, max-age=86400' : 'no-cache')
       return reply.type('image/jpeg').send(readFileSync(posterPath))
     })
 

@@ -173,6 +173,34 @@ export function IconSubtitles (props: IconProps) {
   )
 }
 
+/** 筛选——漏斗。列表页「最近」旁边那个按钮 */
+export function IconFilter (props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M4 5h16l-6.4 7.4V19l-3.2-1.8v-4.8L4 5Z" />
+    </Svg>
+  )
+}
+
+/** 搜索——放大镜。点一下拉长成搜索框 */
+export function IconSearch (props: IconProps) {
+  return (
+    <Svg {...props}>
+      <circle cx="10.5" cy="10.5" r="6.5" />
+      <path d="m15.5 15.5 4.5 4.5" />
+    </Svg>
+  )
+}
+
+/** 关掉（搜索框、悬浮层）*/
+export function IconClose (props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M6 6l12 12M18 6 6 18" />
+    </Svg>
+  )
+}
+
 /** 下载成片 */
 export function IconDownload (props: IconProps) {
   return (

@@ -23,7 +23,7 @@ import { SwipeBack } from '../components/mobile/SwipeBack'
 import { BUILD_SHA, buildTimeLocal } from '../build-info'
 import {
   IconTextLines, IconMic, IconTypeTool, IconFrame, IconMusic,
-  IconChevronLeft, IconChevronDown, IconPreview,
+  IconChevronLeft, IconChevronDown, IconPreview, IconLoader, IconDownload,
 } from '../components/ui/Icon'
 
 /**
@@ -113,6 +113,15 @@ export function MobileWorkspace () {
 
   const masterReady = usePipeline((s) => s.film?.masterReady === true)
   const filmState = usePipeline((s) => s.film?.state ?? null)
+  /*
+   * 【成片状态"还没问出来"是第四种状态，不是"没有"】。
+   * select() 会把 film 清成 null，随后才去 GET /film。网络慢的地方
+   * （国外用户就是这么撞上的）这个窗口能有一两秒——期间 masterReady 是
+   * false、inProgress 也是 false，于是一个明明已完成的项目点进去先给人
+   * 看一屏「还没有成片 / 开始写文案」，这是彻头彻尾的假话。
+   * 未知就老老实实显示封面 + 转圈，等问出来再决定。
+   */
+  const filmUnknown = usePipeline((s) => s.film === null)
   // 流程在跑（配音中/合成中/出错）→ 盖进度蒙层，而不是"还没成片"的空态
   const inProgress = !!project && (
     project.ttsState === 'generating' || project.ttsState === 'error'
@@ -164,7 +173,9 @@ export function MobileWorkspace () {
               ? <MobileFilmPlayer onBack={back} />
               : inProgress
                 ? <MobileGenerating onBack={back} projectName={project.name} />
-                : <EmptyPreview onBack={back} projectName={project.name} onWriteScript={() => push({ k: 'sheet', name: 'script' })} />}
+                : filmUnknown
+                  ? <PreviewLoading onBack={back} projectId={project.id} projectName={project.name} />
+                  : <EmptyPreview onBack={back} projectName={project.name} onWriteScript={() => push({ k: 'sheet', name: 'script' })} />}
 
             <nav
               className="absolute inset-x-0 bottom-0 z-30 flex justify-around px-2.5 pt-3.5"
@@ -226,6 +237,65 @@ export function MobileWorkspace () {
 
       <AppUpdateBanner />
       <VersionBadge />
+    </div>
+  )
+}
+
+/**
+ * 成片状态还没问出来时的过渡屏：**直接把成片第一帧铺满**。
+ *
+ * 封面接口（/film/poster.jpg）只在母带确实躺在盘上时才返回图片，所以
+ * 「图加载成功」本身就是一个可靠的信号：这个项目有成片。据此才点亮右上角
+ * 的下载键——不猜、不画一个点下去会 404 的按钮。
+ *
+ * 图没出来的那一小会儿只有一个转圈，不写任何"还没有成片"之类的话：
+ * 状态未知时说出来的判断，有一半概率是错的。
+ */
+function PreviewLoading ({ onBack, projectId, projectName }: {
+  onBack: () => void; projectId: string; projectName: string
+}) {
+  const [hasFrame, setHasFrame] = useState(false)
+  const [noFrame, setNoFrame] = useState(false)
+  return (
+    <div className="absolute inset-0 bg-black">
+      <img
+        src={`/api/projects/${projectId}/film/poster.jpg`}
+        alt=""
+        onLoad={() => setHasFrame(true)}
+        onError={() => setNoFrame(true)}
+        className="absolute inset-0 size-full object-contain object-top sj-fade"
+        style={{ opacity: hasFrame ? 1 : 0, transition: 'opacity 260ms ease' }}
+      />
+
+      {!hasFrame && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2.5">
+          <IconLoader className="size-6 animate-spin text-ink-600" />
+          {/* 封面取不到（还没合出来，或网络不通）也只说"在读"，不下结论 */}
+          <span className="text-xs text-ink-400">{noFrame ? '正在读取项目…' : '正在载入预览…'}</span>
+        </div>
+      )}
+
+      <div className="absolute inset-x-0 z-20 flex items-center justify-between px-4" style={{ top: 'calc(env(safe-area-inset-top, 0px) + 10px)' }}>
+        <button
+          type="button"
+          onClick={onBack}
+          className="flex items-center gap-2 rounded-full border border-white/15 bg-black/65 px-3.5 py-2 text-sm font-semibold text-white"
+        >
+          <IconChevronLeft className="size-4" strokeWidth={2.2} />
+          <span className="max-w-[46vw] truncate">{projectName}</span>
+          <IconChevronDown className="size-3.5 opacity-70" strokeWidth={2} />
+        </button>
+
+        {hasFrame && (
+          <a
+            href={`/api/projects/${projectId}/film/download`}
+            aria-label="下载视频"
+            className="flex size-10 items-center justify-center rounded-full bg-accent text-ink-950 shadow-lg shadow-black/30"
+          >
+            <IconDownload className="size-5" strokeWidth={2.2} />
+          </a>
+        )}
+      </div>
     </div>
   )
 }

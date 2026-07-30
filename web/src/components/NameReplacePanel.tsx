@@ -105,7 +105,7 @@ export function NameReplacePanel () {
                     ? <span className="text-[11px] text-accent">
                         已复查{review.removeLines.length > 0 ? ` · 又清掉 ${review.removeLines.length} 处` : ' · 没有漏网'}
                       </span>
-                    : <span className="text-[11px] text-ink-500">未复查</span>}
+                    : <span className="text-[11px] text-ink-400">未复查</span>}
                 <button
                   type="button"
                   disabled={busy}
@@ -134,7 +134,7 @@ export function NameReplacePanel () {
                     <span className={`shrink-0 rounded-md border px-1.5 py-0.5 text-[10px] font-semibold ${ROLE[c.role].cls}`}>
                       {ROLE[c.role].label}
                     </span>
-                    <span className="shrink-0 text-xs text-ink-500 line-through">{c.original}</span>
+                    <span className="shrink-0 text-xs text-ink-400 line-through">{c.original}</span>
                     <svg viewBox="0 0 24 24" className="size-3 shrink-0 text-ink-600" fill="none" stroke="currentColor" strokeWidth={2}><path d="M5 12h14M13 6l6 6-6 6" /></svg>
                     <input
                       value={c.replacement}

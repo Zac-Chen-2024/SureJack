@@ -22,7 +22,7 @@
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
-export type StampStatus = 'building' | 'done' | 'error'
+export type StampStatus = 'building' | 'done' | 'error' | 'cancelled'
 
 export interface Stamp {
   fingerprint: string
@@ -55,7 +55,7 @@ export async function readStamp (dir: string, file: string): Promise<Stamp | nul
      * 那是个**可验证**的判断（后面还要 stat 文件、比指纹）；而保留一个
      * 谁也不认识的字符串，只会让下游多一条没人测过的分支。
      */
-    const known = status === 'building' || status === 'done' || status === 'error'
+    const known = status === 'building' || status === 'done' || status === 'error' || status === 'cancelled'
     return {
       fingerprint,
       ...(known ? { status } : {}),

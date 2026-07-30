@@ -69,6 +69,9 @@ export function MobileFilmPlayer ({ onBack }: { onBack: () => void }) {
         onPlay={pb.handlePlay}
         onWaiting={pb.handleWaiting}
         onPlaying={pb.handlePlaying}
+        onProgress={(e) => pb.onProgress(e.currentTarget)}
+        onCanPlay={pb.onCanPlay}
+        onLoadedData={(e) => pb.onProgress(e.currentTarget)}
       />
 
       {/* 背景音乐：另叠一条，接进 Web Audio 图混音（音量走 gain，iOS 才有效）。
@@ -117,8 +120,29 @@ export function MobileFilmPlayer ({ onBack }: { onBack: () => void }) {
         </a>
       </div>
 
+      {/* ── 视频加载中：转圈 + 已缓冲百分比 ──────────────────────────
+          【必须给百分比】。片子几十 MB，慢网络下点开就是一片黑，用户分不清
+          是在下载还是坏了。有个数字在动，等待才是等待而不是故障。 */}
+      {(!pb.metaReady || pb.buffering) && !pb.composing && (
+        <div className="pointer-events-none absolute left-1/2 top-[44%] z-20 flex w-[62%] max-w-[240px] -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-2.5">
+          <IconLoader className="size-7 animate-spin text-white/85" />
+          <div className="text-[13px] font-semibold text-white/90">
+            {pb.metaReady ? '视频缓冲中' : '视频加载中'}
+            {/* 【0% 也要写出来】。省掉它的话最该说明情况的头几秒反而什么都没有，
+                看着像卡死；有个 0 在那儿，用户至少知道系统在数着 */}
+            <span className="ml-1.5 tabular-nums">{pb.bufferedPct}%</span>
+          </div>
+          <div className="h-1 w-full overflow-hidden rounded-full bg-white/20">
+            <div
+              className="h-full rounded-full bg-accent"
+              style={{ width: `${pb.bufferedPct}%`, transition: 'width 400ms cubic-bezier(0.22,1,0.36,1)' }}
+            />
+          </div>
+        </div>
+      )}
+
       {/* ── 中央播放键：仅暂停时出现 ─────────────────────────────────── */}
-      {!pb.playing && (
+      {!pb.playing && pb.metaReady && !pb.buffering && (
         <div className="pointer-events-none absolute left-1/2 top-[44%] z-20 -translate-x-1/2 -translate-y-1/2">
           <div className="flex size-[74px] items-center justify-center rounded-full border-[1.5px] border-white/35 bg-black/50">
             <IconPlay className="ml-1 size-8 fill-white text-white" />
@@ -144,17 +168,26 @@ export function MobileFilmPlayer ({ onBack }: { onBack: () => void }) {
         style={{ bottom: 'calc(env(safe-area-inset-bottom, 0px) + 120px)' }}
       >
         <span>{fmt(pb.cur)}</span>
-        <input
-          type="range"
-          min={0}
-          max={Math.max(pb.dur, 0.01)}
-          step={0.01}
-          value={pb.cur}
-          onChange={(e) => pb.seekTo(Number(e.target.value))}
-          aria-label="播放进度"
-          className="h-1 min-w-0 flex-1 cursor-pointer appearance-none rounded-full bg-white/25"
-          style={{ accentColor: 'var(--color-accent)' }}
-        />
+        {/* 已缓冲垫在滑杆下面：能一眼看出"还能往前拖到哪儿" */}
+        <span className="relative flex min-w-0 flex-1 items-center">
+          <span className="pointer-events-none absolute inset-x-0 h-1 overflow-hidden rounded-full bg-white/25">
+            <span
+              className="block h-full rounded-full bg-white/35"
+              style={{ width: `${pb.bufferedPct}%`, transition: 'width 400ms ease' }}
+            />
+          </span>
+          <input
+            type="range"
+            min={0}
+            max={Math.max(pb.dur, 0.01)}
+            step={0.01}
+            value={pb.cur}
+            onChange={(e) => pb.seekTo(Number(e.target.value))}
+            aria-label="播放进度"
+            className="relative h-1 w-full cursor-pointer appearance-none rounded-full bg-transparent"
+            style={{ accentColor: 'var(--color-accent)' }}
+          />
+        </span>
         <span>{fmt(pb.dur)}</span>
       </div>
 

@@ -59,6 +59,17 @@ export interface FilmPlayback {
   handlePlaying: () => void
   /** <audio> 的 onLoadedMetadata：接进 Web Audio 图、上音量，播放中就对齐续上 */
   onBgmReady: () => void
+
+  /* ── 缓冲状态：给"视频加载中 xx%"用 ──────────────────────────────── */
+  /** 元数据还没到（连总时长都不知道），这时候连进度条都是假的 */
+  metaReady: boolean
+  /** 正卡在缓冲上（onWaiting 到 onPlaying 之间） */
+  buffering: boolean
+  /** 从播放头往后已经缓冲到哪儿了，占总时长的百分比 0–100 */
+  bufferedPct: number
+  /** <video> 的 onProgress / onCanPlay：刷新已缓冲区间 */
+  onProgress: (v: HTMLVideoElement) => void
+  onCanPlay: () => void
 }
 
 /** 漂移超过这么多秒才硬拉回——低于它别动，频繁 set currentTime 会有咔哒声 */
@@ -187,14 +198,34 @@ export function useFilmPlayback (
       if (Math.abs(b.currentTime - expected) > DRIFT_TOLERANCE) b.currentTime = expected
     }
   }
+  /*
+   * 【缓冲要有可见的量】。片子几十 MB，在网络慢的地方点开就是一片黑，
+   * 用户不知道是"在下"还是"坏了"——一个百分比就能把这两件事分开。
+   * buffered 是一组区间，只认【盖住当前播放头】的那一段：别的区间再长
+   * 也不代表马上能接着播。
+   */
+  const [buffering, setBuffering] = useState(false)
+  const [bufferedPct, setBufferedPct] = useState(0)
+  const onProgress = (v: HTMLVideoElement): void => {
+    const total = v.duration
+    if (!Number.isFinite(total) || total <= 0) return
+    let end = 0
+    for (let i = 0; i < v.buffered.length; i++) {
+      if (v.buffered.start(i) <= v.currentTime + 0.25) end = Math.max(end, v.buffered.end(i))
+    }
+    setBufferedPct(Math.min(100, Math.round((end / total) * 100)))
+  }
+  const onCanPlay = (): void => { setBuffering(false) }
+
   const handlePlay = (): void => { setPlaying(true) }
   const handleStop = (): void => { setPlaying(false); bgmRef.current?.pause() }
   // 视频缓冲：BGM 先停，别让它在黑屏时独自往前跑
-  const handleWaiting = (): void => { bgmRef.current?.pause() }
+  const handleWaiting = (): void => { setBuffering(true); bgmRef.current?.pause() }
   // 缓冲结束：对齐当前视频位置再续上（仅当我们本就该在播）
   const handlePlaying = (): void => {
     const v = videoRef.current, b = bgmRef.current
     setPlaying(true)
+    setBuffering(false)
     if (v && b) { ensureGraph(); applyVolume(); syncBgm(v.currentTime); void b.play() }
   }
   const onBgmReady = (): void => {
@@ -208,5 +239,6 @@ export function useFilmPlayback (
     videoRef, bgmRef, playing, cur, dur, src, bgmSrc, poster, composing, progress,
     toggle, seekTo, onLoadedMeta: setDur, onTimeUpdate,
     handlePlay, handleStop, handleWaiting, handlePlaying, onBgmReady,
+    metaReady: dur > 0, buffering, bufferedPct, onProgress, onCanPlay,
   }
 }

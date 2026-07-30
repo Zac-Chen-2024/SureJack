@@ -712,6 +712,15 @@ async function judgeFilm (
     return { kind: 'failed', jobId, error: stamp.error ?? '合成失败' }
   }
 
+  /*
+   * 【用户主动取消的，也要停住】。不写这一条的话：取消 → 盘上没有成片 →
+   * 下面返回 missing → filmInfo 立刻又排一条 → 等于取消根本没生效。
+   * 指纹一起比：用户改了任何输入（指纹变了）就当他想重来，自然会重排。
+   */
+  if (stamp?.status === 'cancelled' && stamp.fingerprint === fingerprint) {
+    return { kind: 'failed', jobId, error: '已取消合成。改动任何设置或点重新合成即可重来。' }
+  }
+
   return { kind: 'missing' }
 }
 

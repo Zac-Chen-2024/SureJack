@@ -153,6 +153,14 @@ button, input, textarea, a, [role="button"], .interactive {
   box-shadow: 0 0 0 3px rgba(240, 180, 41, 0.15);
 }
 
+/*
+ * 胶囊搜索框：焦点环挂到外层胶囊上。
+ * input 自己拿焦点时，上面那条全局 box-shadow 会照着它【方形】的盒子画一圈，
+ * 于是圆胶囊里套出一个方框——截图里那块难看的直角就是它。
+ */
+.sj-capsule:focus-within { box-shadow: 0 0 0 3px rgba(240, 180, 41, 0.15); }
+.sj-capsule input:focus-visible { box-shadow: none; }
+
 /* 大面积书写表面：焦点只是边框极淡地提亮，光晕几乎察觉不到 */
 .surface-focus-soft:focus-visible {
   box-shadow:
@@ -169,6 +177,12 @@ button, input, textarea, a, [role="button"], .interactive {
 .sj-screen-back { animation: sj-screen-in-back 0.26s cubic-bezier(0.32, 0.72, 0, 1) }
 
 /* 开屏"摇一摇"触发后，问候语抖一下 */
+/* 悬浮框弹出：从锚点(右上)轻微放大 + 落下，180ms，别做成弹簧那种夸张感 */
+@keyframes sj-pop {
+  from { opacity: 0; transform: scale(0.96) translateY(-4px) }
+  to   { opacity: 1; transform: scale(1) translateY(0) }
+}
+
 @keyframes sj-wobble {
   0%, 100% { transform: translateX(0) }
   15% { transform: translateX(-7px) rotate(-1deg) }
@@ -193,6 +207,13 @@ button, input, textarea, a, [role="button"], .interactive {
    */
   .sj-fade { transition-duration: revert !important; }
   .animate-spin { animation-duration: 1s !important; }
+  /*
+   * 【刻意设计的小过渡也放行】。搜索框拉开、悬浮框弹出这类几十像素的
+   * 局部变化，是在告诉用户"这个东西是从那儿来的"——被压成 0.01ms 就成了
+   * 生硬的瞬移，用户反馈"动画不丝滑"多半就是撞上了这条。
+   * reduce 真正要防的是整屏位移/视差，那些一条都没豁免。
+   */
+  .sj-motion, .sj-motion * { transition-duration: revert !important; animation-duration: revert !important; }
 }
 
 /* 滚动条也要克制——默认的亮色滚动条会破坏深色沉浸感 */

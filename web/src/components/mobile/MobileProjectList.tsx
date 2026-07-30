@@ -1,10 +1,10 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useProjects, type Project } from '../../store/projects'
 import { usePipeline } from '../../store/pipeline'
 import { AccountMenu } from '../AccountMenu'
 import { PaletteToggle } from '../PaletteToggle'
 import { DownloadPanel } from './DownloadPanel'
-import { IconPlus, IconLoader, IconTrash, IconMore } from '../ui/Icon'
+import { IconPlus, IconLoader, IconTrash, IconMore, IconFilter, IconSearch, IconClose } from '../ui/Icon'
 
 /**
  * 手机版项目列表（概念图 Screen 0）：**我的项目 + 一步新建**。
@@ -13,15 +13,26 @@ import { IconPlus, IconLoader, IconTrash, IconMore } from '../ui/Icon'
  * + 右侧状态徽标（草稿 / 合成中 / 已完成）。状态是这屏的信息核心——它让
  * 用户不点进去就知道每个项目卡在哪一步。
  *
+ * 版式分三层，从上到下【固定 → 固定 → 可滚】：
+ *   ① 标题栏（下载队列 / 配色 / 账户）
+ *   ② 新建项目按钮
+ *   ③「最近」这行（筛选 + 搜索）+ 项目列表 ← 只有这层滚动、下拉刷新
+ * 新建按钮【故意留在滚动区外】：它是常驻入口，下拉刷新时跟着被拽下去会散。
+ *
  * 桌面用的是顶部的项目切换下拉；手机屏够高，直接铺成一整屏列表更好扫。
  */
 
-/** 项目此刻处在哪一步。合成进度来自列表轮询（filmProgress） */
-type Status = 'draft' | 'voicing' | 'render' | 'done'
+/** 项目此刻处在哪一步。成片状态来自列表轮询（filmProgress） */
+type Status = 'draft' | 'voicing' | 'render' | 'failed' | 'done'
 
-function statusOf (p: Project, composing: boolean): Status {
-  if (composing) return 'render'
+function statusOf (p: Project, film?: { composing: boolean; state: string }): Status {
+  if (film?.composing) return 'render'
   if (p.ttsState === 'generating') return 'voicing'
+  /*
+   * 【失败/取消必须盖过"配音已就绪"】。合成被取消或报错时配音本身还是好的，
+   * 只看 ttsState 就会显示成「已完成」——和事实相反，用户会以为片子能下载。
+   */
+  if (p.ttsState === 'error' || film?.state === 'error') return 'failed'
   if (p.ttsState === 'ready') return 'done'
   return 'draft'
 }
@@ -32,6 +43,7 @@ const STATUS_STYLE: Record<Status, { label: string; cls: string }> = {
   // 强调色留给"完成"。
   voicing: { label: '配音中', cls: 'text-[#e0a82e] bg-[#e0a82e]/12' },
   render: { label: '合成中', cls: 'text-[#e0a82e] bg-[#e0a82e]/12' },
+  failed: { label: '未完成', cls: 'text-danger bg-danger/12' },
   draft: { label: '草稿', cls: 'text-ink-300 bg-ink-800' },
 }
 
@@ -48,16 +60,36 @@ function summaryOf (p: Project): string {
   return '空项目 · 从这里开始'
 }
 
+/** 下拉多远算"要刷新"，以及指示条最多长到多高 */
+const PULL_THRESHOLD = 56
+const PULL_MAX = 76
+
 export function MobileProjectList ({ onOpen, onNew }: { onOpen: (id: string) => void; onNew: () => void }) {
   const items = useProjects((s) => s.items)
   const remove = useProjects((s) => s.remove)
   const reload = useProjects((s) => s.load)
   const filmProgress = usePipeline((s) => s.filmProgress)
 
+  // ── 筛选（还没做）/ 搜索（放大镜点开展成输入框）─────────────────
+  const [query, setQuery] = useState('')
+  const [searching, setSearching] = useState(false)
+  const [filterHint, setFilterHint] = useState(false)
+  const searchRef = useRef<HTMLInputElement>(null)
+  useEffect(() => { if (searching) searchRef.current?.focus() }, [searching])
+
+  const shown = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    if (!q) return items
+    // 名字和文案都搜——用户常常只记得片子里说了啥，不记得自己起的名字
+    return items.filter((p) => p.name.toLowerCase().includes(q)
+      || (p.scriptText ?? '').toLowerCase().includes(q))
+  }, [items, query])
+
   /*
    * 【下拉刷新】。列表本来每 5 秒自动刷，但用户想"立刻知道现在怎么样了"时
    * 需要一个自己能触发的动作——干等着刷新是最让人不安的状态。
    * 只在已经滚到最顶(scrollTop<=0)时起手，否则会和正常的向下滚动打架。
+   * 位移打 0.4 的阻尼并封顶，手感像原生而不是被手指拖着走。
    */
   const scrollRef = useRef<HTMLDivElement>(null)
   const pullStart = useRef<number | null>(null)
@@ -66,80 +98,184 @@ export function MobileProjectList ({ onOpen, onNew }: { onOpen: (id: string) => 
 
   async function doRefresh () {
     setRefreshing(true)
+    setPull(0)
     try { await reload() } finally {
-      setRefreshing(false)
-      setPull(0)
+      // 让"正在刷新"至少露一下脸；本地请求太快，一闪而过会像没反应
+      setTimeout(() => setRefreshing(false), 420)
     }
   }
+
+  const ready = pull >= PULL_THRESHOLD
+  const dragging = pullStart.current !== null
 
   return (
     <div
       className="absolute inset-0 flex flex-col overflow-hidden bg-ink-950"
       style={{ paddingTop: 'calc(env(safe-area-inset-top, 0px) + 12px)' }}
     >
-      {/* ── 标题栏 ─────────────────────────────────────────────────── */}
+      {/* ── ① 标题栏（固定）───────────────────────────────────────── */}
       <div className="flex shrink-0 items-center justify-between px-5 pb-4">
         <h2 className="text-2xl font-extrabold tracking-tight text-ink-50">我的项目</h2>
         <div className="flex items-center gap-1">
-          {/* 下载队列：挨着账户头像，点开是进度悬浮框（只在安卓 App 里出现） */}
+          {/* 下载队列：挨着账户头像，点开是进度悬浮框（安卓 App 内可用） */}
           <DownloadPanel />
           <PaletteToggle />
           <AccountMenu align="down-right" />
         </div>
       </div>
 
-      {/* 下拉刷新的提示条：跟着手指下拉长出来 */}
-      {(pull > 0 || refreshing) && (
-        <div
-          className="flex shrink-0 items-center justify-center gap-1.5 overflow-hidden text-[11px] text-ink-400 transition-[height]"
-          style={{ height: refreshing ? 28 : Math.min(pull, 56) }}
-        >
-          {refreshing
-            ? <><IconLoader className="size-3.5 animate-spin" />正在刷新…</>
-            : pull > 48 ? '松手刷新' : '下拉刷新'}
-        </div>
-      )}
-
-      <div
-        ref={scrollRef}
-        className="min-h-0 flex-1 overflow-y-auto px-5 pb-6"
-        onTouchStart={(e) => {
-          if ((scrollRef.current?.scrollTop ?? 0) <= 0) pullStart.current = e.touches[0]!.clientY
-        }}
-        onTouchMove={(e) => {
-          if (pullStart.current === null) return
-          const d = e.touches[0]!.clientY - pullStart.current
-          setPull(d > 0 ? d * 0.5 : 0)
-        }}
-        onTouchEnd={() => {
-          const shouldRefresh = pull > 48
-          pullStart.current = null
-          if (shouldRefresh) void doRefresh()
-          else setPull(0)
-        }}
-      >
-        {/* ── 新建：进引导页（填名+文案→分析人名→确认→生成）─────────── */}
+      {/* ── ② 新建项目（固定，下拉刷新时不动）─────────────────────── */}
+      {/* pb 给得比标题栏大：这里是"操作区"和"内容区"的分界，间距就是那道界 */}
+      <div className="shrink-0 px-5 pb-8">
         <button
           type="button"
           onClick={onNew}
-          className="mb-5 flex w-full items-center justify-center gap-2.5 rounded-2xl bg-accent py-4 text-[15px] font-extrabold text-ink-950 transition-colors hover:bg-accent-dim"
+          className="flex w-full items-center justify-center gap-2.5 rounded-2xl bg-accent py-4 text-[15px] font-extrabold text-ink-950 transition-colors hover:bg-accent-dim"
         >
           <IconPlus className="size-5" strokeWidth={2.4} />
           新建项目
         </button>
+      </div>
 
-        <div className="mb-3 px-0.5 text-xs font-bold uppercase tracking-wider text-ink-500">最近</div>
+      {/* ── ③「最近」+ 筛选 / 搜索（固定，和列表同属下半区）───────── */}
+      {/*
+       * 【这行上下都要留白，且上大下小】。它是一条分隔带，不是列表的第一行：
+       * 上面(32px)把它和"新建项目"这个操作区推开，下面(20px)小一点——
+       * 留白不等宽，它才会读成"下面这堆东西的标题"，而不是飘在中间无所属。
+       */}
+      <div className="mb-5 flex h-9 shrink-0 items-center gap-1.5 px-5">
+        <span className="shrink-0 text-xs font-bold uppercase tracking-wider text-ink-400">最近</span>
 
-        {items.length === 0 ? (
-          <p className="px-1 py-8 text-center text-sm text-ink-400">还没有项目，点上面新建一个。</p>
+        {/* 筛选：功能还没做，就明说，不摆一个装样子的按钮 */}
+        <button
+          type="button" aria-label="筛选"
+          onClick={() => { setFilterHint(true); setTimeout(() => setFilterHint(false), 2400) }}
+          className="flex size-7 shrink-0 items-center justify-center rounded-lg text-ink-400 transition-colors hover:bg-ink-850 hover:text-ink-200"
+        >
+          <IconFilter className="size-4" />
+        </button>
+        {filterHint && !searching && (
+          <span className="truncate text-[11px] text-[#e0a82e]">我还没开发呢，以后再开发</span>
+        )}
+
+        {/*
+         * 【搜索是"原地拉开"，不是换一行】。放大镜这颗按钮本身长成胶囊：
+         * 宽度 28px → 半行，只动 width 一个属性（避免布局抖动），
+         * 输入框在拉开过程中淡入。这样视觉上是同一个东西展开了，
+         * 而不是一个控件消失、另一个凭空出现。
+         */}
+        <div
+          className="sj-motion sj-capsule ml-auto flex h-8 shrink-0 items-center overflow-hidden rounded-full border bg-ink-850"
+          style={{
+            width: searching ? '52%' : 28,
+            borderColor: searching ? 'var(--color-line)' : 'transparent',
+            backgroundColor: searching ? undefined : 'transparent',
+            transition: 'width 340ms cubic-bezier(0.22,1,0.36,1), background-color 240ms ease, border-color 240ms ease',
+          }}
+        >
+          <button
+            type="button" aria-label={searching ? '搜索' : '打开搜索'}
+            onClick={() => setSearching(true)}
+            className={`flex size-7 shrink-0 items-center justify-center rounded-full text-ink-400 transition-colors ${searching ? '' : 'hover:bg-ink-850 hover:text-ink-200'}`}
+          >
+            <IconSearch className="size-4" />
+          </button>
+          <input
+            ref={searchRef}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="搜名字或文案"
+            tabIndex={searching ? 0 : -1}
+            className="min-w-0 flex-1 bg-transparent pr-1 text-xs text-ink-50 caret-accent outline-none placeholder:text-ink-600"
+            style={{
+              // 比宽度动画晚一点点淡入，等胶囊拉开了字才出现，不然会挤在一起
+              opacity: searching ? 1 : 0,
+              transition: 'opacity 200ms ease 120ms',
+            }}
+          />
+          {searching && (
+            <button
+              type="button" aria-label="关闭搜索"
+              onClick={() => { setSearching(false); setQuery('') }}
+              className="mr-0.5 flex size-6 shrink-0 items-center justify-center rounded-full text-ink-400 transition-colors hover:bg-ink-800 hover:text-ink-100"
+            >
+              <IconClose className="size-3.5" />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* 下拉刷新指示：长在列表正上方，只把下半区顶开，新建按钮不受影响 */}
+      <div
+        className="flex shrink-0 items-center justify-center overflow-hidden"
+        style={{
+          height: refreshing ? 30 : Math.min(pull, PULL_MAX),
+          // 松手/开始刷新时才补一段回弹动画；手指还在拖的时候必须跟手，不能有过渡
+          transition: dragging ? 'none' : 'height 300ms cubic-bezier(0.22,1,0.36,1)',
+        }}
+      >
+        {refreshing ? (
+          <span className="flex items-center gap-1.5 text-[11px] font-medium text-accent">
+            <IconLoader className="size-3.5 animate-spin" />正在刷新
+          </span>
+        ) : pull > 6 ? (
+          <span
+            className="flex items-center gap-1.5 text-[11px]"
+            style={{
+              // 越拉越清晰：到阈值时刚好完全不透明，是个连续的"快好了"信号
+              opacity: Math.min(1, pull / PULL_THRESHOLD),
+              color: ready ? 'var(--color-accent)' : 'var(--color-ink-400)',
+            }}
+          >
+            <svg
+              viewBox="0 0 24 24" className="size-3.5" fill="none" stroke="currentColor"
+              strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"
+              style={{
+                // 箭头随下拉转，到阈值翻成朝上 = "可以松手了"
+                transform: `rotate(${ready ? 180 : 0}deg)`,
+                transition: 'transform 240ms cubic-bezier(0.22,1,0.36,1)',
+              }}
+            >
+              <path d="M12 5v14M6 13l6 6 6-6" />
+            </svg>
+            {ready ? '松手刷新' : '下拉刷新'}
+          </span>
+        ) : null}
+      </div>
+
+      {/* ── 列表（可滚 + 下拉刷新）───────────────────────────────── */}
+      <div
+        ref={scrollRef}
+        className="min-h-0 flex-1 overflow-y-auto px-5 pb-6"
+        onTouchStart={(e) => {
+          if ((scrollRef.current?.scrollTop ?? 0) <= 0 && !refreshing) {
+            pullStart.current = e.touches[0]!.clientY
+          }
+        }}
+        onTouchMove={(e) => {
+          if (pullStart.current === null) return
+          const d = e.touches[0]!.clientY - pullStart.current
+          setPull(d > 0 ? d * 0.4 : 0)
+        }}
+        onTouchEnd={() => {
+          const go = pull >= PULL_THRESHOLD
+          pullStart.current = null
+          if (go) void doRefresh()
+          else setPull(0)
+        }}
+      >
+        {shown.length === 0 ? (
+          <p className="px-1 py-8 text-center text-sm text-ink-400">
+            {query.trim() ? `没有匹配「${query.trim()}」的项目` : '还没有项目，点上面新建一个。'}
+          </p>
         ) : (
           <ul className="space-y-3">
-            {items.map((p, i) => {
-              const composing = filmProgress[p.id]?.composing ?? false
-              const st = STATUS_STYLE[statusOf(p, composing)]
+            {shown.map((p, i) => {
+              const film = filmProgress[p.id]
+              const st = STATUS_STYLE[statusOf(p, film)]
               return (
                 <li key={p.id}>
-                  {/* 行本身是可点的 div（不用 <button>）——里头还要放一个删除按钮，
+                  {/* 行本身是可点的 div（不用 <button>）——里头还要放菜单按钮，
                       button 套 button 是非法结构 */}
                   <div
                     role="button"
@@ -169,9 +305,9 @@ export function MobileProjectList ({ onOpen, onNew }: { onOpen: (id: string) => 
 
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-base font-bold text-ink-50">{p.name}</span>
-                      <span className="mt-1 block truncate text-xs text-ink-500">
-                        {composing
-                          ? <span className="inline-flex items-center gap-1 text-[#e0a82e]"><IconLoader className="size-3 animate-spin" />视频合成中 {filmProgress[p.id]?.progress ?? 0}%</span>
+                      <span className="mt-1 block truncate text-xs text-ink-400">
+                        {film?.composing
+                          ? <span className="inline-flex items-center gap-1 text-[#e0a82e]"><IconLoader className="size-3 animate-spin" />视频合成中 {film.progress}%</span>
                           : p.ttsState === 'generating'
                             ? <span className="inline-flex items-center gap-1 text-[#e0a82e]"><IconLoader className="size-3 animate-spin" />配音生成中…</span>
                             : summaryOf(p)}

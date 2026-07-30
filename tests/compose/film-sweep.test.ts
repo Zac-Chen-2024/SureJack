@@ -120,6 +120,25 @@ describe('开机补合扫描', () => {
     expect(r.skipped).toBe(1)
   })
 
+  /*
+   * 用户在「正在生成」页点了中断，取消路由会写下 status:'cancelled'。
+   * 若不认这个状态，盘上没成片 → 判定 missing → 立刻又排一条，
+   * 用户会看到"我明明点了取消，它自己又开始合了"。
+   */
+  it('【用户取消的不自动重排】否则中断按钮等于没点', async () => {
+    const deps = q.deps(dataDir)
+    const id = await makeReadyProject('被用户掐掉的')
+    const dir = assetDir(USER, LIST, id)
+    await writeStamp(dir, FILM_STAMP_FILE, {
+      fingerprint: fingerprintOf(deps, id), status: 'cancelled', jobId: 'j-cancel',
+    })
+
+    const r = await sweepFilms(deps, LIST)
+
+    expect(r.enqueued).toEqual([])
+    expect(q.enqueued).toEqual([])
+  })
+
   it('【失败过的不自动重试】开机跑一堆注定失败的 ffmpeg 只会把机器占死', async () => {
     const deps = q.deps(dataDir)
     const id = await makeReadyProject('上次失败的')

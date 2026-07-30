@@ -28,7 +28,7 @@ export function AppUpdateBanner () {
         type="button"
         onClick={dismiss}
         aria-label="忽略这一版"
-        className="shrink-0 px-1 text-lg leading-none text-ink-500"
+        className="shrink-0 px-1 text-lg leading-none text-ink-400"
       >
         ×
       </button>

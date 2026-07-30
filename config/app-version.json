@@ -1,6 +1,6 @@
 {
-  "versionCode": 7,
-  "versionName": "2.2.0",
+  "versionCode": 8,
+  "versionName": "2.3.0",
   "apkUrl": "https://github.com/Zac-Chen-2024/SureJack/releases/latest/download/SureJack.apk",
-  "notes": "下载队列（进度悬浮框，文件名=项目名）；合成可中断；混音不再排队等烧录；字幕自动换行不再腰斩句子；人名逐字校验重试。"
+  "notes": "下载进度不再永远是 0%（服务端补上了文件长度）；下载队列可中断、可删除（连同手机里的文件）；视频加载显示缓冲百分比；点进已完成的项目先看到第一帧，不再误报「还没有成片」；列表加了筛选位和搜索。"
 }

@@ -87,7 +87,7 @@ export function MobileNewProject ({ onBack, onGo }: { onBack: () => void; onGo: 
             onChange={(e) => setName(e.target.value)}
             placeholder="给这条视频起个名"
             disabled={createdId !== null}
-            className="w-full rounded-xl border border-line bg-ink-850 px-3 py-2.5 text-[15px] text-ink-50 outline-none placeholder:text-ink-500 focus:border-accent disabled:opacity-60"
+            className="w-full rounded-xl border border-line bg-ink-850 px-3 py-2.5 text-[15px] text-ink-50 outline-none placeholder:text-ink-400 focus:border-accent disabled:opacity-60"
           />
         </div>
 
@@ -104,7 +104,7 @@ export function MobileNewProject ({ onBack, onGo }: { onBack: () => void; onGo: 
             value={script}
             onChange={(e) => setScript(e.target.value)}
             placeholder="把小说/文案粘贴到这里，或上传 txt 文件"
-            className="h-40 w-full resize-none rounded-xl border border-line bg-ink-850 px-3 py-2.5 text-sm leading-relaxed text-ink-50 outline-none placeholder:text-ink-500 focus:border-accent"
+            className="h-40 w-full resize-none rounded-xl border border-line bg-ink-850 px-3 py-2.5 text-sm leading-relaxed text-ink-50 outline-none placeholder:text-ink-400 focus:border-accent"
           />
           <p className="mt-1 text-[11px] tabular-nums text-ink-600">{[...script].length} 字</p>
         </div>
