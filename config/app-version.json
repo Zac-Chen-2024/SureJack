@@ -1,6 +1,6 @@
 {
-  "versionCode": 5,
-  "versionName": "2.0.1",
+  "versionCode": 6,
+  "versionName": "2.1.0",
   "apkUrl": "https://github.com/Zac-Chen-2024/SureJack/releases/latest/download/SureJack.apk",
-  "notes": "修：关掉 App 后不用再重新登录（Cookie 落盘）；开屏改为交叉淡出，不再黑屏一下。"
+  "notes": "应用内自动更新（App 内下载+安装，不用再去 GitHub）；字幕彻底不显示标点；清理复查可重试；视频封面显示第一帧。"
 }

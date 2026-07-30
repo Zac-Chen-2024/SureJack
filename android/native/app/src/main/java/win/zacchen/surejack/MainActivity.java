@@ -155,8 +155,15 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
 
         sensors = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
 
+        /*
+         * 应用内更新：启动就问一次 /api/app-version，有新版就提示 → App 内下载
+         * → 唤起安装。用户不用再去 GitHub 下包。失败静默（见 Updater）。
+         */
+        new Updater(this, HOST).checkInBackground();
+
         if (savedInstanceState == null) {
-            web.loadUrl("https://" + HOST + "/?appVersion=" + versionCode());
+            // nativeUpdater=1：网页据此隐藏自己的更新横幅（原生已经接管了）
+            web.loadUrl("https://" + HOST + "/?appVersion=" + versionCode() + "&nativeUpdater=1");
         } else {
             web.restoreState(savedInstanceState);
             pageReady = true;
