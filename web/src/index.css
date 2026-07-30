@@ -161,6 +161,13 @@ button, input, textarea, a, [role="button"], .interactive {
   border-color: rgba(240, 180, 41, 0.22);
 }
 
+/* 手机版屏级转场：进入(push)从右滑入盖上，返回(pop)从左带视差滑入。
+   和系统返回键/左缘左滑（走 History）配合，读起来是"退回上一层"。 */
+@keyframes sj-screen-in-fwd { from { transform: translateX(100%) } to { transform: translateX(0) } }
+@keyframes sj-screen-in-back { from { transform: translateX(-24%); opacity: .5 } to { transform: translateX(0); opacity: 1 } }
+.sj-screen-fwd { animation: sj-screen-in-fwd 0.26s cubic-bezier(0.32, 0.72, 0, 1) }
+.sj-screen-back { animation: sj-screen-in-back 0.26s cubic-bezier(0.32, 0.72, 0, 1) }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
