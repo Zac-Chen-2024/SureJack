@@ -82,3 +82,9 @@ data/library/
 apk-build/
 /android.keystore
 /android-signing-secret.txt
+android/native/build/
+android/native/app/build/
+android/native/.gradle/
+android/native/local.properties
+android/native/_build.sh
+ICON/

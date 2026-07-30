@@ -14,8 +14,19 @@ function honorificOf (welcome: string | null): string {
   return '老大'
 }
 
-/** 摇一摇检测（安卓 TWA 直接可用，无需授权）。加速度突变超阈值触发一次。 */
+/**
+ * 摇一摇检测。两条来源：
+ *  1) 【安卓原生壳】MainActivity 的 SensorManager 摇到了会调 window.__sjShake()
+ *     ——比网页 devicemotion 稳，这是主路。
+ *  2) 网页 devicemotion 兜底（普通浏览器 / 没有原生壳时）。
+ */
 function useShake (onShake: () => void): void {
+  useEffect(() => {
+    const w = window as unknown as { __sjShake?: () => void }
+    w.__sjShake = onShake
+    return () => { if (w.__sjShake === onShake) delete w.__sjShake }
+  }, [onShake])
+
   useEffect(() => {
     let lx = 0, ly = 0, lz = 0, lastT = 0, primed = false
     const onMotion = (e: DeviceMotionEvent): void => {

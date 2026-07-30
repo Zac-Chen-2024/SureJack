@@ -1,0 +1,4 @@
+// 顶层构建文件。原生 WebView 壳，不依赖 Bubblewrap/TWA。
+plugins {
+    id 'com.android.application' version '8.9.1' apply false
+}

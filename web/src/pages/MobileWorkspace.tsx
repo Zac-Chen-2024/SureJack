@@ -19,7 +19,6 @@ import { MobileStartSelect } from '../components/mobile/MobileStartSelect'
 import { MobileFilmPlayer } from '../components/mobile/MobileFilmPlayer'
 import { MobileGenerating } from '../components/mobile/MobileGenerating'
 import { AppUpdateBanner } from '../components/mobile/AppUpdateBanner'
-import { ExitPrompt } from '../components/mobile/ExitPrompt'
 import { SwipeBack } from '../components/mobile/SwipeBack'
 import { BUILD_SHA, buildTimeLocal } from '../build-info'
 import {
@@ -214,7 +213,6 @@ export function MobileWorkspace () {
       </BottomSheet>
 
       <AppUpdateBanner />
-      <ExitPrompt />
       <VersionBadge />
     </div>
   )

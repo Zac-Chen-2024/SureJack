@@ -2,45 +2,25 @@ import { useEffect } from 'react'
 import { useNav } from '../store/nav'
 
 /**
- * 把导航栈接到浏览器 History：系统返回键 / 左缘左滑触发 popstate → 退栈；
- * 在根页（列表）返回时弹"挽留"。挂一次（在 MobileWorkspace 顶层）。
+ * 把导航栈接到浏览器 History：进页面 pushState、返回（系统返回键 / 左缘左滑 /
+ * 桌面浏览器后退）触发 popstate → 退栈。挂一次（在 MobileWorkspace 顶层）。
  *
- * ── 为什么 guard 要用不同 URL（#a）──────────────────────────────────
- * 在最底垫一条 guard 记录、列表压在其上。踩过的坑：guard 和 list 若是
- * 【同一个 URL】，部分安卓 Chrome 在两条同 URL 记录间不稳定触发 popstate，
- * 于是根页返回直接退出、挽留框不弹。给 list 加个 `#a` 哈希、guard 不带，
- * 两条记录 URL 不同，popstate 就稳了。app 内的 editor/抽屉都压在 `#a` 上
- * （pushState 不改 URL），只有 guard 边界这一处用哈希区分。
+ * ── 根页返回由【原生】管，这里不再插手 ────────────────────────────────
+ * 安卓壳已改成原生 WebView（见 android/native）：返回键先由 MainActivity 接，
+ * `webView.canGoBack()` 为真就退栈（走到这里的 popstate），到根页则弹原生
+ * AlertDialog 挽留。所以这里【绝不能】再垫 guard 记录——那会让 canGoBack
+ * 永远为真，原生永远判不出"已在根页"，挽留框就再也不弹了（TWA 时代的
+ * History hack 已连同 TWA 一起废弃）。
  */
 export function useNavHistory (): void {
+  const syncDepth = useNav((s) => s.syncDepth)
   useEffect(() => {
-    const base = location.pathname + location.search
-    try {
-      history.replaceState({ sj: 'guard' }, '', base)          // guard（无哈希）
-      history.pushState({ sjDepth: 0 }, '', base + '#a')        // list（带 #a，与 guard 不同 URL）
-    } catch { /* 非浏览器忽略 */ }
-
-    let disarm: ReturnType<typeof setTimeout> | null = null
+    try { history.replaceState({ sjDepth: 0 }, '') } catch { /* 非浏览器忽略 */ }
     const onPop = (e: PopStateEvent): void => {
-      const st = (e.state ?? {}) as { sj?: string; sjDepth?: number }
-      const nav = useNav.getState()
-      if (st.sj === 'guard') {
-        if (nav.exitPrompt) {                 // 挽留框已亮 + 再按一次 → 放行退出
-          if (disarm) clearTimeout(disarm)
-          try { history.back() } catch { /* ignore */ }
-          return
-        }
-        nav.armExit()
-        // 延一拍再 re-push：popstate 同步内 pushState 有的浏览器会吞掉
-        setTimeout(() => { try { history.pushState({ sjDepth: 0 }, '', base + '#a') } catch { /* ignore */ } }, 0)
-        if (disarm) clearTimeout(disarm)
-        disarm = setTimeout(() => useNav.getState().dismissExit(), 3000)
-        return
-      }
-      nav.syncDepth(typeof st.sjDepth === 'number' ? st.sjDepth : 0)
-      if (nav.exitPrompt) nav.dismissExit()
+      const st = (e.state ?? {}) as { sjDepth?: number }
+      syncDepth(typeof st.sjDepth === 'number' ? st.sjDepth : 0)
     }
     window.addEventListener('popstate', onPop)
-    return () => { window.removeEventListener('popstate', onPop); if (disarm) clearTimeout(disarm) }
-  }, [])
+    return () => window.removeEventListener('popstate', onPop)
+  }, [syncDepth])
 }

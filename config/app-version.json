@@ -1,6 +1,6 @@
 {
-  "versionCode": 3,
-  "versionName": "1.2.0",
+  "versionCode": 4,
+  "versionName": "2.0.0",
   "apkUrl": "https://github.com/Zac-Chen-2024/SureJack/releases/latest/download/SureJack.apk",
-  "notes": "SJ 新图标；开屏欢迎动画（可摇一摇）；根页返回挽留；列表实时进度；一键直入生成流程。"
+  "notes": "原生 WebView 壳：返回键挽留、启动图držet到页面就绪（无空档）、原生摇一摇、下载走系统下载器。"
 }

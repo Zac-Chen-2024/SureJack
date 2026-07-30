@@ -1,0 +1,56 @@
+plugins { id 'com.android.application' }
+
+android {
+    namespace 'win.zacchen.surejack'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'win.zacchen.surejack'   // ⚠️ 必须和旧版一致，否则不是"升级"而是另一个 App
+        minSdk 23
+        targetSdk 35
+        versionCode 4
+        versionName '2.0.0'
+    }
+
+    /*
+     * 用【同一个 keystore】签名——包名+签名都不变，用户覆盖安装即是升级。
+     * 密码走环境变量，绝不写进仓库。
+     */
+    signingConfigs {
+        release {
+            storeFile file(System.getenv('APK_KEYSTORE') ?: 'android.keystore')
+            storePassword System.getenv('APK_KEYSTORE_PASSWORD')
+            keyAlias System.getenv('APK_KEY_ALIAS') ?: 'surejack'
+            keyPassword System.getenv('APK_KEY_PASSWORD') ?: System.getenv('APK_KEYSTORE_PASSWORD')
+        }
+    }
+
+    buildTypes {
+        release {
+            signingConfig signingConfigs.release
+            minifyEnabled false
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    // 启动图向下兼容（Android 12 SplashScreen API 的 backport）
+    implementation 'androidx.core:core-splashscreen:1.0.1'
+    implementation 'androidx.appcompat:appcompat:1.7.0'
+    implementation 'androidx.webkit:webkit:1.12.1'
+
+    /*
+     * 对齐 Kotlin stdlib：不同 androidx 库分别拉了 kotlin-stdlib 1.8.22 和
+     * kotlin-stdlib-jdk7/jdk8 1.6.21，而 jdk7/jdk8 的内容在 1.8 已并入 stdlib，
+     * 混用会报 Duplicate class。统一钉到 1.8.22（其 jdk7/jdk8 是空壳）即可。
+     */
+    constraints {
+        implementation 'org.jetbrains.kotlin:kotlin-stdlib:1.8.22'
+        implementation 'org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.22'
+        implementation 'org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.22'
+    }
+}

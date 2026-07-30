@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 与前端设计令牌一致：页面底色 / 强调色（信号青） -->
+    <color name="sj_bg">#161A1E</color>
+    <color name="sj_splash_bg">#0B0A14</color>
+    <color name="sj_accent">#3DDCE4</color>
+    <color name="sj_black">#FF000000</color>
+</resources>

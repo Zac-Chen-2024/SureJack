@@ -39,10 +39,6 @@ interface NavState {
   stack: NavEntry[]
   /** 上一次变化的方向，驱动进/退不同的转场 */
   dir: 'fwd' | 'back'
-  /** 在根页按返回时弹的"挽留"确认（我走了你别再难过！） */
-  exitPrompt: boolean
-  armExit: () => void
-  dismissExit: () => void
   push: (e: NavEntry) => void
   /** 原地替换栈顶（不新增历史记录）。如新建页完成后换成 editor：回退直接到列表 */
   replace: (e: NavEntry) => void
@@ -61,9 +57,6 @@ function pushHistory (depth: number): void {
 export const useNav = create<NavState>((set, get) => ({
   stack: [{ k: 'list' }],
   dir: 'fwd',
-  exitPrompt: false,
-  armExit () { set({ exitPrompt: true }) },
-  dismissExit () { set({ exitPrompt: false }) },
 
   push (e) {
     const stack = [...get().stack, e]
