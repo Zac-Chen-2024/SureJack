@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { analyzeNovel, coerceAnalysis, extractJson, SYSTEM_PROMPT } from '../../src/rename/deepseek.js'
+import { analyzeNovel, coerceAnalysis, extractJson, SYSTEM_PROMPT, hasIdentityViolation } from '../../src/rename/deepseek.js'
 
 describe('extractJson', () => {
   it('抠出 ```json fence 里的对象', () => {
@@ -39,10 +39,12 @@ describe('coerceAnalysis —— 防御式收敛', () => {
 })
 
 describe('SYSTEM_PROMPT', () => {
-  it('把"好字"规则和"只出 JSON"写进了提示词', () => {
+  it('把关键规则写进了提示词：好字、整名都换、严禁原样、只出 JSON', () => {
     expect(SYSTEM_PROMPT).toContain('漂亮的字')
     expect(SYSTEM_PROMPT).toContain('羽')
     expect(SYSTEM_PROMPT).toContain('保留姓')
+    expect(SYSTEM_PROMPT).toContain('每一个字都必须换')   // 整个名都换，不是只换一个字
+    expect(SYSTEM_PROMPT).toContain('严禁原样返回')        // to 不得等于 from
     expect(SYSTEM_PROMPT).toMatch(/只输出.*JSON/)
   })
 })
@@ -63,5 +65,27 @@ describe('analyzeNovel', () => {
     delete process.env.DEEPSEEK_API_KEY
     await expect(analyzeNovel('x')).rejects.toThrow(/DEEPSEEK_API_KEY/)
     if (prev !== undefined) process.env.DEEPSEEK_API_KEY = prev
+  })
+
+  it('名字原样返回时带纠正语重试一次，取第二次结果', async () => {
+    const identity = { choices: [{ message: { content: '{"chapterHeadings":[],"characters":[{"original":"赵德海","replacement":"赵德海","role":"minor","pairs":[{"from":"赵德海","to":"赵德海","global":true}]}],"relationships":[]}' } }] }
+    const fixed = { choices: [{ message: { content: '{"chapterHeadings":[],"characters":[{"original":"赵德海","replacement":"赵得嗨","role":"minor","pairs":[{"from":"赵德海","to":"赵得嗨","global":true}]}],"relationships":[]}' } }] }
+    let n = 0
+    const fakeFetch = vi.fn(async () => new Response(JSON.stringify(n++ === 0 ? identity : fixed), { status: 200 }))
+    const a = await analyzeNovel('赵德海来了。', { apiKey: 'k', fetch: fakeFetch as unknown as typeof fetch })
+    expect(fakeFetch).toHaveBeenCalledTimes(2)   // 第一次违规 → 重试
+    expect(a.characters[0]!.replacement).toBe('赵得嗨')   // 取第二次
+  })
+})
+
+describe('hasIdentityViolation', () => {
+  it('replacement 等于 original 算违规', () => {
+    expect(hasIdentityViolation({ chapterHeadings: [], relationships: [], characters: [{ original: '甲乙', replacement: '甲乙', role: 'minor', pairs: [] }] })).toBe(true)
+  })
+  it('pair 的 to 等于 from 算违规', () => {
+    expect(hasIdentityViolation({ chapterHeadings: [], relationships: [], characters: [{ original: '甲乙', replacement: '甲丙', role: 'minor', pairs: [{ from: '乙', to: '乙', global: true }] }] })).toBe(true)
+  })
+  it('都换了就不违规', () => {
+    expect(hasIdentityViolation({ chapterHeadings: [], relationships: [], characters: [{ original: '甲乙', replacement: '甲丙', role: 'minor', pairs: [{ from: '甲乙', to: '甲丙', global: true }] }] })).toBe(false)
   })
 })

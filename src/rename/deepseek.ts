@@ -30,10 +30,17 @@ export const SYSTEM_PROMPT = `你是中文小说的人名与关系分析器，�
 2. characters：抽取所有人物，每个人物给出：
    - original：原全名（如"沈砚之"）。
    - role：主角=protagonist，与主角关系密切者=related，其余=minor。
-   - replacement：改名后的全名。规则：【保留姓、只换名】，用【谐音字】。
-     * 主角与主角相关(protagonist/related)：谐音要用【漂亮的字】。例如读音 yu 不要用"雨"，
-       改用"羽""郁""钰""屿"这类雅字；读音 lan 用"澜""岚"而非"篮"。
-     * 配角(minor)：普通谐音即可。
+   - replacement：改名后的全名。规则：
+     * 【保留姓】；姓之后【名字的每一个字都必须换掉】，换成读音相同或相近、但【字不同】
+       的谐音字。整个名都要变，不是只换一个字。
+       例：沈砚之 → 沈彦知（砚 yàn→彦，之 zhī→知）；林晚 → 林婉（晚 wǎn→婉）；
+       苏文轩 → 苏雯萱（文→雯，轩→萱）。
+     * 【严禁原样返回，配角也不例外】：任何角色（含配角）的 replacement 都【绝不能等于】
+       original，每个 pair 的 to 也绝不能等于 from——姓可相同，名里【每一个字都要换成
+       另一个读音相同的字（谐音字）】。中文几乎每个字都有同音字，务必找出来，不许偷懒
+       原样返回；也【不要用近音字凑】，就用【读音完全相同】的字。
+     * 主角与主角相关(protagonist/related)：谐音挑【漂亮的字】。例如读音 yu 用"羽/郁/钰/屿"
+       而非"雨"；zhi 用"知/芷/织"而非"之"；lan 用"澜/岚"而非"篮"。配角(minor)：普通谐音即可。
    - pairs：该人物名下所有需要替换的 token → 新串。包含：全名、单独的名（去掉姓）、
      小名/昵称/称呼中属于【名字】的部分（排除"少爷/学长/师父/大人"这类身份称谓，那些不换）。
      同一人物的所有 token 必须映射到【一致】的新名。每个 pair：
@@ -106,7 +113,18 @@ export function extractJson (content: string): unknown {
   return JSON.parse(body.slice(s, e + 1))
 }
 
-export async function analyzeNovel (novel: string, deps: AnalyzeDeps = {}): Promise<RenameAnalysis> {
+/** 有没有"名字原样没换"的违规——replacement 等于 original，或任一 pair 的 to 等于 from。 */
+export function hasIdentityViolation (a: RenameAnalysis): boolean {
+  return a.characters.some((c) => c.replacement === c.original || c.pairs.some((p) => p.to === p.from))
+}
+
+/** 追加纠正语，专治"把名字原样返回"这个偷懒。 */
+const RETRY_NUDGE =
+  '\n\n【纠正】上一次你把某些名字（尤其配角）原样返回了，这是错误的。这一次务必把每个角色' +
+  '（含配角）名字里的【每一个字】都换成读音相同的谐音字，replacement 与每个 pair 的 to 都' +
+  '绝不能等于原字。'
+
+async function callDeepSeek (novel: string, extraSystem: string, deps: AnalyzeDeps): Promise<RenameAnalysis> {
   const apiKey = deps.apiKey ?? process.env.DEEPSEEK_API_KEY
   if (!apiKey) throw new Error('缺少 DEEPSEEK_API_KEY，无法做人名分析')
   const doFetch = deps.fetch ?? fetch
@@ -119,10 +137,10 @@ export async function analyzeNovel (novel: string, deps: AnalyzeDeps = {}): Prom
       body: JSON.stringify({
         model: MODEL,
         messages: [
-          { role: 'system', content: SYSTEM_PROMPT },
+          { role: 'system', content: SYSTEM_PROMPT + extraSystem },
           { role: 'user', content: buildUserPrompt(novel) },
         ],
-        temperature: 0.3,
+        temperature: 0.4,
         response_format: { type: 'json_object' },
       }),
       signal: ctrl.signal,
@@ -135,4 +153,12 @@ export async function analyzeNovel (novel: string, deps: AnalyzeDeps = {}): Prom
   } finally {
     clearTimeout(timer)
   }
+}
+
+export async function analyzeNovel (novel: string, deps: AnalyzeDeps = {}): Promise<RenameAnalysis> {
+  const first = await callDeepSeek(novel, '', deps)
+  // 模型偶尔把名字（尤其配角）原样返回——发现违规就带纠正语重试一次。
+  // 二次仍有极个别改不动的，前端替换表可手工兜底。
+  if (!hasIdentityViolation(first)) return first
+  return callDeepSeek(novel, RETRY_NUDGE, deps)
 }
