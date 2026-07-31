@@ -305,7 +305,15 @@ export function resolveFilm (
    */
   const ass = buildAssForProject(project, { hidePunctuation: true, wrapStyle: 0 })
   // 指纹那份钉在【老配置】上（14 字上限 + 含标点）→ 已有项目指纹不变、不重烧
-  const assForHash = buildAssForProject(project, { maxChars: LEGACY_SUBTITLE_MAX_CHARS })
+  /*
+   * ⚠️【指纹用老样式，渲染用新样式】。样式行一改，所有历史项目的母带指纹
+   * 立刻失效 → 开机补合会把它们全部重烧一遍。而老片子该保持原样。
+   * legacyStyle 让指纹回到改动之前的值；新项目、或改过字号/高度的项目，
+   * 指纹本来就会变，自然按新样式烧。同一个套路见 LEGACY_SUBTITLE_MAX_CHARS。
+   */
+  const assForHash = buildAssForProject(project, {
+    maxChars: LEGACY_SUBTITLE_MAX_CHARS, legacyStyle: true,
+  })
 
   let clip: Clip
   let bgKey: string

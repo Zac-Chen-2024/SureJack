@@ -53,6 +53,12 @@ export interface BuildAssOptions {
    * 而不是靠"提前把句子切断"来避免溢出。
    */
   wrapStyle?: number
+  /**
+   * 用改版式【之前】的样式行。**只给算指纹用，绝不用于渲染**——
+   * 它的作用是让历史项目的母带指纹回到改动之前的值，从而不被重烧。
+   * 见 legacyStyleLines。
+   */
+  legacyStyle?: boolean
 }
 
 /**
@@ -192,6 +198,27 @@ export const DISCLAIMER_FONT_SIZE = 56
  * 再大就会让几乎每句话都折行，字幕反而占掉半个画面。
  */
 
+/**
+ * 改版式【之前】的样式行，逐字节保留。
+ *
+ * ⚠️【它存在的唯一理由是"老片子不重烧"】。母带指纹里哈希的是 ASS 全文，
+ * 样式行一改，所有历史项目的指纹立刻失效 → 开机补合会把它们全部重烧一遍
+ * （12 条 × 十几分钟）。而用户明确说了老片子保持原样。
+ *
+ * 所以：**哈希用这份老样式，渲染用新样式**。历史项目的指纹回到改动之前的
+ * 值，盘上的成片继续有效；新项目、或任何改过字号/高度的项目，指纹本来就
+ * 会变，自然按新样式烧。
+ *
+ * 同一个套路在字幕换行那次用过（LEGACY_SUBTITLE_MAX_CHARS）。
+ */
+function legacyStyleLines (fontSize: number, marginV: number): string {
+  return [
+    `Style: Sub,${FONT_FAMILY},${fontSize},&H0000E5FF,&H00FFFFFF,&H00000000,&H00000000,1,0,0,0,100,100,0,0,1,4,0,2,60,60,${marginV},1`,
+    `Style: Title,${FONT_FAMILY},96,&H00FFFFFF,&H00FFFFFF,&H00202020,&H00000000,1,0,0,0,100,100,0,0,1,6,0,8,60,60,120,1`,
+    `Style: Disclaimer,${FONT_FAMILY},32,&H00B4B4B4,&H00FFFFFF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,2,60,60,90,1`,
+  ].join('\n')
+}
+
 export function buildAss (opts: BuildAssOptions): string {
   const { lines, overlays, aspect, durationMs, mode } = opts
   const marginV = opts.subtitleMarginV ?? DEFAULT_SUBTITLE_MARGIN_V
@@ -214,6 +241,28 @@ export function buildAss (opts: BuildAssOptions): string {
     return `Dialogue: 1,${start},${end},${o.style},,0,0,0,,${escapeAssText(o.content)}`
   })
 
+  /*
+   * Sub 的配色：【黑字白边】，读过和没读过一个样——用户要的就是这个。
+   * 于是 \kf 的扫光在画面上看不出来了（两端同色），但那些标签仍然留着：
+   * 它们决定每一行什么时候出现、什么时候换下一行，删了字幕就不动了。
+   * 描边随字号缩放（0.075×字号），不写死 4——字号能调到 120，
+   * 固定 4px 在大字上细得压不住背景。
+   *
+   * ⚠️【说明只能写在这儿，不能写进 ASS 正文】。ASS 支持 `;` 注释，但
+   * 母带指纹哈希的是 ASS 全文——往里加一行注释，所有历史项目的指纹立刻
+   * 失效，全部重烧。刚踩过。
+   *
+   * legacyStyle：只给【算指纹】用，见 legacyStyleLines 上面那段。
+   * 渲染永远走新样式。
+   */
+  const styleLines = opts.legacyStyle === true
+    ? legacyStyleLines(fontSize, marginV)
+    : [
+        `Style: Sub,${FONT_FAMILY},${fontSize},&H00000000,&H00000000,&H00FFFFFF,&H00000000,1,0,0,0,100,100,0,0,1,${Math.round(fontSize * 0.075)},0,2,60,60,${marginV},1`,
+        `Style: Title,${FONT_FAMILY},${TITLE_FONT_SIZE},&H00FFFFFF,&H00FFFFFF,&H00202020,&H00000000,1,0,0,0,100,100,0,0,1,10,0,8,60,60,120,1`,
+        `Style: Disclaimer,${FONT_FAMILY},${DISCLAIMER_FONT_SIZE},&H00B4B4B4,&H00FFFFFF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,3,0,2,60,60,90,1`,
+      ].join('\n')
+
   return `[Script Info]
 ScriptType: v4.00+
 PlayResX: ${aspect.width}
@@ -222,13 +271,8 @@ WrapStyle: ${opts.wrapStyle ?? 2}
 ScaledBorderAndShadow: yes
 
 [V4+ Styles]
-; Sub 的配色：未读【黑字白边】、已读琥珀，描边随字号缩放（0.075×字号）。
-; 黑字白边是用户指定的样式——白边在杂色画面上比黑边更能把字"托"出来。
-; 描边不再写死 4：字号能调到 120，固定 4px 在大字上会细得压不住背景。
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Sub,${FONT_FAMILY},${fontSize},&H0000E5FF,&H00000000,&H00FFFFFF,&H00000000,1,0,0,0,100,100,0,0,1,${Math.round(fontSize * 0.075)},0,2,60,60,${marginV},1
-Style: Title,${FONT_FAMILY},${TITLE_FONT_SIZE},&H00FFFFFF,&H00FFFFFF,&H00202020,&H00000000,1,0,0,0,100,100,0,0,1,10,0,8,60,60,120,1
-Style: Disclaimer,${FONT_FAMILY},${DISCLAIMER_FONT_SIZE},&H00B4B4B4,&H00FFFFFF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,3,0,2,60,60,90,1
+${styleLines}
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text

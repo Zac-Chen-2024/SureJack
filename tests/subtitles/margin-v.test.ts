@@ -52,17 +52,15 @@ describe('字幕纵向位置 —— ASS 样式行', () => {
    * 要连着这条断言一起改——它的作用不是禁止改，而是不许无声地改。
    *
    * 当前这版是照着用户自己以前用剪映做的片子量出来的
-   * （screenshots/29226429….jpg）：未读【黑字】、描边【白色】，
-   * 描边宽度随字号缩放（0.075×字号，64 → 5）。
+   * （screenshots/29226429….jpg）：【黑字白边】，读过和没读过一个颜色，
+   * 描边宽度随字号缩放（0.075×字号，80 → 6）。
    *
-   * 上一版是「白字黑边、描边写死 4」。换成白边是因为白边在杂色画面上
-   * 更能把字托出来；描边改成按比例，是因为字号能调到 120，
-   * 固定 4px 在大字上细得压不住背景。
+   * 上一版是「白字黑边、已读转琥珀、描边写死 4」。
    */
   it('Sub 样式行逐字节钉死', () => {
     const ass = buildAss({ lines, overlays: [], aspect, durationMs: 1000, mode: 'karaoke' })
     expect(styleLine(ass, 'Sub')).toBe(
-      `Style: Sub,${FONT_FAMILY},80,&H0000E5FF,&H00000000,&H00FFFFFF,&H00000000,1,0,0,0,100,100,0,0,1,6,0,2,60,60,1000,1`
+      `Style: Sub,${FONT_FAMILY},80,&H00000000,&H00000000,&H00FFFFFF,&H00000000,1,0,0,0,100,100,0,0,1,6,0,2,60,60,1000,1`
     )
     expect(DEFAULT_SUBTITLE_MARGIN_V).toBe(1000)
   })
@@ -129,5 +127,44 @@ describe('字幕纵向位置 —— buildAssForProject', () => {
     expect(title).toBeDefined()
     expect(title?.endsWith(',,豪门')).toBe(true)
     expect(title).not.toContain('640')
+  })
+})
+
+/**
+ * 【老片子不重烧】的那道豁免。
+ *
+ * 母带指纹哈希的是 ASS 全文，样式行一改，所有历史项目的指纹立刻失效 →
+ * 开机补合会把它们全部重烧一遍（十几分钟一条）。所以指纹改用【改版之前】
+ * 的样式行来算：历史项目的指纹回到原值，盘上的成片继续有效；
+ * 渲染仍然走新样式。
+ *
+ * 这一整行必须逐字节等于改版之前的字面量——差一个字符，豁免就失效，
+ * 而症状是"机器莫名其妙忙了两个小时"，没人会想到是这里。
+ */
+describe('老样式豁免（算指纹用）', () => {
+  it('legacyStyle 渲染出的三行样式 = 改版之前的字面量', () => {
+    const ass = buildAss({
+      lines, overlays: [], aspect, durationMs: 1000, mode: 'karaoke',
+      subtitleMarginV: 300, subtitleFontSize: 64, legacyStyle: true,
+    })
+    expect(styleLine(ass, 'Sub')).toBe(
+      `Style: Sub,${FONT_FAMILY},64,&H0000E5FF,&H00FFFFFF,&H00000000,&H00000000,1,0,0,0,100,100,0,0,1,4,0,2,60,60,300,1`
+    )
+    expect(styleLine(ass, 'Title')).toBe(
+      `Style: Title,${FONT_FAMILY},96,&H00FFFFFF,&H00FFFFFF,&H00202020,&H00000000,1,0,0,0,100,100,0,0,1,6,0,8,60,60,120,1`
+    )
+    expect(styleLine(ass, 'Disclaimer')).toBe(
+      `Style: Disclaimer,${FONT_FAMILY},32,&H00B4B4B4,&H00FFFFFF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,2,60,60,90,1`
+    )
+  })
+
+  /*
+   * ⚠️ ASS 支持 `;` 注释，但注释也进哈希。往样式块里加一行说明，
+   * 所有历史项目的指纹就全变了——刚踩过一次。
+   */
+  it('样式块里不许有注释行', () => {
+    const ass = buildAss({ lines, overlays: [], aspect, durationMs: 1000, mode: 'karaoke' })
+    const block = ass.slice(ass.indexOf('[V4+ Styles]'), ass.indexOf('[Events]'))
+    expect(block.split('\n').some((l) => l.trim().startsWith(';'))).toBe(false)
   })
 })
