@@ -170,7 +170,7 @@ describe('字幕派生接口 —— ASS', { timeout: 30_000 }, () => {
     expect(r.body).toContain('[V4+ Styles]')
     // 标题与免责声明必须在场——预览要和成片长一个样
     expect(r.body).toContain('ASS可解析')
-    expect(r.body).toContain('小说内容纯属虚构，无不良引导')
+    expect(r.body).toContain('小说内容纯属虚构无不良引导')
   })
 
   /*

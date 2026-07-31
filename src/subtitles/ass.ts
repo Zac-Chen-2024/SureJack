@@ -185,24 +185,33 @@ export const DEFAULT_SUBTITLE_FONT_SIZE = 81
  * 大字的外形；两层一起比才唯一锁死【字号 + 描边】这一对。
  * 脚本在 spikes/subtitle/。
  *
- * 拟合结果（墨迹外接框，成片坐标）：
- *   标题      参考 461×117  拟合 460×119  → 字号 165 描边 6  离顶 68
- *   字幕      参考 227×61   拟合 228×61   → 字号 81  描边 4  离底 999
- *   免责声明  参考 541×57   拟合 541×45   → 字号 60  描边 3  离底 36
+ * 标定结果（成片坐标）：
+ *   标题      字心 446×104  外框 461×118  → 字号 165 描边 7  离顶 66
+ *   字幕      字心 217×51   外框 227×60   → 字号 81  描边 5  离底 999
+ *   免责声明  外框 503×40                 → 字号 56  描边 2  离底 19
  *
- * ⚠️【别用"量一下再估"代替拟合】。第一版我用阈值掩膜量外接框，得出标题
- * 162、免责声明 59——掩膜把背景里的高光和暗部也算成了文字，外接框直接
- * 撑到整幅宽。拟合不怕掩膜脏：比的是形状重合度，噪点在两边都不出现。
+ * ⚠️【三个坑，都是反复了好几轮才踩明白的】
+ *
+ * 1 阈值掩膜会把背景算成文字。参考图里微信的关闭按钮、画面中的暗块都被
+ *   算了进去，外接框一度撑到整幅宽。解法是【按列切连通段】：文字是一串
+ *   宽度相近、间距均匀的段，背景是孤立的一两段，一眼能分开。
+ *
+ * 2 描边定不出来，因为字心的大小和描边【无关】——描边是往外扩的。
+ *   必须同时量【字心框】和【外框】，描边 = (外框宽 − 字心框宽) / 2。
+ *
+ * 3 两边的量法必须一致。参考的免责声明是靠"黑描边"框出来的（浅灰字压在
+ *   很亮的背景上，只有描边够黑），那候选也得按黑描边量——拿字心去比外框，
+ *   本身就差了两倍描边宽。
  */
 export const TITLE_FONT_SIZE = 165
-export const TITLE_OUTLINE = 6
-export const TITLE_MARGIN_V = 68
-export const DISCLAIMER_FONT_SIZE = 60
-export const DISCLAIMER_OUTLINE = 3
-export const DISCLAIMER_MARGIN_V = 36
+export const TITLE_OUTLINE = 7
+export const TITLE_MARGIN_V = 66
+export const DISCLAIMER_FONT_SIZE = 56
+export const DISCLAIMER_OUTLINE = 2
+export const DISCLAIMER_MARGIN_V = 19
 
-/** 字幕描边 ÷ 字号。参考里 81 号字配 4px 描边 → 0.0494 */
-export const SUBTITLE_OUTLINE_RATIO = 0.0494
+/** 字幕描边 ÷ 字号。参考里 81 号字配 5px 描边 → 0.0617 */
+export const SUBTITLE_OUTLINE_RATIO = 0.0617
 
 /**
  * 字号的上下限。
@@ -226,10 +235,16 @@ export const SUBTITLE_OUTLINE_RATIO = 0.0494
  * 同一个套路在字幕换行那次用过（LEGACY_SUBTITLE_MAX_CHARS）。
  */
 function legacyStyleLines (fontSize: number, marginV: number): string {
+  /*
+   * ⚠️【族名也要写死成老的】。FONT_FAMILY 现在是 Medium，而历史项目的指纹
+   * 是拿 'Noto Sans CJK SC' 算的——这里跟着常量走，豁免立刻失效、
+   * 十几条老片子全部重烧。
+   */
+  const LEGACY_FAMILY = 'Noto Sans CJK SC'
   return [
-    `Style: Sub,${FONT_FAMILY},${fontSize},&H0000E5FF,&H00FFFFFF,&H00000000,&H00000000,1,0,0,0,100,100,0,0,1,4,0,2,60,60,${marginV},1`,
-    `Style: Title,${FONT_FAMILY},96,&H00FFFFFF,&H00FFFFFF,&H00202020,&H00000000,1,0,0,0,100,100,0,0,1,6,0,8,60,60,120,1`,
-    `Style: Disclaimer,${FONT_FAMILY},32,&H00B4B4B4,&H00FFFFFF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,2,60,60,90,1`,
+    `Style: Sub,${LEGACY_FAMILY},${fontSize},&H0000E5FF,&H00FFFFFF,&H00000000,&H00000000,1,0,0,0,100,100,0,0,1,4,0,2,60,60,${marginV},1`,
+    `Style: Title,${LEGACY_FAMILY},96,&H00FFFFFF,&H00FFFFFF,&H00202020,&H00000000,1,0,0,0,100,100,0,0,1,6,0,8,60,60,120,1`,
+    `Style: Disclaimer,${LEGACY_FAMILY},32,&H00B4B4B4,&H00FFFFFF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,2,60,60,90,1`,
   ].join('\n')
 }
 
@@ -272,8 +287,8 @@ export function buildAss (opts: BuildAssOptions): string {
   const styleLines = opts.legacyStyle === true
     ? legacyStyleLines(fontSize, marginV)
     : [
-        `Style: Sub,${FONT_FAMILY},${fontSize},&H00000000,&H00000000,&H00FFFFFF,&H00000000,1,0,0,0,100,100,0,0,1,${Math.max(1, Math.round(fontSize * SUBTITLE_OUTLINE_RATIO))},0,2,60,60,${marginV},1`,
-        `Style: Title,${FONT_FAMILY},${TITLE_FONT_SIZE},&H00FFFFFF,&H00FFFFFF,&H00202020,&H00000000,1,0,0,0,100,100,0,0,1,${TITLE_OUTLINE},0,8,60,60,${TITLE_MARGIN_V},1`,
+        `Style: Sub,${FONT_FAMILY},${fontSize},&H00000000,&H00000000,&H00FFFFFF,&H00000000,0,0,0,0,100,100,0,0,1,${Math.max(1, Math.round(fontSize * SUBTITLE_OUTLINE_RATIO))},0,2,60,60,${marginV},1`,
+        `Style: Title,${FONT_FAMILY},${TITLE_FONT_SIZE},&H00FFFFFF,&H00FFFFFF,&H00202020,&H00000000,0,0,0,0,100,100,0,0,1,${TITLE_OUTLINE},0,8,60,60,${TITLE_MARGIN_V},1`,
         `Style: Disclaimer,${FONT_FAMILY},${DISCLAIMER_FONT_SIZE},&H00B4B4B4,&H00FFFFFF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,${DISCLAIMER_OUTLINE},0,2,60,60,${DISCLAIMER_MARGIN_V},1`,
       ].join('\n')
 

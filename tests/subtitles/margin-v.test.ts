@@ -60,7 +60,7 @@ describe('字幕纵向位置 —— ASS 样式行', () => {
   it('Sub 样式行逐字节钉死', () => {
     const ass = buildAss({ lines, overlays: [], aspect, durationMs: 1000, mode: 'karaoke' })
     expect(styleLine(ass, 'Sub')).toBe(
-      `Style: Sub,${FONT_FAMILY},81,&H00000000,&H00000000,&H00FFFFFF,&H00000000,1,0,0,0,100,100,0,0,1,4,0,2,60,60,999,1`
+      `Style: Sub,${FONT_FAMILY},81,&H00000000,&H00000000,&H00FFFFFF,&H00000000,0,0,0,0,100,100,0,0,1,5,0,2,60,60,999,1`
     )
     expect(DEFAULT_SUBTITLE_MARGIN_V).toBe(999)
   })
@@ -70,7 +70,7 @@ describe('字幕纵向位置 —— ASS 样式行', () => {
    * （spikes/subtitle/，两层 IoU：外轮廓 + 字心），墨迹误差：
    * 标题 3px、字幕 1px、免责声明 0px（宽度）。
    */
-  it('标题 165/描边6/离顶68，免责声明 60/描边3/离底36', () => {
+  it('标题 165/描边7/离顶66，免责声明 56/描边2/离底19', () => {
     const ass = buildAss({
       lines, overlays: [
         { content: '标题', style: 'Title', startMs: null, endMs: null },
@@ -78,9 +78,9 @@ describe('字幕纵向位置 —— ASS 样式行', () => {
       ], aspect, durationMs: 1000, mode: 'karaoke',
     })
     const t = styleLine(ass, 'Title').split(',')
-    expect([t[2], t[16], t[21]]).toEqual(['165', '6', '68'])
+    expect([t[2], t[16], t[21]]).toEqual(['165', '7', '66'])
     const d = styleLine(ass, 'Disclaimer').split(',')
-    expect([d[2], d[16], d[21]]).toEqual(['60', '3', '36'])
+    expect([d[2], d[16], d[21]]).toEqual(['56', '2', '19'])
   })
 
   it('传进来的值进 Sub 样式行的 MarginV', () => {
@@ -106,8 +106,8 @@ describe('字幕纵向位置 —— ASS 样式行', () => {
     const low = buildAss({ lines, overlays: [], aspect, durationMs: 1000, mode: 'karaoke', subtitleMarginV: 0 })
     const high = buildAss({ lines, overlays: [], aspect, durationMs: 1000, mode: 'karaoke', subtitleMarginV: 960 })
     for (const ass of [low, high]) {
-      expect(marginVOf(ass, 'Disclaimer')).toBe('36')
-      expect(marginVOf(ass, 'Title')).toBe('68')
+      expect(marginVOf(ass, 'Disclaimer')).toBe('19')
+      expect(marginVOf(ass, 'Title')).toBe('66')
     }
     expect(styleLine(low, 'Disclaimer')).toBe(styleLine(high, 'Disclaimer'))
     expect(styleLine(low, 'Title')).toBe(styleLine(high, 'Title'))
@@ -123,7 +123,7 @@ describe('字幕纵向位置 —— buildAssForProject', () => {
   it('默认值的项目产出的 ASS 与不带这个字段时完全一致', () => {
     const ass = buildAssForProject(makeProject())
     expect(marginVOf(ass, 'Sub')).toBe(String(DEFAULT_SUBTITLE_MARGIN_V))
-    expect(marginVOf(ass, 'Disclaimer')).toBe('36')
+    expect(marginVOf(ass, 'Disclaimer')).toBe('19')
   })
 
   /** 项目名会被烧进画面：这个参数不许顺手把任何状态信息带进 Title 那一行 */
@@ -153,14 +153,20 @@ describe('老样式豁免（算指纹用）', () => {
       lines, overlays: [], aspect, durationMs: 1000, mode: 'karaoke',
       subtitleMarginV: 300, subtitleFontSize: 64, legacyStyle: true,
     })
+    /*
+     * ⚠️ 这里【必须写死老族名】，不能用 FONT_FAMILY——那个常量现在是
+     * Medium。历史项目的指纹是拿 'Noto Sans CJK SC' 算的，跟着常量走
+     * 豁免立刻失效、十几条老片子全部重烧。
+     */
+    const LEGACY_FAMILY = 'Noto Sans CJK SC'
     expect(styleLine(ass, 'Sub')).toBe(
-      `Style: Sub,${FONT_FAMILY},64,&H0000E5FF,&H00FFFFFF,&H00000000,&H00000000,1,0,0,0,100,100,0,0,1,4,0,2,60,60,300,1`
+      `Style: Sub,${LEGACY_FAMILY},64,&H0000E5FF,&H00FFFFFF,&H00000000,&H00000000,1,0,0,0,100,100,0,0,1,4,0,2,60,60,300,1`
     )
     expect(styleLine(ass, 'Title')).toBe(
-      `Style: Title,${FONT_FAMILY},96,&H00FFFFFF,&H00FFFFFF,&H00202020,&H00000000,1,0,0,0,100,100,0,0,1,6,0,8,60,60,120,1`
+      `Style: Title,${LEGACY_FAMILY},96,&H00FFFFFF,&H00FFFFFF,&H00202020,&H00000000,1,0,0,0,100,100,0,0,1,6,0,8,60,60,120,1`
     )
     expect(styleLine(ass, 'Disclaimer')).toBe(
-      `Style: Disclaimer,${FONT_FAMILY},32,&H00B4B4B4,&H00FFFFFF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,2,60,60,90,1`
+      `Style: Disclaimer,${LEGACY_FAMILY},32,&H00B4B4B4,&H00FFFFFF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,2,60,60,90,1`
     )
   })
 

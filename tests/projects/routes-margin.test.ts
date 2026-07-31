@@ -175,6 +175,6 @@ describe('PATCH /api/projects/:id —— subtitleMarginV', () => {
     expect(sub?.endsWith(',60,60,640,1')).toBe(true)
     // 免责声明留在原地
     const dis = res.body.split('\n').find((l) => l.startsWith('Style: Disclaimer,'))
-    expect(dis?.endsWith(',60,60,36,1')).toBe(true)
+    expect(dis?.endsWith(',60,60,19,1')).toBe(true)
   })
 })

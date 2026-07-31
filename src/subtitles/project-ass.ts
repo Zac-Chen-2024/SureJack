@@ -42,7 +42,19 @@ export const SUBTITLE_MAX_CHARS = 24
  */
 export const LEGACY_SUBTITLE_MAX_CHARS = 14
 
-export const DISCLAIMER = '小说内容纯属虚构，无不良引导'
+// 参考里没有逗号，跟着参考走
+export const DISCLAIMER = '小说内容纯属虚构无不良引导'
+
+/**
+ * 改文案【之前】那句，逐字保留。
+ *
+ * ⚠️ 和 legacyStyleLines 是同一件事，但踩了第二次：指纹哈希的是 ASS
+ * 【全文】——样式行冻住了，事件行没冻。免责声明是个 overlay，去掉一个逗号
+ * 就让十几条历史项目的指纹全变了，开机补合把它们又全排上了队。
+ *
+ * 结论：凡是进 ASS 的东西（样式、文案、标点），改动都要在指纹侧留一份老的。
+ */
+export const LEGACY_DISCLAIMER = '小说内容纯属虚构，无不良引导'
 
 const DEFAULT_ASPECT: AspectPreset = { name: '9:16', width: 1080, height: 1920 }
 
@@ -167,7 +179,10 @@ export function buildAssForProject (
   } = {},
 ): string {
   const overlays: TextOverlay[] = [
-    { content: DISCLAIMER, style: 'Disclaimer', startMs: null, endMs: null },
+    {
+      content: opts.legacyStyle === true ? LEGACY_DISCLAIMER : DISCLAIMER,
+      style: 'Disclaimer', startMs: null, endMs: null,
+    },
     // 片内标题：作者自己填的优先，没填就用项目名。**不是封面标题**——
     // 封面是给平台抓缩略图的一帧，这行是看片的人全程都在看的
     { content: inVideoTitleOf(project), style: 'Title', startMs: null, endMs: null },
