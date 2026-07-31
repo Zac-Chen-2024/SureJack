@@ -5,8 +5,24 @@ import { WelcomePage } from './pages/WelcomePage'
 import { Workspace } from './pages/Workspace'
 import { MobileWorkspace } from './pages/MobileWorkspace'
 import { useIsMobile } from './hooks/useIsMobile'
+import { SubtitleLab } from './pages/SubtitleLab'
 
 export default function App () {
+  /*
+   * 【字幕尺子走在会话检查之前】。它是个拿在手上比划的量尺工具，不读任何
+   * 用户数据，打开就该能用。要是排在登录后面，"在手机上随手看一眼"就变成
+   * 一件要先输密码的事。
+   *
+   * 路由用 pathname 直接判，没上路由库——全站就这一条独立页面，
+   * 为它引一个依赖不值得（服务端的 SPA 兜底会把这个路径回成 index.html）。
+   */
+  if (typeof window !== 'undefined' && window.location.pathname === '/subtitle-lab') {
+    return <SubtitleLab />
+  }
+  return <MainApp />
+}
+
+function MainApp () {
   const { status, check } = useSession()
   const isMobile = useIsMobile()
   const [entered, setEntered] = useState(false)

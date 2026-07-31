@@ -15,6 +15,7 @@ import { registerSubtitleRoutes } from './subtitles/routes.js'
 import { registerRenameRoutes } from './rename/routes.js'
 import { openLibraryDb } from './library/library-db.js'
 import { registerEpisodeRoutes } from './episodes/routes.js'
+import { registerLabRoutes } from './lab/routes.js'
 import { registerLibraryRoutes } from './library/routes.js'
 import { ExportQueue } from './queue/queue.js'
 import { registerExportRoutes } from './queue/routes.js'
@@ -229,6 +230,8 @@ export function buildServer (opts: BuildOpts = {}): FastifyInstance {
       openLibrary: () => openLibraryDb(libraryDataDir),
     })
     registerEpisodeRoutes(scope, { whitelist, plan: opts.planSplit })
+    // 字幕尺子：公开、不需要登录（见 lab/routes.ts 顶部）
+    registerLabRoutes(scope, { dataDir: libraryDataDir })
     registerLibraryRoutes(scope, { dataDir: libraryDataDir })
 
     // 背景视频可能很大；nginx 侧已放开到 500M

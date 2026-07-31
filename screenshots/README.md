@@ -12,6 +12,8 @@
 | `cover-repro.png` / `cover-diff.png` | 封面复刻 vs 参考图。差异图里红=参考多出、绿=复刻多出、白=重合——只剩边缘一像素 |
 | `episode-1-cover.png` / `episode-2-cover.png` | 分集验收：主片和续集各自的封面第一帧 |
 | `episode-reminder.png` | 续集第 88.6 秒——「分集验收第二集开始啦」念出来、有字幕，背景此时已经是地铁跑酷 |
+| `lab-phone.png` / `lab-desktop.png` | 字幕尺子 `/subtitle-lab`：真实底图 + 真实字体的字幕，两个滑块 |
+| `lab-submitted.png` | 提交后的回执「已严肃收集」 |
 | `cover-titles.png` | 四种长度的标题：4 字（和参考同字号）、9 字（换两行）、7 字、14 字（换行 + 缩字号） |
 | `downloads.png` | 下载队列悬浮框（进行中一条 + 已保存一条 + 底部说明） |
 | `search-mid.png` | 放大镜拉开到一半的中间帧——用来看展开动画有没有真的在动 |

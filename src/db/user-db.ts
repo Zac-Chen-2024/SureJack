@@ -277,6 +277,17 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
       height INTEGER,
       created_at TEXT NOT NULL
     );
+    /*
+     * 用户级设置。**故意做成 key/value 而不是一张宽表**：这里放的是
+     * "我习惯把字幕摆多高"这类个人偏好，加一项就多一个键，不用改表结构、
+     * 不用写迁移。项目自己的字段（每条片子各不相同）仍然在 projects 上，
+     * 两者别混——偏好只在【新建项目那一刻】被读一次当初值。
+     */
+    CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS export_jobs (
       id TEXT PRIMARY KEY,
       project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
