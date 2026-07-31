@@ -20,6 +20,7 @@ import { MobileStartSelect } from '../components/mobile/MobileStartSelect'
 import { MobileFilmPlayer } from '../components/mobile/MobileFilmPlayer'
 import { MobileGenerating } from '../components/mobile/MobileGenerating'
 import { AppUpdateBanner } from '../components/mobile/AppUpdateBanner'
+import { ScrubReadout } from '../components/mobile/ScrubSlider'
 import { SwipeBack } from '../components/mobile/SwipeBack'
 import { BUILD_SHA, buildTimeLocal } from '../build-info'
 import {
@@ -266,6 +267,9 @@ export function MobileWorkspace () {
         <MusicPanel />
       </BottomSheet>
 
+      {/* 拖字幕滑块时浮在画面正中的读数：界面都淡掉了，
+          没个数字用户不知道自己调到哪儿了 */}
+      <ScrubReadout />
       <AppUpdateBanner />
       <VersionBadge />
     </div>

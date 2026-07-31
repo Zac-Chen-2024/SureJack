@@ -1,4 +1,5 @@
 import { useEffect, type ReactNode } from 'react'
+import { useScrub } from './ScrubSlider'
 import { IconChevronDown } from '../ui/Icon'
 
 /**
@@ -17,12 +18,20 @@ import { IconChevronDown } from '../ui/Icon'
  *   不垫的话按钮会被它压住点不着。
  * - Esc 关：桌面上用大屏调试时也能关，不吃亏。
  */
+/**
+ * 抽屉在【拖字幕滑块】时整个淡掉。
+ *
+ * 用户此刻要看的是画面，而抽屉正好盖着半个画面。留 8% 不透明度而不是
+ * 完全隐藏：让人知道它还在、一松手就回来，不至于以为界面崩了。
+ */
 export function BottomSheet ({ open, onClose, title, children }: {
   open: boolean
   onClose: () => void
   title: string
   children: ReactNode
 }) {
+  const scrubbing = useScrub((s) => s.active !== null)
+
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
@@ -39,7 +48,19 @@ export function BottomSheet ({ open, onClose, title, children }: {
   if (!open) return null
 
   return (
-    <div className="fixed inset-0 z-50">
+    /*
+     * 拖字幕滑块时整个淡掉：用户此刻要看的是画面，而抽屉正好盖着半个画面。
+     * 留 8% 而不是完全隐藏——让人知道它还在、一松手就回来，
+     * 不至于以为界面崩了。
+     */
+    <div
+      className="sj-motion fixed inset-0 z-50"
+      style={{
+        opacity: scrubbing ? 0.08 : 1,
+        pointerEvents: scrubbing ? 'none' : undefined,
+        transition: 'opacity 160ms ease',
+      }}
+    >
       {/* 遮罩：点一下关 */}
       <button
         type="button"

@@ -53,8 +53,25 @@ const SIDE_MARGIN = 60                 // MarginL / MarginR
 
 const MIN_FONT = 36
 const MAX_FONT = 120
-const MIN_MARGIN = 160
-const MAX_MARGIN = PLAY_H / 2
+/*
+ * 【尺子不设产品里那道钳位】。产品里 maxSubtitleMarginV 把字幕限制在画面
+ * 下半部分（半屏），那是个产品判断；而尺子的用途正是"看看放到别处会怎样"，
+ * 带着结论去量等于白量。
+ *
+ * 上限按字号动态算：字幕顶边贴到画面最上沿为止（再往上就出画了）。
+ * 下限 0 = 底边贴着画面最下沿。合起来就是从顶到底。
+ */
+const MIN_MARGIN = 0
+/**
+ * 一行字从"MarginV 那条线"往上占多高，占字号的比例。上限 = 画面高 − 它×字号。
+ *
+ * 【按行盒算，不是按墨迹算】。先按墨迹高 0.67 减，拉到头字顶还是被切了
+ * ——因为 CSS 里占位的是行盒（line-height 1.15 × 0.686 ≈ 0.79 字号），
+ * 再加上基线补正的 0.20，合起来正好约等于【一个字号】。
+ *
+ * 实测三个字号（36/64/120）在 1920−1.0×字号 处，字块顶边刚好贴住画面顶。
+ */
+const TOP_ROOM = 1.0
 
 const SAMPLE = '座右铭从人淡如菊改成大力出奇迹'
 
@@ -93,6 +110,8 @@ export function SubtitleLab () {
 
   const k = previewW / PLAY_W          // 成片坐标 → 预览像素
   const cssFont = fontSize * LIBASS_SCALE * k
+  // 顶到底：上限 = 画面高 - 这一行字的墨迹高，再高字就出画了
+  const maxMargin = Math.round(PLAY_H - fontSize * TOP_ROOM)
 
   // 卡拉OK扫光：前 45% 已读（琥珀），后面未读（白）。取个中间态最有代表性
   const chars = useMemo(() => [...text], [text])
@@ -210,11 +229,14 @@ export function SubtitleLab () {
           <label className="block">
             <span className="mb-1.5 flex items-baseline justify-between">
               <span className="text-xs font-bold text-ink-100">离画面底部</span>
-              <span className="text-xs tabular-nums text-accent">{marginV}</span>
+              <span className="text-xs tabular-nums text-accent">
+                {marginV}<span className="ml-1 text-ink-500">/ {maxMargin}</span>
+              </span>
             </span>
             <input
-              type="range" min={MIN_MARGIN} max={MAX_MARGIN} step={5}
-              value={marginV} onChange={(e) => setMarginV(Number(e.target.value))}
+              type="range" min={MIN_MARGIN} max={maxMargin} step={5}
+              value={Math.min(marginV, maxMargin)}
+              onChange={(e) => setMarginV(Number(e.target.value))}
               className="w-full" style={{ accentColor: 'var(--color-accent)' }}
             />
           </label>

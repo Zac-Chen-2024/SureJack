@@ -5,6 +5,8 @@ import {
   MIN_SUBTITLE_FONT_SIZE, MAX_SUBTITLE_FONT_SIZE,
 } from '../store/projects'
 import { IconSubtitles } from './ui/Icon'
+import { ScrubSlider } from './mobile/ScrubSlider'
+import { useIsMobile } from '../hooks/useIsMobile'
 
 /**
  * 字幕高度滑块。
@@ -33,6 +35,7 @@ export function SubtitleHeight () {
   const draftSize = useProjects((s) => s.draftFontSize)
   const setDraftSize = useProjects((s) => s.setDraftFontSize)
   const [busy, setBusy] = useState(false)
+  const isMobile = useIsMobile()
 
   const max = maxSubtitleMarginV(project?.aspectRatio ?? '9:16')
   const storedMargin = project?.subtitleMarginV ?? DEFAULT_SUBTITLE_MARGIN_V
@@ -56,35 +59,62 @@ export function SubtitleHeight () {
         <IconSubtitles className="size-3.5" />字幕
       </div>
 
-      <label className="mb-1 flex items-baseline justify-between text-[11px] text-ink-400">
-        <span>高度</span>
-        <span>{subtitleHeightLabel(margin, max)}</span>
-      </label>
-      <input
-        type="range"
-        min={MIN_SUBTITLE_MARGIN_V} max={max} step={10}
-        value={Math.min(margin, max)}
-        onChange={(e) => setDraftMargin(Number(e.target.value))}
-        aria-label="字幕高度"
-        className="h-1 w-full cursor-pointer appearance-none rounded-full bg-ink-700"
-        style={{ accentColor: 'var(--color-accent)' }}
-      />
+      {/*
+        * 手机上换成【按住就让界面让路】的滑块：抽屉正好盖着半个画面，
+        * 用普通滑块只能"拖一下→关抽屉→看→再打开"，判断和操作被隔开。
+        * 桌面没这个问题（面板在侧边，画面一直露着），保持原来的滑块。
+        */}
+      {isMobile ? (
+        <>
+          <ScrubSlider
+            id="margin" label="高度"
+            value={Math.min(margin, max)}
+            min={MIN_SUBTITLE_MARGIN_V} max={max} step={10}
+            format={(v) => subtitleHeightLabel(v, max)}
+            onChange={setDraftMargin}
+            onCommit={() => void onConfirm()}
+          />
+          <ScrubSlider
+            id="size" label="字号"
+            value={size}
+            min={MIN_SUBTITLE_FONT_SIZE} max={MAX_SUBTITLE_FONT_SIZE} step={2}
+            onChange={setDraftSize}
+            onCommit={() => void onConfirm()}
+          />
+        </>
+      ) : (
+        <>
+          <label className="mb-1 flex items-baseline justify-between text-[11px] text-ink-400">
+            <span>高度</span>
+            <span>{subtitleHeightLabel(margin, max)}</span>
+          </label>
+          <input
+            type="range"
+            min={MIN_SUBTITLE_MARGIN_V} max={max} step={10}
+            value={Math.min(margin, max)}
+            onChange={(e) => setDraftMargin(Number(e.target.value))}
+            aria-label="字幕高度"
+            className="h-1 w-full cursor-pointer appearance-none rounded-full bg-ink-700"
+            style={{ accentColor: 'var(--color-accent)' }}
+          />
 
-      <label className="mb-1 mt-3 flex items-baseline justify-between text-[11px] text-ink-400">
-        <span>字号</span>
-        <span className="tabular-nums">{size}</span>
-      </label>
-      <input
-        type="range"
-        min={MIN_SUBTITLE_FONT_SIZE} max={MAX_SUBTITLE_FONT_SIZE} step={2}
-        value={size}
-        onChange={(e) => setDraftSize(Number(e.target.value))}
-        aria-label="字幕字号"
-        className="h-1 w-full cursor-pointer appearance-none rounded-full bg-ink-700"
-        style={{ accentColor: 'var(--color-accent)' }}
-      />
+          <label className="mb-1 mt-3 flex items-baseline justify-between text-[11px] text-ink-400">
+            <span>字号</span>
+            <span className="tabular-nums">{size}</span>
+          </label>
+          <input
+            type="range"
+            min={MIN_SUBTITLE_FONT_SIZE} max={MAX_SUBTITLE_FONT_SIZE} step={2}
+            value={size}
+            onChange={(e) => setDraftSize(Number(e.target.value))}
+            aria-label="字幕字号"
+            className="h-1 w-full cursor-pointer appearance-none rounded-full bg-ink-700"
+            style={{ accentColor: 'var(--color-accent)' }}
+          />
+        </>
+      )}
 
-      {dirty ? (
+      {dirty && !isMobile ? (
         <div className="mt-3">
           {/*
             【把代价说出来再让他点】。确认下去就是十几分钟的重烧，
