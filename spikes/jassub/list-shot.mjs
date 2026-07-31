@@ -35,7 +35,10 @@ const PROJECTS = [
   }),
   project('p2', '深夜食堂的秘密', { ttsState: 'generating', ttsDurationMs: null }),
   project('p3', '老宅里的第七个房间'),
-  project('p4', '写了一半的稿子', { ttsState: 'idle', ttsDurationMs: null }),
+  project('p4', '写了一半的稿子', {
+    ttsState: 'none', ttsDurationMs: null,
+    scriptText: '这是我贴进来还没分析的文案。第二句。第三句。',
+  }),
   project('p5', '被取消的那条'),
 ]
 
@@ -100,6 +103,14 @@ await page.waitForSelector('text=我的项目', { timeout: 15000 })
 await page.waitForSelector('text=欢迎回来', { state: 'detached', timeout: 20000 }).catch(() => {})
 await page.waitForTimeout(800)
 await page.screenshot({ path: OUT + 'list.png' })
+
+// 草稿点进去：应该是「接着完成」，不是「还没有成片」
+await page.getByText('写了一半的稿子').first().click()
+await page.waitForTimeout(600)
+console.log('  草稿点进去 =', (await page.locator('body').innerText()).slice(0, 90).replace(/\n/g, ' | '))
+await page.screenshot({ path: OUT + 'resume-draft.png' })
+await page.getByLabel('返回').click()
+await page.waitForTimeout(400)
 
 // 新建项目页（要看「自动创建续集」开关在不在）
 await page.getByText('新建项目', { exact: true }).click()

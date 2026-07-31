@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useProjects } from '../../store/projects'
 import { usePipeline } from '../../store/pipeline'
 import { useRename, renameGates } from '../../store/rename'
@@ -14,16 +14,26 @@ import { SplitPicker } from './SplitPicker'
  * 建项目发生在点「分析人名并继续」那一刻（带上已填的名字和文案），不提前
  * 造空项目。之后所有操作都作用在这个已建项目上，复用现有 per-project 机制。
  */
-export function MobileNewProject ({ onBack, onGo }: { onBack: () => void; onGo: (id: string) => void }) {
+export function MobileNewProject ({ onBack, onGo, resumeId }: {
+  onBack: () => void
+  onGo: (id: string) => void
+  /**
+   * 【接着上次继续】。已经建了项目、文案也贴了，但还没走完分析/生成就退出去了
+   * ——再点进来该回到这一页接着填，而不是甩给他一屏"还没有成片"。
+   * 那屏说的是实话，但它答的不是用户此刻的问题：他要的是"接着弄完"。
+   */
+  resumeId?: string
+}) {
   const { create, updateScript } = useProjects()
   const project = useProjects((s) => s.current())
   const analyze = useRename((s) => s.analyze)
   const renameError = useRename((s) => s.error)
   const generateVoice = usePipeline((s) => s.generateVoice)
 
-  const [name, setName] = useState('')
-  const [script, setScript] = useState('')
-  const [createdId, setCreatedId] = useState<string | null>(null)
+  const resumed = useProjects((s) => (resumeId ? s.items.find((p) => p.id === resumeId) : undefined))
+  const [name, setName] = useState(resumed?.name ?? '')
+  const [script, setScript] = useState(resumed?.scriptText ?? '')
+  const [createdId, setCreatedId] = useState<string | null>(resumeId ?? null)
   const [busy, setBusy] = useState<'analyze' | 'generate' | null>(null)
   /*
    * 【自动创建续集】。开着的话，确认人名之后先进断点选择，拆完再生成——
@@ -33,6 +43,25 @@ export function MobileNewProject ({ onBack, onGo }: { onBack: () => void; onGo: 
   const [autoSequel, setAutoSequel] = useState(false)
   const [splitting, setSplitting] = useState(false)
   const fileInput = useRef<HTMLInputElement>(null)
+
+  /*
+   * 接着上次继续时，把选中项目切过去——下面的 NameReplacePanel 之类都读
+   * store 里的"当前项目"，不切的话它们看的还是别的项目。
+   */
+  useEffect(() => {
+    if (resumeId && useProjects.getState().currentId !== resumeId) {
+      useProjects.getState().select(resumeId)
+    }
+  }, [resumeId])
+
+  // 列表异步加载完才拿得到这条项目，到了再把名字和文案补上（只补一次）
+  const filled = useRef(false)
+  useEffect(() => {
+    if (!resumed || filled.current) return
+    filled.current = true
+    setName(resumed.name)
+    setScript(resumed.scriptText ?? '')
+  }, [resumed])
 
   /**
    * 建项目并把【页面上这份原始文案】写进去。只在"分析"那一步调。
@@ -83,7 +112,7 @@ export function MobileNewProject ({ onBack, onGo }: { onBack: () => void; onGo: 
         <button type="button" onClick={onBack} aria-label="返回" className="flex size-9 items-center justify-center rounded-full border border-line bg-ink-900 text-ink-100">
           <IconChevronLeft className="size-4" strokeWidth={2.2} />
         </button>
-        <h2 className="text-lg font-extrabold text-ink-50">新建项目</h2>
+        <h2 className="text-lg font-extrabold text-ink-50">{resumeId ? '接着完成' : '新建项目'}</h2>
       </div>
 
       <div className="space-y-4 px-4 pb-10">

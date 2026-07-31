@@ -131,11 +131,33 @@ export function MobileWorkspace () {
   // 哪些项目这次会话过了"起始选择"。空项目第一次进要先选文本/自备
   const [startedIds, setStartedIds] = useState<Set<string>>(new Set())
 
+  /*
+   * 【草稿点进去回到"接着完成"，而不是编辑器】。
+   *
+   * 用户建了项目、贴了文案，还没分析就退出去了；再点进来看到的是一屏
+   * 「还没有成片」——那句话是实话，但它答的不是他此刻的问题：他要的是
+   * "接着弄完"。文案还在库里，分析按钮就在新建那一页上，所以就该回那一页。
+   *
+   * 判据是【配音还没生成】（ttsState==='none'）：一旦配了音，这条片子就
+   * 进入了预览/微调的阶段，那才是编辑器的地盘。
+   */
   function openProject (id: string) {
     useProjects.getState().select(id)
-    push({ k: 'editor' })
+    const p = useProjects.getState().items.find((x) => x.id === id)
+    if (p && p.ttsState === 'none') { setResumeDraft(true); push({ k: 'newproject' }) }
+    else push({ k: 'editor' })
   }
-  const openNew = () => push({ k: 'newproject' })
+  /*
+   * 【新建之前必须把"接着完成"的标记清掉】。同一屏（newproject）现在有两种
+   * 用途：真·新建、和回到某条草稿接着填。区分靠的是"当前选中的项目是不是
+   * 一条草稿"——所以点「新建项目」时得先把选中态清空，否则刚从草稿退出来
+   * 再点新建，会莫名其妙地又回到那条草稿。
+   */
+  const [resumeDraft, setResumeDraft] = useState(true)
+  function openNew () {
+    setResumeDraft(false)
+    push({ k: 'newproject' })
+  }
   function goEditor (id: string) {
     useProjects.getState().select(id)
     replace({ k: 'editor' })   // 用编辑器替换新建页：从编辑器返回直接回列表
@@ -157,7 +179,12 @@ export function MobileWorkspace () {
         {screen === 'list' ? (
           <MobileProjectList onOpen={openProject} onNew={openNew} />
         ) : screen === 'newproject' ? (
-          <MobileNewProject onBack={back} onGo={goEditor} />
+          /* 从列表点进一条草稿时带上 id，那一页会把名字和文案填回去接着走 */
+          <MobileNewProject
+            onBack={back}
+            onGo={goEditor}
+            resumeId={resumeDraft && project && project.ttsState === 'none' ? project.id : undefined}
+          />
         ) : !project ? (
           <MobileProjectList onOpen={openProject} onNew={openNew} />
         ) : needsStart ? (
