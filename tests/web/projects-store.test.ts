@@ -9,15 +9,23 @@ import {
 import { DEFAULT_SUBTITLE_MARGIN_V as SERVER_DEFAULT } from '../../src/subtitles/ass.js'
 
 describe('maxSubtitleMarginV（前端滑块上界）', () => {
-  it('是画面高度的一半', () => {
-    expect(maxSubtitleMarginV('9:16')).toBe(960)
-    expect(maxSubtitleMarginV('16:9')).toBe(540)
-    expect(maxSubtitleMarginV('1:1')).toBe(540)
-    expect(maxSubtitleMarginV('4:5')).toBe(675)
+  /*
+   * 上界 = 画面高 − 一个最大字号（120）。
+   *
+   * ⚠️ 原来是"画面高的一半"。那道线挡住了参考图里的位置（离底 1000，
+   * 超过 9:16 的半屏 960），也挡住了"想把字幕放上半屏"这种正当排版——
+   * 它不是安全边界，是个没说清理由的产品判断。现在这条才是物理边界：
+   * 字号拉到最大时，字顶正好不出画。
+   */
+  it('上界 = 画面高 − 最大字号', () => {
+    expect(maxSubtitleMarginV('9:16')).toBe(1800)
+    expect(maxSubtitleMarginV('16:9')).toBe(960)
+    expect(maxSubtitleMarginV('1:1')).toBe(960)
+    expect(maxSubtitleMarginV('4:5')).toBe(1230)
   })
 
   it('认不出的画幅回落竖屏，不返回 NaN 把滑块弄坏', () => {
-    expect(maxSubtitleMarginV('乱写')).toBe(960)
+    expect(maxSubtitleMarginV('乱写')).toBe(1800)
   })
 
   /**

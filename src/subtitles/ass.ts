@@ -8,7 +8,17 @@ import type { SubtitleLine, TextOverlay, AspectPreset } from '../types.js'
  * 现在成了 projects.subtitle_margin_v 的列默认值。改这个数等于把所有
  * 没动过滑块的老项目的字幕集体挪一下位置——线上已经有真实成片了。
  */
-export const DEFAULT_SUBTITLE_MARGIN_V = 300
+/**
+ * 字幕默认离画面底多远。
+ *
+ * 1000 = 参考图量出来的位置（screenshots/29226429….jpg，用户自己以前用剪映
+ * 做的片子）：字幕落在画面中部偏下，而不是贴底。
+ *
+ * 【为什么中部比贴底好】：竖屏视频在各家 App 里，底部那一条都被进度条、
+ * 头像、点赞栏、评论框占着；贴底的字幕在刷的时候经常被压住。抬到中部
+ * 反而是"永远看得见"的位置。原来的 300 是凭感觉填的。
+ */
+export const DEFAULT_SUBTITLE_MARGIN_V = 1000
 
 export interface BuildAssOptions {
   lines: SubtitleLine[]
@@ -157,7 +167,22 @@ export function buildKaraoke (line: SubtitleLine, hidePunctuation = false): stri
  * 所以【默认值不能动】：改了会让每一条已有成片的指纹失效，
  * 全部重烧一遍十几分钟。
  */
-export const DEFAULT_SUBTITLE_FONT_SIZE = 64
+/** 参考图量出来的字幕字号（每字 54px → ASS 约 79，取整 80） */
+export const DEFAULT_SUBTITLE_FONT_SIZE = 80
+
+/**
+ * 片内标题和免责声明的字号。**都是量出来的**。
+ *
+ * 参考的是用户自己以前用剪映做的片子（screenshots/29226429….jpg）。把那张
+ * 微信截图换算回成片坐标之后：标题每字 111px → ASS 字号约 162；
+ * 免责声明每字 40px → 约 59。而我们原来是 96 和 32——只有参考的六成。
+ *
+ * 【为什么原来那两个数偏小】：它们是当初凭感觉填的，而唯一的检验方式是
+ * 在 1080×1920 的画布上看整幅——在电脑上看一张缩小到 300px 宽的预览图，
+ * 96 号字显得挺大。真到手机上全屏播，它就小了。
+ */
+export const TITLE_FONT_SIZE = 160
+export const DISCLAIMER_FONT_SIZE = 56
 
 /**
  * 字号的上下限。
@@ -197,10 +222,13 @@ WrapStyle: ${opts.wrapStyle ?? 2}
 ScaledBorderAndShadow: yes
 
 [V4+ Styles]
+; Sub 的配色：未读【黑字白边】、已读琥珀，描边随字号缩放（0.075×字号）。
+; 黑字白边是用户指定的样式——白边在杂色画面上比黑边更能把字"托"出来。
+; 描边不再写死 4：字号能调到 120，固定 4px 在大字上会细得压不住背景。
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Sub,${FONT_FAMILY},${fontSize},&H0000E5FF,&H00FFFFFF,&H00000000,&H00000000,1,0,0,0,100,100,0,0,1,4,0,2,60,60,${marginV},1
-Style: Title,${FONT_FAMILY},96,&H00FFFFFF,&H00FFFFFF,&H00202020,&H00000000,1,0,0,0,100,100,0,0,1,6,0,8,60,60,120,1
-Style: Disclaimer,${FONT_FAMILY},32,&H00B4B4B4,&H00FFFFFF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,2,60,60,90,1
+Style: Sub,${FONT_FAMILY},${fontSize},&H0000E5FF,&H00000000,&H00FFFFFF,&H00000000,1,0,0,0,100,100,0,0,1,${Math.round(fontSize * 0.075)},0,2,60,60,${marginV},1
+Style: Title,${FONT_FAMILY},${TITLE_FONT_SIZE},&H00FFFFFF,&H00FFFFFF,&H00202020,&H00000000,1,0,0,0,100,100,0,0,1,10,0,8,60,60,120,1
+Style: Disclaimer,${FONT_FAMILY},${DISCLAIMER_FONT_SIZE},&H00B4B4B4,&H00FFFFFF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,3,0,2,60,60,90,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text

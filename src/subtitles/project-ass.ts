@@ -59,8 +59,19 @@ export function aspectOf (project: Project): AspectPreset {
  * 而不是"我拖过头了"，这种失败模式完全不可自证。取一半是因为再往上
  * 就越过画面中线，字幕跑到上半屏，那已经不是"调高度"而是换版式了。
  */
+/**
+ * 字幕最高能抬到哪儿。
+ *
+ * ⚠️ 原来是【画面高的一半】。那道线挡住了参考里的位置（离底 1000，超过
+ * 9:16 的半屏 960），也挡住了"想把字幕放上半屏"这种完全正当的排版。
+ * 那不是安全边界，是一个没说清楚理由的产品判断。
+ *
+ * 现在的上限是【画面高 − 一个最大字号】：保证字号拉到头时字顶也不出画。
+ * 这才是真正的物理边界。
+ */
 export function maxSubtitleMarginV (aspectRatio: string): number {
-  return Math.floor((ASPECT_PRESETS[aspectRatio] ?? DEFAULT_ASPECT).height / 2)
+  const h = (ASPECT_PRESETS[aspectRatio] ?? DEFAULT_ASPECT).height
+  return Math.floor(h - MAX_SUBTITLE_FONT_SIZE)
 }
 
 /**

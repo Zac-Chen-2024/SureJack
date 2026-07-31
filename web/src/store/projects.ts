@@ -7,7 +7,7 @@ import { api } from '../api/client'
  * import 不了后端代码，只能各写一份；tests/web/projects-store.test.ts
  * 里有一条测试把两边钉在一起。
  */
-export const DEFAULT_SUBTITLE_MARGIN_V = 300
+export const DEFAULT_SUBTITLE_MARGIN_V = 1000
 
 /**
  * 字幕能贴多低。**必须与后端 src/subtitles/project-ass.ts 的
@@ -27,7 +27,7 @@ export const MIN_SUBTITLE_MARGIN_V = 160
  * better-sqlite3 拖进浏览器包），只能各存一份。对不上的后果是：
  * 滑块能拖到后端会钳掉的值，用户确认后看到的结果和他选的不一样。
  */
-export const DEFAULT_SUBTITLE_FONT_SIZE = 64
+export const DEFAULT_SUBTITLE_FONT_SIZE = 80
 export const MIN_SUBTITLE_FONT_SIZE = 36
 export const MAX_SUBTITLE_FONT_SIZE = 120
 
@@ -63,13 +63,13 @@ const ASPECT_HEIGHT: Record<string, number> = {
 }
 
 /**
- * 滑块上界：画面高度的一半，与后端 clampSubtitleMarginV 同一条规则。
+ * 滑块上界：画面高 − 一个最大字号，与后端 maxSubtitleMarginV 同一条规则。
  *
  * ⚠️ 这里算出来的只是【体验】——真正的防线在路由层。滑块给不出越界值，
  * 但接口是公开的，所以后端那一道不能省，这一道也不能自作主张放宽。
  */
 export function maxSubtitleMarginV (aspectRatio: string): number {
-  return Math.floor((ASPECT_HEIGHT[aspectRatio] ?? 1920) / 2)
+  return Math.floor((ASPECT_HEIGHT[aspectRatio] ?? 1920) - MAX_SUBTITLE_FONT_SIZE)
 }
 
 /**

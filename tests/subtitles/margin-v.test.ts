@@ -47,13 +47,36 @@ function marginVOf (ass: string, name: string): string {
 }
 
 describe('字幕纵向位置 —— ASS 样式行', () => {
-  it('默认值渲染出的 Sub 样式行与加这个参数之前逐字节相同', () => {
+  /*
+   * 这一整行钉死字幕的观感。任何一次改动都必须是【有意的】，并且改完
+   * 要连着这条断言一起改——它的作用不是禁止改，而是不许无声地改。
+   *
+   * 当前这版是照着用户自己以前用剪映做的片子量出来的
+   * （screenshots/29226429….jpg）：未读【黑字】、描边【白色】，
+   * 描边宽度随字号缩放（0.075×字号，64 → 5）。
+   *
+   * 上一版是「白字黑边、描边写死 4」。换成白边是因为白边在杂色画面上
+   * 更能把字托出来；描边改成按比例，是因为字号能调到 120，
+   * 固定 4px 在大字上细得压不住背景。
+   */
+  it('Sub 样式行逐字节钉死', () => {
     const ass = buildAss({ lines, overlays: [], aspect, durationMs: 1000, mode: 'karaoke' })
-    // 这一整行就是改动之前的字面量。老项目的观感由它钉死。
     expect(styleLine(ass, 'Sub')).toBe(
-      `Style: Sub,${FONT_FAMILY},64,&H0000E5FF,&H00FFFFFF,&H00000000,&H00000000,1,0,0,0,100,100,0,0,1,4,0,2,60,60,300,1`
+      `Style: Sub,${FONT_FAMILY},80,&H0000E5FF,&H00000000,&H00FFFFFF,&H00000000,1,0,0,0,100,100,0,0,1,6,0,2,60,60,1000,1`
     )
-    expect(DEFAULT_SUBTITLE_MARGIN_V).toBe(300)
+    expect(DEFAULT_SUBTITLE_MARGIN_V).toBe(1000)
+  })
+
+  /* 标题和免责声明的字号也是量出来的，同样钉死 */
+  it('标题 160、免责声明 56——都是从参考图量出来的', () => {
+    const ass = buildAss({
+      lines, overlays: [
+        { content: '标题', style: 'Title', startMs: null, endMs: null },
+        { content: '声明', style: 'Disclaimer', startMs: null, endMs: null },
+      ], aspect, durationMs: 1000, mode: 'karaoke',
+    })
+    expect(styleLine(ass, 'Title').split(',')[2]).toBe('160')
+    expect(styleLine(ass, 'Disclaimer').split(',')[2]).toBe('56')
   })
 
   it('传进来的值进 Sub 样式行的 MarginV', () => {

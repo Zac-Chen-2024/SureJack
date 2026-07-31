@@ -94,40 +94,45 @@ describe('PATCH /api/projects/:id —— subtitleMarginV', () => {
     expect((await patch(a, cookie, id, { subtitleMarginV: -200 })).body.subtitleMarginV).toBe(160)
   })
 
-  it('超过画面高度一半的值被钳到一半（9:16 → 960）', async () => {
+  /*
+   * 上界从"画面高的一半"改成"画面高 − 最大字号(120)"。
+   * 半屏那道线不是安全边界，是个没说清理由的产品判断——它挡住了参考图里
+   * 的字幕位置（离底 1000）。现在这条是物理边界：字号拉满时字顶不出画。
+   */
+  it('超出上界的值被钳到 画面高−120（9:16 → 1800）', async () => {
     const a = await makeApp()
     const cookie = await loginAs(a, '测试字幕高度乙')
     const id = await newProject(a, cookie)
-    expect((await patch(a, cookie, id, { subtitleMarginV: 5000 })).body.subtitleMarginV).toBe(960)
+    expect((await patch(a, cookie, id, { subtitleMarginV: 5000 })).body.subtitleMarginV).toBe(1800)
   })
 
-  it('钳位上界跟着项目画幅走，不是写死 960', async () => {
+  it('钳位上界跟着项目画幅走，不是写死一个数', async () => {
     const a = await makeApp()
     const cookie = await loginAs(a, '测试字幕高度乙')
     const id = await newProject(a, cookie)
     await patch(a, cookie, id, { aspectRatio: '16:9' })   // 1920×1080
-    expect((await patch(a, cookie, id, { subtitleMarginV: 5000 })).body.subtitleMarginV).toBe(540)
+    expect((await patch(a, cookie, id, { subtitleMarginV: 5000 })).body.subtitleMarginV).toBe(960)
   })
 
   it('同一次请求里一起改画幅时，按【新】画幅钳位', async () => {
     const a = await makeApp()
     const cookie = await loginAs(a, '测试字幕高度乙')
     const id = await newProject(a, cookie)
-    const res = await patch(a, cookie, id, { aspectRatio: '16:9', subtitleMarginV: 900 })
-    expect(res.body.subtitleMarginV).toBe(540)
+    const res = await patch(a, cookie, id, { aspectRatio: '16:9', subtitleMarginV: 5000 })
+    expect(res.body.subtitleMarginV).toBe(960)
   })
 
   /**
-   * 换成更矮的画幅时，存着的旧值可能已经超过新画面的一半——不重新钳位的话
+   * 换成更矮的画幅时，存着的旧值可能已经超过新画面的上界——不重新钳位的话
    * 用户只是换了个画幅，字幕就凭空跑到画外去了。
    */
   it('单独改画幅也会把存着的值重新钳进新画幅的范围', async () => {
     const a = await makeApp()
     const cookie = await loginAs(a, '测试字幕高度乙')
     const id = await newProject(a, cookie)
-    await patch(a, cookie, id, { subtitleMarginV: 900 })
+    await patch(a, cookie, id, { subtitleMarginV: 1700 })   // 9:16 下合法
     const res = await patch(a, cookie, id, { aspectRatio: '16:9' })
-    expect(res.body.subtitleMarginV).toBe(540)
+    expect(res.body.subtitleMarginV).toBe(960)               // 16:9 下要收进来
   })
 
   it('低于下限的值被抬到 160——绝不让字幕压在免责声明上', async () => {
