@@ -109,6 +109,7 @@ await page.getByText('写了一半的稿子').first().click()
 await page.waitForTimeout(600)
 console.log('  草稿点进去 =', (await page.locator('body').innerText()).slice(0, 90).replace(/\n/g, ' | '))
 await page.screenshot({ path: OUT + 'resume-draft.png' })
+console.log('  有没有标题区 =', (await page.locator('text=封面标题（缩略图那一帧上的字）').count()) > 0 ? '有' : '没有')
 await page.getByLabel('返回').click()
 await page.waitForTimeout(400)
 

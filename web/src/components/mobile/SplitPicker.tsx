@@ -119,7 +119,8 @@ function Wheel ({ items, value, onChange, allowed }: {
 
 export function SplitPicker ({ projectId, onDone, onCancel }: {
   projectId: string
-  onDone: () => void
+  /** 拆完把两条片子的 id 交回去——下一步要给它们分别填标题 */
+  onDone: (ids: { mainId: string; sequelId: string }) => void
   onCancel: () => void
 }) {
   const [plan, setPlan] = useState<Plan | null>(null)
@@ -153,8 +154,9 @@ export function SplitPicker ({ projectId, onDone, onCancel }: {
   async function confirm () {
     setBusy(true)
     try {
-      await api.post(`/api/projects/${projectId}/split`, { breakIndex, introEndIndex: introEnd })
-      onDone()
+      const r = await api.post<{ main: { id: string }; sequel: { id: string } }>(
+        `/api/projects/${projectId}/split`, { breakIndex, introEndIndex: introEnd })
+      onDone({ mainId: r.main.id, sequelId: r.sequel.id })
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {

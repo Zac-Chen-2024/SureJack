@@ -5,6 +5,7 @@ import { useRename, renameGates } from '../../store/rename'
 import { NameReplacePanel } from '../NameReplacePanel'
 import { IconChevronLeft, IconUpload, IconLoader, IconEdit, IconScissors} from '../ui/Icon'
 import { SplitPicker } from './SplitPicker'
+import { EpisodeTitles } from './EpisodeTitles'
 
 /**
  * 新建项目引导页（点「新建项目」进来）。一条线走完：
@@ -42,6 +43,8 @@ export function MobileNewProject ({ onBack, onGo, resumeId }: {
    */
   const [autoSequel, setAutoSequel] = useState(false)
   const [splitting, setSplitting] = useState(false)
+  /** 拆出来的续集。有它就说明这一批要生成两条片子 */
+  const [sequelId, setSequelId] = useState<string | null>(null)
   const fileInput = useRef<HTMLInputElement>(null)
 
   /*
@@ -84,6 +87,15 @@ export function MobileNewProject ({ onBack, onGo, resumeId }: {
     setBusy('analyze')
     try { const id = await ensureProject(); await analyze(id) } finally { setBusy(null) }
   }
+  /*
+   * 【一批可能是两条片子】。开了续集的话，主片和续集都要配音——
+   * 串行等：TTS 是同步接口，两条一起发会撞 Azure 的限速，而且第二条
+   * 排在队列里也是等，不如老老实实一条一条来。
+   */
+  async function voiceAll (ids: string[]): Promise<void> {
+    for (const id of ids) await generateVoice(id)
+  }
+
   async function onGenerate () {
     setBusy('generate')
     try {
@@ -91,7 +103,8 @@ export function MobileNewProject ({ onBack, onGo, resumeId }: {
       const id = createdId ?? await ensureProject()
       // 【不等配音跑完】：立刻开跑 + 立刻进编辑器看进度蒙层（配音中→合成中）。
       // 配音/合成都在后台，这期间能返回列表继续建别的项目。
-      void generateVoice(id)
+      // 拆过集的话续集也一起配——两条都是这一批的产物，不该让用户再去点一次。
+      void voiceAll(sequelId ? [id, sequelId] : [id])
       onGo(id)
     } finally { setBusy(null) }
   }
@@ -211,16 +224,30 @@ export function MobileNewProject ({ onBack, onGo, resumeId }: {
               <SplitPicker
                 projectId={createdId}
                 onCancel={() => setSplitting(false)}
-                onDone={() => { setSplitting(false); setAutoSequel(false); void onGenerate() }}
+                onDone={({ sequelId: sid }) => {
+                  setSplitting(false)
+                  setSequelId(sid)
+                  // 拆完【不立刻生成】：先让用户把两条片子的标题分别定好。
+                  // 这两个字段会被烧进产物，生成之后再改代价完全不同。
+                  void useProjects.getState().load()
+                }}
               />
             )}
 
-            {!autoSequel && (
+            {/*
+              * 标题：封面标题和片内标题都会被【烧进产物】，所以正确的位置就是
+              * "按下生成之前的最后一屏"。拆过集的话两条片子分别填。
+              */}
+            {!splitting && <EpisodeTitles ids={sequelId ? [createdId, sequelId] : [createdId]} />}
+
+            {!splitting && (!autoSequel || sequelId) && (
               <button
                 type="button" onClick={() => void onGenerate()} disabled={!canGenerate}
                 className="flex w-full items-center justify-center gap-1.5 rounded-xl bg-accent px-4 py-3 text-sm font-extrabold text-ink-950 transition-colors hover:bg-accent-dim disabled:opacity-40"
               >
-                {busy === 'generate' ? <><IconLoader className="size-4 animate-spin" />提交中…</> : '生成配音并合成视频'}
+                {busy === 'generate'
+                  ? <><IconLoader className="size-4 animate-spin" />提交中…</>
+                  : sequelId ? '生成两集的配音并合成' : '生成配音并合成视频'}
               </button>
             )}
             {gated && <p className="text-center text-[11px] text-accent">先在上面确认人名替换（或关掉人名替换），才能生成。</p>}
