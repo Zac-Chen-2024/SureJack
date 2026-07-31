@@ -7,7 +7,7 @@ import { api } from '../api/client'
  * import 不了后端代码，只能各写一份；tests/web/projects-store.test.ts
  * 里有一条测试把两边钉在一起。
  */
-export const DEFAULT_SUBTITLE_MARGIN_V = 1000
+export const DEFAULT_SUBTITLE_MARGIN_V = 999
 
 /**
  * 字幕能贴多低。**必须与后端 src/subtitles/project-ass.ts 的
@@ -27,7 +27,7 @@ export const MIN_SUBTITLE_MARGIN_V = 160
  * better-sqlite3 拖进浏览器包），只能各存一份。对不上的后果是：
  * 滑块能拖到后端会钳掉的值，用户确认后看到的结果和他选的不一样。
  */
-export const DEFAULT_SUBTITLE_FONT_SIZE = 80
+export const DEFAULT_SUBTITLE_FONT_SIZE = 81
 export const MIN_SUBTITLE_FONT_SIZE = 36
 export const MAX_SUBTITLE_FONT_SIZE = 120
 

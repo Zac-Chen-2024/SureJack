@@ -18,7 +18,7 @@ import type { SubtitleLine, TextOverlay, AspectPreset } from '../types.js'
  * 头像、点赞栏、评论框占着；贴底的字幕在刷的时候经常被压住。抬到中部
  * 反而是"永远看得见"的位置。原来的 300 是凭感觉填的。
  */
-export const DEFAULT_SUBTITLE_MARGIN_V = 1000
+export const DEFAULT_SUBTITLE_MARGIN_V = 999
 
 export interface BuildAssOptions {
   lines: SubtitleLine[]
@@ -173,22 +173,36 @@ export function buildKaraoke (line: SubtitleLine, hidePunctuation = false): stri
  * 所以【默认值不能动】：改了会让每一条已有成片的指纹失效，
  * 全部重烧一遍十几分钟。
  */
-/** 参考图量出来的字幕字号（每字 54px → ASS 约 79，取整 80） */
-export const DEFAULT_SUBTITLE_FONT_SIZE = 80
+/** 参考图拟合出来的字幕字号（墨迹 227×61，拟合 228×61，误差 1px） */
+export const DEFAULT_SUBTITLE_FONT_SIZE = 81
 
 /**
- * 片内标题和免责声明的字号。**都是量出来的**。
+ * 标题 / 字幕 / 免责声明的字号、描边、位置。**全部是逐像素拟合出来的。**
  *
- * 参考的是用户自己以前用剪映做的片子（screenshots/29226429….jpg）。把那张
- * 微信截图换算回成片坐标之后：标题每字 111px → ASS 字号约 162；
- * 免责声明每字 40px → 约 59。而我们原来是 96 和 32——只有参考的六成。
+ * 参考是用户自己以前用剪映做的片子（screenshots/29226429….jpg）。做法和认
+ * 封面字体那次一样：拿 libass 真渲染候选参数，和参考做两层 IoU
+ * （外轮廓 + 字心）——只比外轮廓认不出描边宽度，描边加粗能把小字撑成
+ * 大字的外形；两层一起比才唯一锁死【字号 + 描边】这一对。
+ * 脚本在 spikes/subtitle/。
  *
- * 【为什么原来那两个数偏小】：它们是当初凭感觉填的，而唯一的检验方式是
- * 在 1080×1920 的画布上看整幅——在电脑上看一张缩小到 300px 宽的预览图，
- * 96 号字显得挺大。真到手机上全屏播，它就小了。
+ * 拟合结果（墨迹外接框，成片坐标）：
+ *   标题      参考 461×117  拟合 460×119  → 字号 165 描边 6  离顶 68
+ *   字幕      参考 227×61   拟合 228×61   → 字号 81  描边 4  离底 999
+ *   免责声明  参考 541×57   拟合 541×45   → 字号 60  描边 3  离底 36
+ *
+ * ⚠️【别用"量一下再估"代替拟合】。第一版我用阈值掩膜量外接框，得出标题
+ * 162、免责声明 59——掩膜把背景里的高光和暗部也算成了文字，外接框直接
+ * 撑到整幅宽。拟合不怕掩膜脏：比的是形状重合度，噪点在两边都不出现。
  */
-export const TITLE_FONT_SIZE = 160
-export const DISCLAIMER_FONT_SIZE = 56
+export const TITLE_FONT_SIZE = 165
+export const TITLE_OUTLINE = 6
+export const TITLE_MARGIN_V = 68
+export const DISCLAIMER_FONT_SIZE = 60
+export const DISCLAIMER_OUTLINE = 3
+export const DISCLAIMER_MARGIN_V = 36
+
+/** 字幕描边 ÷ 字号。参考里 81 号字配 4px 描边 → 0.0494 */
+export const SUBTITLE_OUTLINE_RATIO = 0.0494
 
 /**
  * 字号的上下限。
@@ -258,9 +272,9 @@ export function buildAss (opts: BuildAssOptions): string {
   const styleLines = opts.legacyStyle === true
     ? legacyStyleLines(fontSize, marginV)
     : [
-        `Style: Sub,${FONT_FAMILY},${fontSize},&H00000000,&H00000000,&H00FFFFFF,&H00000000,1,0,0,0,100,100,0,0,1,${Math.round(fontSize * 0.075)},0,2,60,60,${marginV},1`,
-        `Style: Title,${FONT_FAMILY},${TITLE_FONT_SIZE},&H00FFFFFF,&H00FFFFFF,&H00202020,&H00000000,1,0,0,0,100,100,0,0,1,10,0,8,60,60,120,1`,
-        `Style: Disclaimer,${FONT_FAMILY},${DISCLAIMER_FONT_SIZE},&H00B4B4B4,&H00FFFFFF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,3,0,2,60,60,90,1`,
+        `Style: Sub,${FONT_FAMILY},${fontSize},&H00000000,&H00000000,&H00FFFFFF,&H00000000,1,0,0,0,100,100,0,0,1,${Math.max(1, Math.round(fontSize * SUBTITLE_OUTLINE_RATIO))},0,2,60,60,${marginV},1`,
+        `Style: Title,${FONT_FAMILY},${TITLE_FONT_SIZE},&H00FFFFFF,&H00FFFFFF,&H00202020,&H00000000,1,0,0,0,100,100,0,0,1,${TITLE_OUTLINE},0,8,60,60,${TITLE_MARGIN_V},1`,
+        `Style: Disclaimer,${FONT_FAMILY},${DISCLAIMER_FONT_SIZE},&H00B4B4B4,&H00FFFFFF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,${DISCLAIMER_OUTLINE},0,2,60,60,${DISCLAIMER_MARGIN_V},1`,
       ].join('\n')
 
   return `[Script Info]

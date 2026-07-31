@@ -60,21 +60,27 @@ describe('字幕纵向位置 —— ASS 样式行', () => {
   it('Sub 样式行逐字节钉死', () => {
     const ass = buildAss({ lines, overlays: [], aspect, durationMs: 1000, mode: 'karaoke' })
     expect(styleLine(ass, 'Sub')).toBe(
-      `Style: Sub,${FONT_FAMILY},80,&H00000000,&H00000000,&H00FFFFFF,&H00000000,1,0,0,0,100,100,0,0,1,6,0,2,60,60,1000,1`
+      `Style: Sub,${FONT_FAMILY},81,&H00000000,&H00000000,&H00FFFFFF,&H00000000,1,0,0,0,100,100,0,0,1,4,0,2,60,60,999,1`
     )
-    expect(DEFAULT_SUBTITLE_MARGIN_V).toBe(1000)
+    expect(DEFAULT_SUBTITLE_MARGIN_V).toBe(999)
   })
 
-  /* 标题和免责声明的字号也是量出来的，同样钉死 */
-  it('标题 160、免责声明 56——都是从参考图量出来的', () => {
+  /*
+   * 标题和免责声明同样逐字节钉死。这三行是照参考图【逐像素拟合】出来的
+   * （spikes/subtitle/，两层 IoU：外轮廓 + 字心），墨迹误差：
+   * 标题 3px、字幕 1px、免责声明 0px（宽度）。
+   */
+  it('标题 165/描边6/离顶68，免责声明 60/描边3/离底36', () => {
     const ass = buildAss({
       lines, overlays: [
         { content: '标题', style: 'Title', startMs: null, endMs: null },
         { content: '声明', style: 'Disclaimer', startMs: null, endMs: null },
       ], aspect, durationMs: 1000, mode: 'karaoke',
     })
-    expect(styleLine(ass, 'Title').split(',')[2]).toBe('160')
-    expect(styleLine(ass, 'Disclaimer').split(',')[2]).toBe('56')
+    const t = styleLine(ass, 'Title').split(',')
+    expect([t[2], t[16], t[21]]).toEqual(['165', '6', '68'])
+    const d = styleLine(ass, 'Disclaimer').split(',')
+    expect([d[2], d[16], d[21]]).toEqual(['60', '3', '36'])
   })
 
   it('传进来的值进 Sub 样式行的 MarginV', () => {
@@ -100,8 +106,8 @@ describe('字幕纵向位置 —— ASS 样式行', () => {
     const low = buildAss({ lines, overlays: [], aspect, durationMs: 1000, mode: 'karaoke', subtitleMarginV: 0 })
     const high = buildAss({ lines, overlays: [], aspect, durationMs: 1000, mode: 'karaoke', subtitleMarginV: 960 })
     for (const ass of [low, high]) {
-      expect(marginVOf(ass, 'Disclaimer')).toBe('90')
-      expect(marginVOf(ass, 'Title')).toBe('120')
+      expect(marginVOf(ass, 'Disclaimer')).toBe('36')
+      expect(marginVOf(ass, 'Title')).toBe('68')
     }
     expect(styleLine(low, 'Disclaimer')).toBe(styleLine(high, 'Disclaimer'))
     expect(styleLine(low, 'Title')).toBe(styleLine(high, 'Title'))
@@ -117,7 +123,7 @@ describe('字幕纵向位置 —— buildAssForProject', () => {
   it('默认值的项目产出的 ASS 与不带这个字段时完全一致', () => {
     const ass = buildAssForProject(makeProject())
     expect(marginVOf(ass, 'Sub')).toBe(String(DEFAULT_SUBTITLE_MARGIN_V))
-    expect(marginVOf(ass, 'Disclaimer')).toBe('90')
+    expect(marginVOf(ass, 'Disclaimer')).toBe('36')
   })
 
   /** 项目名会被烧进画面：这个参数不许顺手把任何状态信息带进 Title 那一行 */
