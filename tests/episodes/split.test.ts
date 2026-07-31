@@ -96,14 +96,21 @@ describe('拆故事', () => {
 })
 
 describe('续集的标题', () => {
-  it('项目名加 2，封面和片内标题跟着片内标题加 2', () => {
+  /*
+   * 【只有封面带“2”，片内标题不带】。封面是给刷到的人看的，「2」告诉他
+   * 前面还有一集；片内标题是"这个故事叫什么"，两集是同一个故事，
+   * 挂个 2 在那儿反而像剧名的一部分。
+   */
+  it('封面标题加 2，片内标题不加', () => {
     expect(sequelTitles({ name: '豪门归来', inVideoTitle: '她回来了' })).toEqual({
-      name: '豪门归来2', coverTitle: '她回来了2', inVideoTitle: '她回来了2',
+      name: '豪门归来2', coverTitle: '她回来了2', inVideoTitle: '她回来了',
     })
   })
 
   it('没填片内标题就用项目名推', () => {
-    expect(sequelTitles({ name: '豪门归来', inVideoTitle: '' }).coverTitle).toBe('豪门归来2')
+    const t = sequelTitles({ name: '豪门归来', inVideoTitle: '' })
+    expect(t.coverTitle).toBe('豪门归来2')
+    expect(t.inVideoTitle).toBe('豪门归来')
   })
 
   /* 提醒语用【片内标题】——那是观众在第一集屏幕上一直看着的那行字 */

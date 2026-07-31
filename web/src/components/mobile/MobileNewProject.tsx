@@ -87,24 +87,20 @@ export function MobileNewProject ({ onBack, onGo, resumeId }: {
     setBusy('analyze')
     try { const id = await ensureProject(); await analyze(id) } finally { setBusy(null) }
   }
-  /*
-   * 【一批可能是两条片子】。开了续集的话，主片和续集都要配音——
-   * 串行等：TTS 是同步接口，两条一起发会撞 Azure 的限速，而且第二条
-   * 排在队列里也是等，不如老老实实一条一条来。
-   */
-  async function voiceAll (ids: string[]): Promise<void> {
-    for (const id of ids) await generateVoice(id)
-  }
-
   async function onGenerate () {
     setBusy('generate')
     try {
       // 不再碰 scriptText——此刻库里那份是"确认替换"后的成品，动它就等于回退
       const id = createdId ?? await ensureProject()
-      // 【不等配音跑完】：立刻开跑 + 立刻进编辑器看进度蒙层（配音中→合成中）。
-      // 配音/合成都在后台，这期间能返回列表继续建别的项目。
-      // 拆过集的话续集也一起配——两条都是这一批的产物，不该让用户再去点一次。
-      void voiceAll(sequelId ? [id, sequelId] : [id])
+      /*
+       * 【不等配音跑完】：立刻开跑 + 立刻进编辑器看进度蒙层（配音中→合成中）。
+       * 配音/合成都在后台，这期间能返回列表继续建别的项目。
+       *
+       * 【续集不在这里发第二次请求】：主片配完之后服务端会自己接着配续集
+       * （见 tts/routes.ts）。放前端的话要求页面一直开着，而按下生成就
+       * 切走/锁屏是常态——页面一走，续集就永远停在草稿。
+       */
+      void generateVoice(id)
       onGo(id)
     } finally { setBusy(null) }
   }

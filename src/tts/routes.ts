@@ -143,6 +143,31 @@ export function registerTtsRoutes (app: FastifyInstance, deps: Deps): void {
         void enqueueFilm(deps, name, req.params.id)
           .catch((e: unknown) => { req.log.warn({ err: e }, '成片自动合成入队失败，稍后由状态接口补排') })
 
+        /*
+         * ── 续集跟着一起配 ─────────────────────────────────────────────
+         * 拆过集的项目，主片配完就该轮到续集，用户不该再去点第二次。
+         *
+         * 【为什么放在服务端而不是前端接着发一次请求】：前端那条路要求页面
+         * 一直开着。用户按下生成就切走/锁屏是常态，页面一走，续集就永远
+         * 停在草稿——而他以为两条都在跑。放这儿就跟页面无关了。
+         *
+         * 【串行、不并发】：Azure 有限速，两条一起发只会互相拖。而且续集
+         * 排在后面本来也要等，先后顺序还正好是观众看的顺序。
+         */
+        void (async () => {
+          const kids = withUserDb(name, (db) => db.listProjects()
+            .filter((p) => p.parentProjectId === req.params.id && p.ttsState === 'none'
+              && (p.scriptText ?? '').trim() !== ''))
+          for (const kid of kids) {
+            try {
+              await synthesizeProject(deps, name, whitelist, kid.id, key, region, synth)
+              req.log.info({ sequel: kid.id }, '续集配音完成，已排合成')
+            } catch (e) {
+              req.log.warn({ err: e, sequel: kid.id }, '续集配音失败，用户可在那条项目里重试')
+            }
+          }
+        })()
+
         return {
           ttsState: updated!.ttsState,
           durationMs: result.durationMs,
@@ -157,6 +182,52 @@ export function registerTtsRoutes (app: FastifyInstance, deps: Deps): void {
         return reply.code(502).send({ error: e instanceof Error ? e.message : '配音失败' })
       }
     })
+}
+
+/**
+ * 给一条项目配音：合成 → 写素材 + 词级时间轴 → 排成片。
+ *
+ * 抽出来是为了让【续集】能走完全一样的一条路。复制一份的话，两处迟早
+ * 分叉——而分叉的表现是"续集的字幕/时间轴和主片规则不一样"，极难发现。
+ */
+async function synthesizeProject (
+  deps: Deps, userName: string, whitelist: string[], projectId: string,
+  key: string, region: string, synth: typeof synthesizeLong,
+): Promise<void> {
+  const withDb = <T>(fn: (db: ReturnType<typeof openUserDb>) => T): T => {
+    const db = openUserDb(userName, whitelist)
+    try { return fn(db) } finally { db.close() }
+  }
+  const project = withDb((db) => db.getProject(projectId))
+  if (!project) return
+  const text = normalizeScript(project.scriptText)
+  if (!text) return
+
+  withDb((db) => db.updateProject(projectId, { ttsState: 'generating' }))
+  try {
+    const dir = assetDir(userName, whitelist, projectId)
+    await mkdir(dir, { recursive: true })
+    const result = await synth({
+      text, outPath: join(dir, 'voice.mp3'), key, region,
+      voice: project.voiceName, rate: project.voiceRate,
+      volume: project.voiceVolume, pitch: project.voicePitch,
+    })
+    withDb((db) => {
+      for (const a of db.listAssets(projectId, 'voice')) db.deleteAsset(a.id)
+      db.addAsset({
+        projectId, kind: 'voice', path: result.audioPath,
+        originalName: 'voice.mp3', size: 0, durationMs: result.durationMs,
+      })
+      db.updateProject(projectId, {
+        ttsState: 'ready', ttsDurationMs: result.durationMs,
+        wordTimingsJson: JSON.stringify(result.words),
+      })
+    })
+    await enqueueFilm(deps, userName, projectId)
+  } catch (e) {
+    withDb((db) => db.updateProject(projectId, { ttsState: 'error' }))
+    throw e
+  }
 }
 
 /**

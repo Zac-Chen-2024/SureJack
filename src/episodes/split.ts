@@ -79,9 +79,17 @@ export function splitStory (opts: {
 /**
  * 续集的三个标题。
  *
- * 【封面标题加“2”，片内标题跟着自己的项目名】——用户点「应用项目名」
- * 时就是这个默认；之后他改任何一个都不会被覆盖回去（改的是库里的值，
- * 这个函数只在【创建那一刻】用一次）。
+ * ⚠️【只有封面标题带“2”，片内标题不带】。
+ *
+ * 封面是给刷到的人看的：他没看过第一集，「…2」才告诉他这是续集、
+ * 前面还有一集可看，这个「2」是有用信息。
+ * 片内标题是全片顶部常驻的那行，它的作用是"这个故事叫什么"——两集是
+ * 同一个故事，标题就该是同一个。挂个「2」在那儿反而像是剧名的一部分。
+ *
+ * 项目名带「2」是另一回事：那是作者自己在列表里认片子用的，观众看不到。
+ *
+ * 这个函数只在【创建那一刻】和【点"用项目名做标题"那一下】用；
+ * 之后用户改了哪个都不会被覆盖回去。
  */
 export function sequelTitles (main: { name: string; inVideoTitle?: string | null }): {
   name: string; coverTitle: string; inVideoTitle: string
@@ -90,6 +98,6 @@ export function sequelTitles (main: { name: string; inVideoTitle?: string | null
   return {
     name: `${main.name}2`,
     coverTitle: `${base}2`,
-    inVideoTitle: `${base}2`,
+    inVideoTitle: base,
   }
 }
