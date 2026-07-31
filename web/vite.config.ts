@@ -2,6 +2,8 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { execSync } from 'node:child_process'
+import { writeFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 
 /**
  * 构建时把版本戳进产物。
@@ -27,8 +29,29 @@ function buildStamp (): string {
   }
 }
 
+/**
+ * 构建时把版本戳单独写一份到 build.json。
+ *
+ * ⚠️【为什么光有注入进 JS 的那份还不够】：那份是"这个页面是哪一版"，
+ * 而这个文件是"服务器现在是哪一版"。原生壳把 WebView 留在内存里，切回
+ * App 不会重新请求页面——于是我改完部署了，用户手上那张页面还是旧的，
+ * 他去找新功能，找不到。踩过一次，就是这么找过来的。
+ *
+ * 有了这个文件，页面能自己发现"我过期了"并提示刷新。它不带内容哈希、
+ * 服务端也不给缓存，所以每次拿到的都是当下的真值。
+ */
+function emitBuildJson (): { name: string; closeBundle: () => void } {
+  return {
+    name: 'sj-build-json',
+    closeBundle () {
+      const stamp = { sha: buildStamp(), time: new Date().toISOString() }
+      writeFileSync(resolve(__dirname, '../public/build.json'), JSON.stringify(stamp))
+    },
+  }
+}
+
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), emitBuildJson()],
 
   define: {
     __BUILD_SHA__: JSON.stringify(buildStamp()),

@@ -312,6 +312,11 @@ export function buildServer (opts: BuildOpts = {}): FastifyInstance {
       const url = req.url.split('?')[0]!
       if (url.startsWith('/api/')) return
       if (url.includes('/assets/')) reply.header('Cache-Control', 'public, max-age=31536000, immutable')
+      /*
+       * build.json 问的是"服务器此刻是哪一版"，被缓存住就等于白问——
+       * 页面会永远认为自己是最新的，而那正是这个文件要解决的问题本身。
+       */
+      else if (url === '/build.json') reply.header('Cache-Control', 'no-store')
       else if (url === '/' || !url.slice(1).includes('.')) reply.header('Cache-Control', 'no-cache, must-revalidate')
     })
     // SPA fallback：非 /api 的未知路径一律回 index.html，交给前端路由

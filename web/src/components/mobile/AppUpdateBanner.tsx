@@ -1,5 +1,6 @@
 import { useAppUpdate } from '../../hooks/useAppUpdate'
-import { IconDownload } from '../ui/Icon'
+import { useWebBuild } from '../../hooks/useWebBuild'
+import { IconDownload, IconLoader } from '../ui/Icon'
 
 /**
  * 顶部"有新版"横幅（只在安卓 APK 里、且检测到更高版本时出现）。
@@ -8,6 +9,33 @@ import { IconDownload } from '../ui/Icon'
  */
 export function AppUpdateBanner () {
   const { update, dismiss } = useAppUpdate()
+  const web = useWebBuild()
+
+  /*
+   * 【界面过期优先于 APK 更新】。界面重载是一秒钟的事、而且必然有效；
+   * APK 更新要下载安装。两个横幅同时出现只会让人不知道先点哪个，
+   * 所以先把便宜且确定的那个推给用户。
+   */
+  if (web.stale) {
+    return (
+      <div
+        className="absolute inset-x-0 top-0 z-50 flex items-center gap-2 border-b border-accent/30 bg-ink-900/95 px-4 backdrop-blur"
+        style={{ paddingTop: 'calc(env(safe-area-inset-top, 0px) + 8px)', paddingBottom: '8px' }}
+      >
+        <span className="min-w-0 flex-1 text-xs text-ink-100">
+          界面有更新 <span className="text-ink-400">· 点一下加载新版</span>
+        </span>
+        <button
+          type="button"
+          onClick={web.reload}
+          className="flex shrink-0 items-center gap-1 rounded-lg bg-accent px-3 py-1.5 text-xs font-bold text-ink-950"
+        >
+          <IconLoader className="size-3.5" strokeWidth={2.2} />刷新
+        </button>
+      </div>
+    )
+  }
+
   if (!update) return null
   return (
     <div

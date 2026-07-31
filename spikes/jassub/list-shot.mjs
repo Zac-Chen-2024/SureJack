@@ -101,6 +101,14 @@ await page.waitForSelector('text=欢迎回来', { state: 'detached', timeout: 20
 await page.waitForTimeout(800)
 await page.screenshot({ path: OUT + 'list.png' })
 
+// 新建项目页（要看「自动创建续集」开关在不在）
+await page.getByText('新建项目', { exact: true }).click()
+await page.waitForTimeout(500)
+await page.screenshot({ path: OUT + 'new-project.png' })
+console.log('  新建页文本 =', (await page.locator('body').innerText()).slice(0, 200).replace(/\n/g, ' | '))
+await page.getByLabel('返回').click()
+await page.waitForTimeout(400)
+
 // 下载悬浮框
 await page.getByLabel('下载队列').click()
 await page.waitForTimeout(400)
