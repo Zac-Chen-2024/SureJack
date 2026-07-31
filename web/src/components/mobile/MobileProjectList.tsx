@@ -175,8 +175,10 @@ export function MobileProjectList ({ onOpen, onNew }: { onOpen: (id: string) => 
       </div>
 
       {/* ── ② 新建项目（固定，下拉刷新时不动）─────────────────────── */}
-      {/* pb 给得比标题栏大：这里是"操作区"和"内容区"的分界，间距就是那道界 */}
-      <div className="shrink-0 px-5 pb-8">
+      {/* pb 比标题栏略大：这里是"操作区"和"内容区"的分界。
+          【但也别太大】——这条带子占的高度只该比搜索框本身多一点，
+          留白撑得比它要分隔的东西还显眼，就本末倒置了 */}
+      <div className="shrink-0 px-5 pb-4">
         <button
           type="button"
           onClick={onNew}
@@ -190,10 +192,13 @@ export function MobileProjectList ({ onOpen, onNew }: { onOpen: (id: string) => 
       {/* ── ③「最近」+ 筛选 / 搜索（固定，和列表同属下半区）───────── */}
       {/*
        * 【这行上下都要留白，且上大下小】。它是一条分隔带，不是列表的第一行：
-       * 上面(32px)把它和"新建项目"这个操作区推开，下面(20px)小一点——
+       * 上面(16px)把它和"新建项目"这个操作区推开，下面(12px)小一点——
        * 留白不等宽，它才会读成"下面这堆东西的标题"，而不是飘在中间无所属。
+       *
+       * 整条带子连留白算下来 64px，搜索胶囊本身 32px——刚好比它宽一点。
+       * 之前给到 32+36+20=88px，隔开的效果没变，只是把列表往下推了一截。
        */}
-      <div className="mb-5 flex h-9 shrink-0 items-center gap-1.5 px-5">
+      <div className="mb-3 flex h-9 shrink-0 items-center gap-1.5 px-5">
         <span className="shrink-0 text-xs font-bold uppercase tracking-wider text-ink-400">最近</span>
 
         {/* 筛选：功能还没做，就明说，不摆一个装样子的按钮 */}
