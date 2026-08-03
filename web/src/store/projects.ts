@@ -112,6 +112,11 @@ export interface Project {
   subtitleFontSize: number
   /** 封面标题。空串 = 用项目名（后端 coverTitleOf 兜的底） */
   coverTitle: string
+  /**
+   * 开头素材还等不等作者挑。pending = 合成被拦着，等这一屏。
+   * 老项目一律 settled——它们从来没有这一步。
+   */
+  openingState: 'pending' | 'settled'
   /** 片内标题——顶部常驻那行大字。空串 = 用项目名 */
   inVideoTitle: string
   /** 续集指向它的主片；主片自己是 null */

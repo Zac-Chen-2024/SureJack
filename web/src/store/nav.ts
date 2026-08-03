@@ -18,8 +18,8 @@ import { create } from 'zustand'
  * list；在 list（根）按返回 → 浏览器默认行为（TWA 里=退出 App），符合直觉。
  */
 export type Sheet = 'script' | 'voice' | 'subtitle' | 'background' | 'music'
-export type NavEntry = { k: 'list' } | { k: 'newproject' } | { k: 'editor' } | { k: 'sheet'; name: Sheet }
-export type Screen = 'list' | 'newproject' | 'editor'
+export type NavEntry = { k: 'list' } | { k: 'newproject' } | { k: 'opening' } | { k: 'editor' } | { k: 'sheet'; name: Sheet }
+export type Screen = 'list' | 'newproject' | 'opening' | 'editor'
 
 /** 当前该渲染哪一屏（抽屉不改变底层屏） */
 export function topScreen (stack: NavEntry[]): Screen {

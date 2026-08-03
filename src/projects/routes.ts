@@ -197,6 +197,24 @@ export function registerProjectRoutes (app: FastifyInstance, deps: Deps): void {
    * 算出同一份排布，所见即所得。
    */
   /**
+   * 把这个项目挂起，等作者挑开头。
+   *
+   * ⚠️【必须在开始配音【之前】调，而且要等它返回】。配音一完成，服务端
+   * 就会自己排合成——短文案十几秒就配完了。先发配音再挂起的话，
+   * 那条片子已经拿着一套随机开头烧上了。
+   *
+   * 幂等：重复调只是再写一次同样的状态。
+   */
+  app.post<{ Params: { id: string } }>(
+    '/api/projects/:id/opening/hold', { preHandler: requireAuth }, async (req, reply) => {
+      const name = getSession(req)!
+      const project = withUserDb(name, (db) => db.getProject(req.params.id))
+      if (!project) return reply.code(404).send({ error: '项目不存在' })
+      withUserDb(name, (db) => db.updateProject(req.params.id, { openingState: 'pending' }))
+      return { openingState: 'pending' }
+    })
+
+  /**
    * 敲定这个项目的开头素材，然后放行合成。
    *
    * body.pick 给了就用作者挑的；没给（或空）= 「用默认素材」。

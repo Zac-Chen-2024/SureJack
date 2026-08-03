@@ -6,6 +6,7 @@ import { listBucket, scanBucket, getLibraryItem } from './scan.js'
 import { libraryItemPath } from './paths.js'
 import { playbackMimeFor, parseRange } from '../assets/storage.js'
 import { createReadStream } from 'node:fs'
+import { ensureThumb } from './thumbs.js'
 import { stat } from 'node:fs/promises'
 
 export interface LibraryDeps {
@@ -33,6 +34,30 @@ export function registerLibraryRoutes (app: FastifyInstance, deps: LibraryDeps):
     const db = openLibraryDb(dataDir)
     try { return fn(db) } finally { db.close() }
   }
+
+  /**
+   * 一条素材的缩略图。挑开头那一屏要铺 68 张图，没有图没法挑。
+   *
+   * 【按需生成 + 落盘缓存】：第一次进这一屏会现抽，之后直接读文件。
+   * 不在扫库时一次性全抽——扫库本来就慢，再加 68 次 ffmpeg 会让
+   * 「扫描素材库」这个按钮看起来卡死。
+   */
+  app.get<{ Params: { id: string } }>(
+    '/api/library/items/:id/thumb', { preHandler: requireAuth }, async (req, reply) => {
+      const item = withLibraryDb((db) => getLibraryItem(db, req.params.id))
+      if (item === null) return reply.code(404).send({ error: '素材不存在' })
+      let path: string
+      try {
+        path = await ensureThumb(dataDir, item)
+      } catch {
+        // 抽帧失败（文件损坏之类）就给 404，前端显示占位格，不整屏报错
+        return reply.code(404).send({ error: '这条素材抽不出缩略图' })
+      }
+      // 素材不会变，缓存久一点；前端一屏 68 张图，来回滚动不该反复回源
+      reply.header('Cache-Control', 'private, max-age=86400')
+      reply.type('image/jpeg')
+      return reply.send(createReadStream(path))
+    })
 
   app.get<{ Params: { bucket: string } }>(
     '/api/library/:bucket', { preHandler: requireAuth }, async (req, reply) => {

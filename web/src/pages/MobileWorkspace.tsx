@@ -6,6 +6,7 @@ import { useLibrary } from '../store/library'
 import { useFilmStatus } from '../hooks/useFilmStatus'
 import { useNav, topScreen, topSheet, type Sheet } from '../store/nav'
 import { useNavHistory } from '../hooks/useNavHistory'
+import { OpeningPicker } from '../components/mobile/OpeningPicker'
 import { ScriptEditor } from '../components/ScriptEditor'
 import { NameReplacePanel } from '../components/NameReplacePanel'
 import { VoicePanel } from '../components/VoicePanel'
@@ -145,8 +146,12 @@ export function MobileWorkspace () {
   function openProject (id: string) {
     useProjects.getState().select(id)
     const p = useProjects.getState().items.find((x) => x.id === id)
-    if (p && p.ttsState === 'none') { setResumeDraft(true); push({ k: 'newproject' }) }
-    else push({ k: 'editor' })
+    /*
+     * 【开头还没挑完的，点进去要回到那一屏】。和上面草稿那条同一个道理：
+     * 这条片子的合成正被闸门拦着，给他看「合成中」或者「还没有成片」
+     * 都是把他晾在原地——他要做的那件事就是挑开头。
+     */
+    if (p && p.openingState === 'pending') { push({ k: 'opening' }) } else if (p && p.ttsState === 'none') { setResumeDraft(true); push({ k: 'newproject' }) } else push({ k: 'editor' })
   }
   /*
    * 【新建之前必须把"接着完成"的标记清掉】。同一屏（newproject）现在有两种
@@ -179,6 +184,16 @@ export function MobileWorkspace () {
       >
         {screen === 'list' ? (
           <MobileProjectList onOpen={openProject} onNew={openNew} />
+        ) : screen === 'opening' && project ? (
+          /* 挑到一半退出去了：点回来接着挑。续集也在这条线上 */
+          <OpeningPicker
+            projects={[project, ...useProjects.getState().items.filter((x) => x.parentProjectId === project.id)]
+              .filter((x) => x.openingState === 'pending')
+              .map((x, at) => ({
+                id: x.id, name: x.name, ttsDurationMs: x.ttsDurationMs, isSequel: at > 0,
+              }))}
+            onDone={() => { replace({ k: 'editor' }) }}
+          />
         ) : screen === 'newproject' ? (
           /* 从列表点进一条草稿时带上 id，那一页会把名字和文案填回去接着走 */
           <MobileNewProject

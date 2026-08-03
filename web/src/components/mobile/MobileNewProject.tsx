@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
+import { api } from '../../api/client'
 import { useProjects } from '../../store/projects'
 import { usePipeline } from '../../store/pipeline'
 import { useRename, renameGates } from '../../store/rename'
 import { NameReplacePanel } from '../NameReplacePanel'
 import { IconChevronLeft, IconUpload, IconLoader, IconEdit, IconScissors} from '../ui/Icon'
 import { SplitPicker } from './SplitPicker'
+import { OpeningPicker } from './OpeningPicker'
 import { EpisodeTitles } from './EpisodeTitles'
 
 /**
@@ -45,6 +47,8 @@ export function MobileNewProject ({ onBack, onGo, resumeId }: {
   const [splitting, setSplitting] = useState(false)
   /** 拆出来的续集。有它就说明这一批要生成两条片子 */
   const [sequelId, setSequelId] = useState<string | null>(null)
+  /** 进了挑开头那一屏：要挑的项目 id，主片在前 */
+  const [picking, setPicking] = useState<string[] | null>(null)
   const fileInput = useRef<HTMLInputElement>(null)
 
   /*
@@ -100,8 +104,16 @@ export function MobileNewProject ({ onBack, onGo, resumeId }: {
        * （见 tts/routes.ts）。放前端的话要求页面一直开着，而按下生成就
        * 切走/锁屏是常态——页面一走，续集就永远停在草稿。
        */
+      /*
+       * ⚠️【先挂起，再发配音，顺序不能反】。配音一完成服务端就自己排合成，
+       * 短文案十几秒就配完了——先发配音的话，那条片子已经拿着一套随机开头
+       * 烧上了，用户挑完还得重烧一遍。await 也不能省。
+       */
+      const ids = sequelId ? [id, sequelId] : [id]
+      for (const pid of ids) await api.post(`/api/projects/${pid}/opening/hold`)
       void generateVoice(id)
-      onGo(id)
+      // 不进编辑器，进挑开头那一屏。配音在后台跑，他挑他的，互不耽误
+      setPicking(ids)
     } finally { setBusy(null) }
   }
 
@@ -114,6 +126,24 @@ export function MobileNewProject ({ onBack, onGo, resumeId }: {
   // 建好后：改名没确认（且开着）就不让生成——和配音入口同一道门
   const gated = createdId !== null && renameGates(project)
   const canGenerate = script.trim().length > 0 && !gated && busy === null
+
+  if (picking !== null) {
+    const all = useProjects.getState().items
+    return (
+      <OpeningPicker
+        projects={picking.map((pid, at) => {
+          const p = all.find((x) => x.id === pid)
+          return {
+            id: pid,
+            name: p?.name ?? '',
+            ttsDurationMs: p?.ttsDurationMs ?? null,
+            isSequel: at > 0,
+          }
+        })}
+        onDone={() => onGo(picking[0]!)}
+      />
+    )
+  }
 
   return (
     <div className="absolute inset-0 overflow-y-auto bg-ink-950" style={{ paddingTop: 'calc(env(safe-area-inset-top, 0px) + 12px)' }}>
