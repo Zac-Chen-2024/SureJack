@@ -26,9 +26,17 @@ import {
  */
 
 /** 项目此刻处在哪一步。成片状态来自列表轮询（filmProgress） */
-type Status = 'draft' | 'voicing' | 'render' | 'failed' | 'done'
+type Status = 'draft' | 'voicing' | 'opening' | 'render' | 'failed' | 'done'
 
 function statusOf (p: Project, film?: { composing: boolean; state: string }): Status {
+  /*
+   * 【"等你挑开头"要盖过其它一切】。这条片子的合成正被闸门拦着：
+   * 配音可能已经好了（ttsState==='ready'），但那不等于"已完成"——
+   * 显示成已完成的话，用户以为片子能下载了，实际上它连烧都没开始，
+   * 而且他自己才是那个卡住流程的人。踩过：主片显示「已完成」、
+   * 续集显示「合成中」，可两条其实都停在挑开头这一步。
+   */
+  if (p.openingState === 'pending') return 'opening'
   if (film?.composing) return 'render'
   if (p.ttsState === 'generating') return 'voicing'
   /*
@@ -46,6 +54,8 @@ const STATUS_STYLE: Record<Status, { label: string; cls: string }> = {
   // 强调色留给"完成"。
   voicing: { label: '配音中', cls: 'text-[#e0a82e] bg-[#e0a82e]/12' },
   render: { label: '合成中', cls: 'text-[#e0a82e] bg-[#e0a82e]/12' },
+  // 要用户动手的状态，用强调色而不是琥珀：琥珀是"机器在忙，等着就行"
+  opening: { label: '等你挑开头', cls: 'text-accent bg-accent/12' },
   failed: { label: '未完成', cls: 'text-danger bg-danger/12' },
   draft: { label: '草稿', cls: 'text-ink-300 bg-ink-800' },
 }
@@ -55,6 +65,10 @@ function summaryOf (p: Project): string {
   const head = (p.scriptText ?? '').trim().replace(/\s+/g, '')
   const secs = p.ttsDurationMs ? Math.round(p.ttsDurationMs / 1000) : null
   const dur = secs !== null ? `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}` : null
+  // 卡在挑开头时，摘要要说清楚"在等什么"，别让人以为是机器在忙
+  if (p.openingState === 'pending') {
+    return [p.ttsState === 'generating' ? '配音生成中' : '配音已生成', '点进去挑开头'].join(' · ')
+  }
   if (p.ttsState === 'ready') {
     const byo = p.subtitleMode === 'line' ? '自备配音' : '配音已生成'
     return [head ? head.slice(0, 12) : byo, dur].filter(Boolean).join(' · ')

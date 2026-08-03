@@ -128,21 +128,8 @@ export function MobileNewProject ({ onBack, onGo, resumeId }: {
   const canGenerate = script.trim().length > 0 && !gated && busy === null
 
   if (picking !== null) {
-    const all = useProjects.getState().items
-    return (
-      <OpeningPicker
-        projects={picking.map((pid, at) => {
-          const p = all.find((x) => x.id === pid)
-          return {
-            id: pid,
-            name: p?.name ?? '',
-            ttsDurationMs: p?.ttsDurationMs ?? null,
-            isSequel: at > 0,
-          }
-        })}
-        onDone={() => onGo(picking[0]!)}
-      />
-    )
+    // 只传 id：项目数据由 OpeningPicker 自己订阅，配音跑完时长才会出来
+    return <OpeningPicker ids={picking} onDone={() => onGo(picking[0]!)} />
   }
 
   return (

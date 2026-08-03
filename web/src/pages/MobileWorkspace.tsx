@@ -187,11 +187,9 @@ export function MobileWorkspace () {
         ) : screen === 'opening' && project ? (
           /* 挑到一半退出去了：点回来接着挑。续集也在这条线上 */
           <OpeningPicker
-            projects={[project, ...useProjects.getState().items.filter((x) => x.parentProjectId === project.id)]
+            ids={[project, ...useProjects.getState().items.filter((x) => x.parentProjectId === project.id)]
               .filter((x) => x.openingState === 'pending')
-              .map((x, at) => ({
-                id: x.id, name: x.name, ttsDurationMs: x.ttsDurationMs, isSequel: at > 0,
-              }))}
+              .map((x) => x.id)}
             onDone={() => { replace({ k: 'editor' }) }}
           />
         ) : screen === 'newproject' ? (

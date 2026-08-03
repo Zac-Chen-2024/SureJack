@@ -35,7 +35,7 @@ const PROJECTS = [
   {
     id: 'm1', name: '周周撸铁', createdAt: now, updatedAt: now,
     coverTitle: '周周撸铁', inVideoTitle: '周周撸铁', parentProjectId: null, episodeIndex: 1,
-    scriptText: '正文', ttsState: 'generating', ttsDurationMs: 452000,
+    scriptText: '正文', ttsState: 'ready', ttsDurationMs: 452000,
     subtitleMode: 'word', openingState: 'pending',
   },
   {
@@ -106,7 +106,7 @@ await page.waitForTimeout(400)
 await page.screenshot({ path: `${OUT}opening-picked.png` })
 
 // 连着看一遍：截两个时刻，看它是不是真的在往下走
-await page.getByText('连着看').click()
+await page.getByLabel('连着看一遍').click()
 await page.waitForTimeout(2500)
 await page.screenshot({ path: `${OUT}opening-preview-1.png` })
 const seen = await page.evaluate(() => {
