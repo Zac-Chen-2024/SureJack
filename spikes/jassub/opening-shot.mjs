@@ -98,7 +98,7 @@ await page.waitForTimeout(1500)
 await page.screenshot({ path: `${OUT}opening-empty.png` })
 
 // 挑 5 段
-for (const i of [0, 3, 5, 8, 11, 13, 14, 15, 16, 17]) {
+for (const i of [0, 3, 5, 8, 11, 13, 14, 15]) {
   await page.locator('button:has(img)').nth(i).click()
   await page.waitForTimeout(140)
 }

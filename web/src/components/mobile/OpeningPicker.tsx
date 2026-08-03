@@ -124,8 +124,9 @@ export function OpeningPicker ({ ids, onDone }: {
    * 截短、再往后的一段都不用（见 compose/plan.ts 的 fillFrom），而且悄无声息。
    * 与其让用户选了 10 段、烧出来只用了 6 段半，不如当场拦住并说明白。
    *
-   * 判据是【整段放不下就不让加】，不是"加进去再截短"——这样小条上的秒数
-   * 永远是真的。剩下那点空隙本来就由系统自动接。
+   * 拦的是【铺满之后】。跨过边界的那一段照样让加——它被截短正好把开头
+   * 铺满，是正常且想要的；小条上会如实写成 30→11s。
+   * 铺满之后再加进来的才是纯粹用不上的段，那时才封口。
    *
    * ⚠️ 配音还没跑完时目标时长是未知的，这时不设限（否则这一屏在等配音的
    * 几分钟里完全没法用）。等时长到了再开始拦。
@@ -143,12 +144,8 @@ export function OpeningPicker ({ ids, onDone }: {
       setPicks({ ...picks, [current.id]: now.filter((_, k) => k !== at) })
       return
     }
-    const need = byId.get(id)?.durationMs ?? 0
-    const room = roomLeftMs()
-    if (need > room) {
-      setTip(room <= 0
-        ? '开头已经满了，再多就装不下了'
-        : `这段 ${Math.round(need / 1000)} 秒，开头只剩 ${Math.round(room / 1000)} 秒了`)
+    if (roomLeftMs() <= 0) {
+      setTip('开头已经铺满了，再多就用不上了')
       return
     }
     setPicks({ ...picks, [current.id]: [...now, id] })
@@ -207,7 +204,9 @@ export function OpeningPicker ({ ids, onDone }: {
 
       <div className="px-4 pb-2">
         <div className="flex items-baseline justify-between text-xs text-ink-300">
-          <span>已选 {pick.length} 段 · {fmt(pickedMs)}</span>
+          {/* 显示【实际会播的】总长：最后那段被截短的话，全长和真正播的对不上 */}
+          <span>已选 {pick.length} 段 · {fmt(
+            !current.isSequel && durationKnown ? Math.min(pickedMs, targetMs) : pickedMs)}</span>
           {current.isSequel
             ? <span className="text-ink-400">默认 5 段，之后直接进跑酷</span>
             : durationKnown
@@ -232,17 +231,9 @@ export function OpeningPicker ({ ids, onDone }: {
         {!current.isSequel && durationKnown && pickedMs < targetMs && pick.length > 0 && (
           <p className="mt-1 text-[11px] text-ink-400">还差 {fmt(targetMs - pickedMs)}，不补满也行，剩下的自动接。</p>
         )}
-        {!current.isSequel && durationKnown && pickedMs > targetMs && (
-          <p className="mt-1 text-[11px] text-accent">
-            超出 {fmt(pickedMs - targetMs)}：
-            {(() => {
-              const f = fateOf(pick, targetMs)
-              const cut = f.filter((x) => x.take > 0 && x.take < x.full).length
-              const unused = f.filter((x) => x.take === 0).length
-              return [cut > 0 ? '最后进画面的那段会被截短' : null,
-                unused > 0 ? `后面 ${unused} 段用不上` : null].filter(Boolean).join('，')
-            })()}。
-          </p>
+        {/* 铺满之后就不让再加了，所以这里只可能是"最后那段被截短"这一种情况 */}
+        {!current.isSequel && durationKnown && pickedMs >= targetMs && (
+          <p className="mt-1 text-[11px] text-accent">开头铺满了。最后那段会截到正好接上，多的部分不播。</p>
         )}
       </div>
 
@@ -276,8 +267,8 @@ export function OpeningPicker ({ ids, onDone }: {
         <div className="grid grid-cols-3 gap-1.5">
           {(items ?? []).map((it) => {
             const n = pick.filter((p) => p === it.id).length
-            // 放不下的直接变暗：不用点一下才知道
-            const tooBig = n === 0 && it.durationMs > roomLeftMs()
+            // 铺满之后其余的一律变暗：不用点一下才知道加不进去了
+            const tooBig = n === 0 && roomLeftMs() <= 0
             return (
               <button
                 key={it.id} type="button" onClick={() => toggle(it.id)}
