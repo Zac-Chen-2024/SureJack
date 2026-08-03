@@ -35,7 +35,7 @@ const PROJECTS = [
   {
     id: 'm1', name: '周周撸铁', createdAt: now, updatedAt: now,
     coverTitle: '周周撸铁', inVideoTitle: '周周撸铁', parentProjectId: null, episodeIndex: 1,
-    scriptText: '正文', ttsState: 'ready', ttsDurationMs: 452000,
+    scriptText: '正文', ttsState: 'ready', ttsDurationMs: 240000,
     subtitleMode: 'word', openingState: 'pending',
   },
   {
@@ -98,9 +98,9 @@ await page.waitForTimeout(1500)
 await page.screenshot({ path: `${OUT}opening-empty.png` })
 
 // 挑 5 段
-for (const i of [0, 3, 5, 8, 11]) {
+for (const i of [0, 3, 5, 8, 11, 13, 14, 15, 16, 17]) {
   await page.locator('button:has(img)').nth(i).click()
-  await page.waitForTimeout(120)
+  await page.waitForTimeout(140)
 }
 await page.waitForTimeout(400)
 await page.screenshot({ path: `${OUT}opening-picked.png` })

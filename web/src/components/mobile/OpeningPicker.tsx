@@ -62,6 +62,8 @@ export function OpeningPicker ({ ids, onDone }: {
   const [busy, setBusy] = useState(false)
   const [previewing, setPreviewing] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  /** 「装不下了」的小提示。一闪而过，不占版面 */
+  const [tip, setTip] = useState<string | null>(null)
 
   useEffect(() => {
     void api.get<{ items: Item[] }>(`/api/library/${encodeURIComponent(OPENING_BUCKET)}`)
@@ -92,17 +94,72 @@ export function OpeningPicker ({ ids, onDone }: {
    * 开头段根本没有目标时长——挑几段就是几段，剩下全给跑酷。
    * 硬凑一个"5 段 × 20 秒"的数只会让用户以为有个必须凑满的额度。
    */
+  /*
+   * 【超出目标时长会发生什么，必须说出来】。后端铺开头段是"铺满就停"：
+   * 跨过边界的那一段被截短，再往后的段一个都不用（见 compose/plan.ts
+   * 的 fillFrom）。不说的话，用户选了 10 段、烧出来只用了 6 段半，
+   * 而且没有任何地方提过——他会以为是 bug。
+   *
+   * 续集不算：那套公式是"几段开头 + 全程跑酷"，开头段没有上限，
+   * 挑几段用几段，剩下的时长自然落给跑酷。
+   */
   const durationKnown = (current?.ttsDurationMs ?? 0) > 0
   const targetMs = current === undefined || current.isSequel
     ? 0
     : Math.round((current.ttsDurationMs ?? 0) * OPENING_RATIO)
 
+  /** 逐段累加，算出每一段的下场：整段用、被截短、还是根本用不上 */
+  function fateOf (ids: string[], limitMs: number): Array<{ id: string; full: number; take: number }> {
+    let acc = 0
+    return ids.map((id) => {
+      const full = byId.get(id)?.durationMs ?? 0
+      const take = limitMs <= 0 ? full : Math.min(full, Math.max(0, limitMs - acc))
+      acc += take
+      return { id, full, take }
+    })
+  }
+
+  /*
+   * 【装不下就不让加】。后端铺开头段是"铺满就停"：跨过边界的那一段会被
+   * 截短、再往后的一段都不用（见 compose/plan.ts 的 fillFrom），而且悄无声息。
+   * 与其让用户选了 10 段、烧出来只用了 6 段半，不如当场拦住并说明白。
+   *
+   * 判据是【整段放不下就不让加】，不是"加进去再截短"——这样小条上的秒数
+   * 永远是真的。剩下那点空隙本来就由系统自动接。
+   *
+   * ⚠️ 配音还没跑完时目标时长是未知的，这时不设限（否则这一屏在等配音的
+   * 几分钟里完全没法用）。等时长到了再开始拦。
+   */
+  function roomLeftMs (): number {
+    if (current === undefined || current.isSequel || !durationKnown) return Number.POSITIVE_INFINITY
+    return targetMs - pickedMs
+  }
+
   function toggle (id: string): void {
     if (!current) return
     const now = picks[current.id] ?? []
     const at = now.indexOf(id)
-    setPicks({ ...picks, [current.id]: at >= 0 ? now.filter((_, k) => k !== at) : [...now, id] })
+    if (at >= 0) {                       // 取消选择永远允许
+      setPicks({ ...picks, [current.id]: now.filter((_, k) => k !== at) })
+      return
+    }
+    const need = byId.get(id)?.durationMs ?? 0
+    const room = roomLeftMs()
+    if (need > room) {
+      setTip(room <= 0
+        ? '开头已经满了，再多就装不下了'
+        : `这段 ${Math.round(need / 1000)} 秒，开头只剩 ${Math.round(room / 1000)} 秒了`)
+      return
+    }
+    setPicks({ ...picks, [current.id]: [...now, id] })
   }
+
+  // 提示一闪而过。每次换内容都重新计时，连点几下不会提前消失
+  useEffect(() => {
+    if (tip === null) return
+    const t = setTimeout(() => setTip(null), 2200)
+    return () => { clearTimeout(t) }
+  }, [tip])
 
   function remove (at: number): void {
     if (!current) return
@@ -175,20 +232,42 @@ export function OpeningPicker ({ ids, onDone }: {
         {!current.isSequel && durationKnown && pickedMs < targetMs && pick.length > 0 && (
           <p className="mt-1 text-[11px] text-ink-400">还差 {fmt(targetMs - pickedMs)}，不补满也行，剩下的自动接。</p>
         )}
+        {!current.isSequel && durationKnown && pickedMs > targetMs && (
+          <p className="mt-1 text-[11px] text-accent">
+            超出 {fmt(pickedMs - targetMs)}：
+            {(() => {
+              const f = fateOf(pick, targetMs)
+              const cut = f.filter((x) => x.take > 0 && x.take < x.full).length
+              const unused = f.filter((x) => x.take === 0).length
+              return [cut > 0 ? '最后进画面的那段会被截短' : null,
+                unused > 0 ? `后面 ${unused} 段用不上` : null].filter(Boolean).join('，')
+            })()}。
+          </p>
+        )}
       </div>
 
       {/* 已选的一排：顺序就是播放顺序 */}
       {pick.length > 0 && (
         <div className="flex gap-1.5 overflow-x-auto px-4 pb-2">
-          {pick.map((id, at) => (
-            <button
-              key={`${id}-${at}`} type="button" onClick={() => remove(at)}
-              className="flex flex-none items-center gap-1 rounded-md border border-accent/60 bg-accent/10 px-2 py-1 font-mono text-[11px] text-accent"
-            >
-              {at + 1} · {Math.round((byId.get(id)?.durationMs ?? 0) / 1000)}s
-              <IconClose className="size-3" />
-            </button>
-          ))}
+          {fateOf(pick, current.isSequel ? 0 : targetMs).map((f, at) => {
+            const unused = f.take === 0
+            const cut = f.take > 0 && f.take < f.full
+            return (
+              <button
+                key={`${f.id}-${at}`} type="button" onClick={() => remove(at)}
+                title={unused ? '超出开头时长，这段用不上' : cut ? '这段会被截短' : ''}
+                className={`flex flex-none items-center gap-1 rounded-md border px-2 py-1 font-mono text-[11px] ${
+                  unused
+                    ? 'border-line bg-ink-850 text-ink-500 line-through'
+                    : 'border-accent/60 bg-accent/10 text-accent'}`}
+              >
+                {at + 1} · {cut
+                  ? `${Math.round(f.full / 1000)}→${Math.round(f.take / 1000)}s`
+                  : `${Math.round(f.full / 1000)}s`}
+                <IconClose className="size-3" />
+              </button>
+            )
+          })}
         </div>
       )}
 
@@ -197,10 +276,13 @@ export function OpeningPicker ({ ids, onDone }: {
         <div className="grid grid-cols-3 gap-1.5">
           {(items ?? []).map((it) => {
             const n = pick.filter((p) => p === it.id).length
+            // 放不下的直接变暗：不用点一下才知道
+            const tooBig = n === 0 && it.durationMs > roomLeftMs()
             return (
               <button
                 key={it.id} type="button" onClick={() => toggle(it.id)}
-                className={`relative aspect-[9/16] overflow-hidden rounded-md border ${n > 0 ? 'border-accent' : 'border-line'}`}
+                className={`relative aspect-[9/16] overflow-hidden rounded-md border transition-opacity ${
+                  n > 0 ? 'border-accent' : 'border-line'} ${tooBig ? 'opacity-30' : ''}`}
               >
                 <img
                   src={`/api/library/items/${it.id}/thumb`} alt=""
@@ -240,6 +322,17 @@ export function OpeningPicker ({ ids, onDone }: {
           {step + 1 < projects.length ? '下一集' : '开始合成'}
         </button>
       </div>
+
+      {tip !== null && (
+        <div
+          role="status"
+          className="sj-motion pointer-events-none fixed inset-x-0 bottom-24 z-40 flex justify-center px-6"
+        >
+          <span className="rounded-full border border-accent/50 bg-ink-850/95 px-3.5 py-2 text-xs font-bold text-accent shadow-lg">
+            {tip}
+          </span>
+        </div>
+      )}
 
       {previewing && <OpeningPreview itemIds={pick} onClose={() => setPreviewing(false)} />}
     </div>

@@ -18,6 +18,7 @@ import { registerEpisodeRoutes } from './episodes/routes.js'
 import { registerLabRoutes } from './lab/routes.js'
 import { registerLibraryRoutes } from './library/routes.js'
 import { ExportQueue } from './queue/queue.js'
+import { resetStuckVoices } from './tts/recover.js'
 import { registerExportRoutes } from './queue/routes.js'
 import { sweepFilms } from './compose/film.js'
 import { openAuthDb } from './db/auth-db.js'
@@ -252,6 +253,16 @@ export function buildServer (opts: BuildOpts = {}): FastifyInstance {
    */
   if (opts.sweepFilmsOnStart === true) {
     app.addHook('onReady', async () => {
+      /*
+       * 【先复位卡住的配音，再补合】。顺序有讲究：复位会把
+       * 'generating' 改成 'error'，而补合扫描要按最新状态判断该不该排队。
+       *
+       * 这一步是同步的、只读几行数据库，不值得为它不 await。
+       */
+      const stuck = resetStuckVoices(whitelist)
+      if (stuck.length > 0) {
+        app.log.warn({ stuck }, '开机复位：这些项目的配音被中断过（多半是上次部署重启），已标成未完成，用户可重试')
+      }
       void sweepFilms({ whitelist, libraryDataDir, queue }, whitelist)
         .then((r) => {
           if (r.enqueued.length > 0) {
