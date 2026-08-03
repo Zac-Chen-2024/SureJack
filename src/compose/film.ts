@@ -40,7 +40,7 @@ import { assetDir } from '../assets/storage.js'
 import { openLibraryDb } from '../library/library-db.js'
 import { getLibraryItem } from '../library/scan.js'
 import { libraryItemPath } from '../library/paths.js'
-import { hasVideoMaterials, planProjectBackground, type BackgroundPlan } from '../library/background.js'
+import { hasVideoMaterials, planProjectBackground, parseOpeningPick, type BackgroundPlan } from '../library/background.js'
 import { buildAssForProject, aspectOf, LEGACY_SUBTITLE_MAX_CHARS } from '../subtitles/project-ass.js'
 import { render } from '../render/index.js'
 import { buildBackgroundTrack } from './build.js'
@@ -249,6 +249,15 @@ export function resolveFilm (
   const project = snap.project
   if (project === null) return { ok: false, code: 'missing', error: '项目不存在' }
 
+  /*
+   * 【开头还没挑完就不合成】。这道闸门要放在这儿而不是只放在配音那一步：
+   * 开机补合、状态接口补排都走 resolveFilm，只挡入队那一处的话，
+   * 服务一重启就把这些项目全烧了。blocked 的理由是给人看的，会直接显示。
+   */
+  if (project.openingState === 'pending') {
+    return { ok: false, code: 'blocked', error: '还没挑开头素材，挑完再合成' }
+  }
+
   // 阶段 1 划界：多片段需要两趟渲染，尚未实现。显式报错而非悄悄出错。
   if (snap.videos.length > 1) {
     return { ok: false, code: 'blocked', error: '暂时只支持一个背景视频，请删掉多余的' }
@@ -287,7 +296,11 @@ export function resolveFilm (
           return { ok: false, code: 'blocked', error: '素材库里没有可用的视频素材，请先扫描素材库' }
         }
         plan = planProjectBackground(lib, project.id, durationMs,
-          { sequel: project.parentProjectId !== null })
+          {
+            sequel: project.parentProjectId !== null,
+            // 挑过的按挑的铺；没挑过（老项目）是空数组 → 走原来的洗牌，指纹不变
+            openingPick: parseOpeningPick(project.openingPickJson),
+          })
         if (plan.segments.length === 0) {
           return { ok: false, code: 'blocked', error: '算不出背景排布，请确认配音时长和素材库' }
         }

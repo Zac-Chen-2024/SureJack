@@ -27,7 +27,7 @@ import { join } from 'node:path'
 import { openUserDb, type Project } from '../db/user-db.js'
 import { assetDir } from '../assets/storage.js'
 import { openLibraryDb } from '../library/library-db.js'
-import { hasVideoMaterials, planProjectBackground, type BgSegment } from '../library/background.js'
+import { hasVideoMaterials, planProjectBackground, parseOpeningPick, type BgSegment } from '../library/background.js'
 import { aspectOf } from '../subtitles/project-ass.js'
 import { buildBackgroundTrack } from './build.js'
 import { reusableOutput, writeStamp as writeStampFile } from './stamp.js'
@@ -124,7 +124,11 @@ function currentPlan (
     if (!hasVideoMaterials(lib)) return null
     const aspect = aspectOf(project)
     const plan = planProjectBackground(lib, project.id, project.ttsDurationMs,
-      { sequel: project.parentProjectId !== null })
+      {
+            sequel: project.parentProjectId !== null,
+            // 挑过的按挑的铺；没挑过（老项目）是空数组 → 走原来的洗牌，指纹不变
+            openingPick: parseOpeningPick(project.openingPickJson),
+          })
     if (plan.segments.length === 0) return null
     return { segments: plan.segments, fingerprint: planFingerprint(plan.segments, aspect), aspect }
   } finally {

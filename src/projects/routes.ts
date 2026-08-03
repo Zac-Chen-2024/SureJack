@@ -8,7 +8,10 @@ import { probeDurationMs } from '../render/probe.js'
 import { getSession, requireAuth } from '../auth/session.js'
 import { assetDir } from '../assets/storage.js'
 import { openLibraryDb } from '../library/library-db.js'
-import { hasVideoMaterials, planProjectBackground } from '../library/background.js'
+import {
+  hasVideoMaterials, planProjectBackground, parseOpeningPick, openingIdsOf, OPENING_BUCKET,
+} from '../library/background.js'
+import { listBucket } from '../library/scan.js'
 import { bgTrackInfo, type PrebuildDeps } from '../compose/prebuild.js'
 import { enqueueFilm } from '../compose/film.js'
 
@@ -32,6 +35,23 @@ export function registerProjectRoutes (app: FastifyInstance, deps: Deps): void {
   function withUserDb<T> (name: string, fn: (db: ReturnType<typeof openUserDb>) => T): T {
     const db = openUserDb(name, whitelist)
     try { return fn(db) } finally { db.close() }
+  }
+
+  /**
+   * 某个项目【现在事实上用的】开头素材 id。
+   * 挑过就是挑的那份；没挑过（还停在默认）就把默认排布算出来。
+   * 给续集剔重用——续集要避开的是主片真正在用的那几段。
+   */
+  function openingOf (
+    lib: ReturnType<typeof openLibraryDb>, userName: string, projectId: string,
+  ): string[] {
+    const p = withUserDb(userName, (db) => db.getProject(projectId))
+    if (p === null) return []
+    const picked = parseOpeningPick(p.openingPickJson)
+    if (picked.length > 0) return picked
+    return openingIdsOf(planProjectBackground(lib, p.id, p.ttsDurationMs, {
+      sequel: p.parentProjectId !== null,
+    }))
   }
 
   app.get('/api/projects', { preHandler: requireAuth }, async (req) => {
@@ -176,6 +196,74 @@ export function registerProjectRoutes (app: FastifyInstance, deps: Deps): void {
    * （地铁跑酷单桶就 4.7GB）。前端拿它画预览条，导出时用同一个函数
    * 算出同一份排布，所见即所得。
    */
+  /**
+   * 敲定这个项目的开头素材，然后放行合成。
+   *
+   * body.pick 给了就用作者挑的；没给（或空）= 「用默认素材」。
+   *
+   * ⚠️【默认也要物化成一份具体清单】，不能只是"不填、回头现算"。
+   * 排布本来是拿项目 id 当种子现算的，扫进新素材就会变（background.ts
+   * 里写明的已知取舍）。作者在这一屏看过、认过的那几段，落库之后
+   * 重烧多少次都还是那几段。
+   *
+   * ⚠️【续集的默认要避开主片的开头】。两集各用自己的种子洗牌，顺序不同，
+   * 但抓的是同一个桶——按概率平均会撞上一段。用户要求两集开头不一样，
+   * 所以在这里显式把主片用过的段剔掉，不指望随机自然分开。
+   */
+  app.post<{ Params: { id: string }; Body: { pick?: unknown } }>(
+    '/api/projects/:id/opening', { preHandler: requireAuth }, async (req, reply) => {
+      const name = getSession(req)!
+      const project = withUserDb(name, (db) => db.getProject(req.params.id))
+      if (!project) return reply.code(404).send({ error: '项目不存在' })
+
+      const raw = Array.isArray(req.body?.pick)
+        ? req.body.pick.filter((x): x is string => typeof x === 'string')
+        : []
+
+      const lib = openLibraryDb(libraryDataDir)
+      let pick: string[]
+      try {
+        if (!hasVideoMaterials(lib)) {
+          return reply.code(409).send({ error: '素材库里没有可用的视频素材，请先扫描素材库' })
+        }
+        /*
+         * 只收开头桶里真实存在的 id。脏 id 落了库，排布那边只会默默跳过它，
+         * 于是作者挑了 5 段、烧出来只有 3 段，而且没有任何地方报错。
+         */
+        const valid = new Set(listBucket(lib, OPENING_BUCKET).map((it) => it.id))
+        const bad = raw.filter((id) => !valid.has(id))
+        if (bad.length > 0) {
+          return reply.code(400).send({ error: `有 ${bad.length} 段素材不在开头素材库里，刷新一下再挑` })
+        }
+
+        if (raw.length > 0) {
+          pick = raw
+        } else {
+          // 「用默认素材」：把现算的默认排布物化下来
+          const parentPick = project.parentProjectId === null
+            ? []
+            : openingOf(lib, name, project.parentProjectId)
+          pick = openingIdsOf(planProjectBackground(lib, project.id, project.ttsDurationMs, {
+            sequel: project.parentProjectId !== null,
+            excludeOpening: parentPick,
+          }))
+        }
+      } finally {
+        lib.close()
+      }
+
+      withUserDb(name, (db) => db.updateProject(req.params.id, {
+        openingPickJson: JSON.stringify(pick),
+        openingState: 'settled',
+      }))
+
+      // 闸门放行：这一刻才轮到它排队
+      void enqueueFilm(deps, name, req.params.id)
+        .catch((e: unknown) => { req.log.warn({ err: e }, '开头敲定后入队失败，稍后由状态接口补排') })
+
+      return { openingPick: pick }
+    })
+
   app.get<{ Params: { id: string } }>(
     '/api/projects/:id/background-plan', { preHandler: requireAuth }, async (req, reply) => {
       const name = getSession(req)!
@@ -196,7 +284,11 @@ export function registerProjectRoutes (app: FastifyInstance, deps: Deps): void {
         }
         // 续集用另一套素材公式（几段开头 + 全程跑酷），见 background.ts
         return planProjectBackground(lib, project.id, project.ttsDurationMs,
-          { sequel: project.parentProjectId !== null })
+          {
+            sequel: project.parentProjectId !== null,
+            // 挑过的按挑的铺；没挑过（老项目）是空数组 → 走原来的洗牌，指纹不变
+            openingPick: parseOpeningPick(project.openingPickJson),
+          })
       } finally {
         lib.close()
       }

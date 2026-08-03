@@ -140,8 +140,18 @@ export function registerTtsRoutes (app: FastifyInstance, deps: Deps): void {
          * 失败也只记一行日志——入队没成功顶多是用户下次打开时由状态接口
          * 补排一条，绝不该让他看到一个"配音失败"。
          */
-        void enqueueFilm(deps, name, req.params.id)
-          .catch((e: unknown) => { req.log.warn({ err: e }, '成片自动合成入队失败，稍后由状态接口补排') })
+        /*
+         * ⚠️【开头待定就先别排】。走新建项目那条线的项目，配音完了还有一屏
+         * 让作者挑开头素材。这时候排队等于拿一套随机开头把片子烧掉，
+         * 等他挑完还得重烧一遍——白烧十几分钟，他还会先看到一条不是自己
+         * 挑的片子。挑完（或按了「用默认素材」）由那个接口负责排。
+         */
+        if (openingPending(name, whitelist, req.params.id)) {
+          req.log.info({ project: req.params.id }, '开头待挑，先不排合成')
+        } else {
+          void enqueueFilm(deps, name, req.params.id)
+            .catch((e: unknown) => { req.log.warn({ err: e }, '成片自动合成入队失败，稍后由状态接口补排') })
+        }
 
         /*
          * ── 续集跟着一起配 ─────────────────────────────────────────────
@@ -190,6 +200,16 @@ export function registerTtsRoutes (app: FastifyInstance, deps: Deps): void {
  * 抽出来是为了让【续集】能走完全一样的一条路。复制一份的话，两处迟早
  * 分叉——而分叉的表现是"续集的字幕/时间轴和主片规则不一样"，极难发现。
  */
+/** 这个项目是不是还等着作者挑开头 */
+function openingPending (userName: string, whitelist: string[], projectId: string): boolean {
+  const db = openUserDb(userName, whitelist)
+  try {
+    return db.getProject(projectId)?.openingState === 'pending'
+  } finally {
+    db.close()
+  }
+}
+
 async function synthesizeProject (
   deps: Deps, userName: string, whitelist: string[], projectId: string,
   key: string, region: string, synth: typeof synthesizeLong,
@@ -223,7 +243,10 @@ async function synthesizeProject (
         wordTimingsJson: JSON.stringify(result.words),
       })
     })
-    await enqueueFilm(deps, userName, projectId)
+    // 续集同理：开头没挑完就不排，见上面那段
+    if (!openingPending(userName, whitelist, projectId)) {
+      await enqueueFilm(deps, userName, projectId)
+    }
   } catch (e) {
     withDb((db) => db.updateProject(projectId, { ttsState: 'error' }))
     throw e

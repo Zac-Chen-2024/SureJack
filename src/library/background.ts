@@ -74,7 +74,8 @@ export function shuffled<T> (items: readonly T[], rand: () => number): T[] {
 }
 
 /** 参与背景视频排布的三个桶，顺序即成片顺序。背景音乐桶不在其中。 */
-const VIDEO_BUCKETS = ['1-开头', '2-常规', '3-地铁跑酷'] as const
+export const OPENING_BUCKET = '1-开头'
+const VIDEO_BUCKETS = [OPENING_BUCKET, '2-常规', '3-地铁跑酷'] as const
 
 /**
  * 续集的背景【只用开头段 + 地铁跑酷】，跳过常规桶。
@@ -113,12 +114,27 @@ export function hasVideoMaterials (db: LibraryDb): boolean {
  *
  * ⚠️【已知取舍】排布不落库、每次现算，所以**扫进新素材会让已有项目的
  * 排布改变**（被打乱的数组内容变了，Fisher-Yates 的结果自然跟着变）。
- * 换来的是"项目只存引用、不复制 4.7GB 素材"。真要钉死，得在项目上存一列
- * 排布快照——那是另一个任务。
+ * 换来的是"项目只存引用、不复制 4.7GB 素材"。
+ * 作者亲手挑过开头的项目不受这条影响——那份选择是落库的（opts.openingPick），
+ * 扫库怎么变都不会动它。常规段和跑酷段仍然现算。
  */
 export function planProjectBackground (
   db: LibraryDb, projectId: string, ttsDurationMs: number | null,
-  opts: { sequel?: boolean } = {},
+  opts: {
+    sequel?: boolean
+    /**
+     * 作者亲手挑的开头素材 id，有序。给了就按这个顺序铺开头段，不洗牌。
+     * 空数组/不给 = 走默认随机。
+     */
+    openingPick?: readonly string[]
+    /**
+     * 排默认开头时要避开的素材 id。**给续集用**：
+     * 两集各用自己的项目 id 当种子，顺序确实不同，但都从同一个 68 段的桶里抓，
+     * 主片抓十几段、续集抓 5 段，按概率平均会撞上一段左右。
+     * 用户要求两集开头不能一样，所以靠显式剔除，不靠随机自然分开。
+     */
+    excludeOpening?: readonly string[]
+  } = {},
 ): BackgroundPlan {
   if (ttsDurationMs === null || ttsDurationMs <= 0) return { segments: [], totalMs: 0 }
 
@@ -144,7 +160,21 @@ export function planProjectBackground (
    * planBackground 的"缺口顺延"会把填不满的部分一路推到地铁跑酷，
    * 结果正好是"几段开头 + 全程跑酷"。那个纯函数一行都不用改。
    */
-  const opening = opts.sequel ? openingAll.slice(0, SEQUEL_OPENING_CLIPS) : openingAll
+  /*
+   * 【人挑的优先，其次剔除要避开的，最后才是洗好的默认顺序】。
+   * 人挑的清单里可以有重复（同一段开头连着用两次是合理的），
+   * 所以按 id 逐个映射而不是 filter——filter 会把重复项吃掉。
+   */
+  const pick = opts.openingPick ?? []
+  const openingById = new Map(openingAll.map((it) => [it.id, it]))
+  const exclude = new Set(opts.excludeOpening ?? [])
+  const openingPool = pick.length > 0
+    ? pick.map((id) => openingById.get(id)).filter((it): it is LibraryItem => it !== undefined)
+    : openingAll.filter((it) => !exclude.has(it.id))
+
+  const opening = opts.sequel && pick.length === 0
+    ? openingPool.slice(0, SEQUEL_OPENING_CLIPS)
+    : openingPool
   const regular = opts.sequel ? [] : regularAll
 
   const byId = new Map<string, LibraryItem>()
@@ -172,4 +202,23 @@ export function planProjectBackground (
       }
     }),
   }
+}
+
+/**
+ * 解析落库的开头清单。存的是 JSON 数组，坏数据一律当"没挑"处理——
+ * 这一列只影响挑素材，为它抛异常会把整条烧录链路带崩。
+ */
+export function parseOpeningPick (json: string): string[] {
+  if (json === '') return []
+  try {
+    const v: unknown = JSON.parse(json)
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []
+  } catch {
+    return []
+  }
+}
+
+/** 一份排布里，开头段用到的素材 id（有序、含重复） */
+export function openingIdsOf (plan: BackgroundPlan): string[] {
+  return plan.segments.filter((s) => s.bucket === OPENING_BUCKET).map((s) => s.itemId)
 }
