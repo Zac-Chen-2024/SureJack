@@ -185,12 +185,38 @@ function retryNudge (violations: string[], attempt: number): string {
     '\n请对上面列出的每个字逐一给出不同的同音字，配角也一样。'
 }
 
+/**
+ * 一次调用的超时。
+ *
+ * 【为什么是 120 而不是 60】：线上遇到过一次——同一篇 5917 字的文案，
+ * 一次 60 秒超时、隔一会儿再跑只用 17 秒。DeepSeek 的延迟波动很大，
+ * 而 60 秒卡的正好是波动的上沿。分集那边（split-ai）本来就给的 120 秒。
+ */
+const CALL_TIMEOUT_MS = 120_000
+
+/**
+ * 偶发失败重试一次。
+ *
+ * 【和下面那个"名字没改干净"的重试是两回事】：那个重试的是【模型答得不对】，
+ * 这个重试的是【压根没答上来】（超时、网络断、5xx）。原来只有前者，
+ * 于是一次网络抖动就把用户甩回"分析失败"，而他什么都没做错。
+ */
+async function withRetry<T> (label: string, fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn()
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    console.warn(`[rename] ${label} 第一次失败（${msg}），重试一次`)
+    return await fn()
+  }
+}
+
 async function callDeepSeek (novel: string, extraSystem: string, deps: AnalyzeDeps): Promise<RenameAnalysis> {
   const apiKey = deps.apiKey ?? process.env.DEEPSEEK_API_KEY
   if (!apiKey) throw new Error('缺少 DEEPSEEK_API_KEY，无法做人名分析')
   const doFetch = deps.fetch ?? fetch
   const ctrl = new AbortController()
-  const timer = setTimeout(() => ctrl.abort(), deps.timeoutMs ?? 60_000)
+  const timer = setTimeout(() => ctrl.abort(), deps.timeoutMs ?? CALL_TIMEOUT_MS)
   try {
     const res = await doFetch(ENDPOINT, {
       method: 'POST',
@@ -260,11 +286,15 @@ export function coerceReview (raw: unknown): ReviewResult {
  * **失败不阻塞**——调用方拿不到结果就沿用第一层的产物即可。
  */
 export async function reviewCleanup (text: string, deps: AnalyzeDeps = {}): Promise<ReviewResult> {
+  return withRetry('清理复查', () => reviewCleanupOnce(text, deps))
+}
+
+async function reviewCleanupOnce (text: string, deps: AnalyzeDeps = {}): Promise<ReviewResult> {
   const apiKey = deps.apiKey ?? process.env.DEEPSEEK_API_KEY
   if (!apiKey) throw new Error('缺少 DEEPSEEK_API_KEY，无法做清理复查')
   const doFetch = deps.fetch ?? fetch
   const ctrl = new AbortController()
-  const timer = setTimeout(() => ctrl.abort(), deps.timeoutMs ?? 60_000)
+  const timer = setTimeout(() => ctrl.abort(), deps.timeoutMs ?? CALL_TIMEOUT_MS)
   try {
     const res = await doFetch(ENDPOINT, {
       method: 'POST',
@@ -299,7 +329,7 @@ export async function analyzeNovel (novel: string, deps: AnalyzeDeps = {}): Prom
    *
    * 极个别怎么都改不动的，前端替换表会把它标出来让用户手改（见 web 端）。
    */
-  let best = await callDeepSeek(novel, '', deps)
+  let best = await withRetry('人名分析', () => callDeepSeek(novel, '', deps))
   let bestBad = findIdentityViolations(best)
   for (let attempt = 1; attempt <= 2 && bestBad.length > 0; attempt++) {
     const next = await callDeepSeek(novel, retryNudge(bestBad, attempt), deps)

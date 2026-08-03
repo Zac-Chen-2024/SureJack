@@ -114,3 +114,42 @@ describe('hasIdentityViolation', () => {
     expect(hasIdentityViolation({ chapterHeadings: [], relationships: [], characters: [{ original: '甲乙', replacement: '甲丙', role: 'minor', pairs: [{ from: '甲乙', to: '甲丙', global: true }] }] })).toBe(false)
   })
 })
+
+describe('偶发失败要重试一次', () => {
+  /*
+   * 线上真出过：同一篇 5917 字的文案，一次 60 秒超时、隔一会儿再跑只用 17 秒。
+   * 原来只对"名字没改干净"重试，网络/超时一次都不重试——一次抖动就把用户
+   * 甩回"分析失败"，而他什么都没做错。
+   */
+  const GOOD = JSON.stringify({
+    chapterHeadings: [],
+    characters: [{ original: '顾文渊', replacement: '顾闻缘', role: '男主' }],
+    relationships: [],
+  })
+  const reply = (): Response => new Response(JSON.stringify({
+    choices: [{ message: { content: GOOD } }],
+  }), { status: 200 })
+
+  it('第一次超时、第二次成功 → 整体成功', async () => {
+    let n = 0
+    const fakeFetch = async (): Promise<Response> => {
+      n++
+      if (n === 1) throw new DOMException('This operation was aborted', 'AbortError')
+      return reply()
+    }
+    const a = await analyzeNovel('顾文渊走进屋子。', { fetch: fakeFetch as typeof fetch, apiKey: 'k' })
+    expect(n).toBe(2)
+    expect(a.characters[0]?.replacement).toBe('顾闻缘')
+  })
+
+  it('两次都失败才算失败——不无限重试', async () => {
+    let n = 0
+    const fakeFetch = async (): Promise<Response> => {
+      n++
+      throw new Error('网络断了')
+    }
+    await expect(analyzeNovel('顾文渊走进屋子。', { fetch: fakeFetch as typeof fetch, apiKey: 'k' }))
+      .rejects.toThrow('网络断了')
+    expect(n).toBe(2)
+  })
+})
