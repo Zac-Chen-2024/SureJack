@@ -1,5 +1,5 @@
 import { ASPECT_PRESETS } from '../config.js'
-import { segmentLines } from './segment.js'
+import { segmentLines, applyCuts, lineText } from './segment.js'
 import { buildAss, DEFAULT_SUBTITLE_FONT_SIZE } from './ass.js'
 export { DEFAULT_SUBTITLE_FONT_SIZE }
 import type { Project } from '../db/user-db.js'
@@ -19,19 +19,21 @@ import type { WordTiming, SubtitleLine, TextOverlay, AspectPreset } from '../typ
  */
 
 /**
- * 一条字幕的字数上限（兜底）。
+ * 一条字幕的字数上限。
  *
- * 【断句由标点决定，长了靠换行而不是切断】。原来 14 太紧：637 行里 27 行
- * 撞上限被硬断，把"大力出奇迹"劈成"大力出 / 奇迹"这种明显不对的地方。
+ * 演进过程值得记一笔，因为每一版都是被上一版的毛病逼出来的：
+ *   14  —— 太紧，637 行里 27 行撞上限被硬断，"大力出奇迹"被劈成
+ *          "大力出 / 奇迹"。
+ *   24  —— 放宽 + WrapStyle 改成 0（智能折行），长句折两行而不是腰斩。
+ *          但一条 24 字的字幕铺满两行，在手机上仍然糊。
+ *   19  —— 现在这版。配合【语义切分】：超限的行不再靠折行硬扛，而是
+ *          由 LLM 按语义切成几条先后显示（见 cut-ai.ts）。
+ *          19 是"一行放得下、不用折行"的量。
  *
- * 但也不能放太宽——那样一条字幕会长到糊满屏幕。正解是【两条一起改】：
- *   · 上限适度放到 24（约两行显示的量）；
- *   · 渲染时把 WrapStyle 从 2（完全不自动换行）改成 0（智能均分换行），
- *     超过一行的自动折成两行。当初把上限压到 14，正是因为 WrapStyle=2
- *     根本不换行、长了就溢出屏幕。
- * 于是绝大多数换行落在标点上，偶尔的长句折成两行、而不是被腰斩。
+ * 【指纹侧仍然是 14】（LEGACY_SUBTITLE_MAX_CHARS），所以历史项目
+ * 一条都不会因为这几次调整被重烧。
  */
-export const SUBTITLE_MAX_CHARS = 24
+export const SUBTITLE_MAX_CHARS = 19
 
 /**
  * 【旧的上限，只用于算母带指纹】。
@@ -157,7 +159,23 @@ export function deriveSubtitleLines (
       words: [w],
     }))
   }
-  return segmentLines(words, maxChars)
+  const lines = segmentLines(words, maxChars)
+  /*
+   * 【语义切分】：机械切完仍然超限的行，用落库的断点再切一次。
+   *
+   * 标点断句本来就是一次语义分割，绝大多数行到这儿已经断干净了；
+   * 剩下超限的都是"一整段没有标点可断"的长句，机械切法只能硬断，
+   * 常把成语、词组劈成两半。断点是配音完成后算好存下来的（见 cut-ai.ts），
+   * 这里只做查表和落刀——渲染路径上不能有网络调用。
+   *
+   * 没有断点（老项目、算失败、还没算）就用机械切法，一切照旧。
+   */
+  const cuts = parseCuts(project.subtitleCutsJson)
+  if (cuts.size === 0) return lines
+  return lines.flatMap((l) => {
+    const pts = cuts.get(lineText(l))
+    return pts === undefined ? [l] : applyCuts(l, pts)
+  })
 }
 
 /**
@@ -203,4 +221,23 @@ export function buildAssForProject (
     legacyStyle: opts.legacyStyle,
     watermark: opts.watermark,
   })
+}
+
+/**
+ * 解析落库的语义断点。坏数据一律当"没有"——这一层只影响字幕好不好看，
+ * 为它抛异常会把整条烧录链路带崩，而症状离得很远。
+ */
+export function parseCuts (json: string): Map<string, number[]> {
+  const out = new Map<string, number[]>()
+  if (json === '') return out
+  try {
+    const o: unknown = JSON.parse(json)
+    if (o === null || typeof o !== 'object') return out
+    for (const [k, v] of Object.entries(o as Record<string, unknown>)) {
+      if (Array.isArray(v) && v.every((x) => Number.isInteger(x))) out.set(k, v as number[])
+    }
+  } catch {
+    // 坏 JSON 当没有
+  }
+  return out
 }

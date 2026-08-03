@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { segmentLines } from '../../src/subtitles/segment.js'
-import type { WordTiming } from '../../src/types.js'
+import { segmentLines, applyCuts, overlongLines } from '../../src/subtitles/segment.js'
+import type { WordTiming, SubtitleLine } from '../../src/types.js'
 
 const w = (text: string, offsetMs: number, durationMs: number, isPunctuation = false): WordTiming =>
   ({ text, offsetMs, durationMs, isPunctuation })
@@ -97,5 +97,72 @@ describe('segmentLines', () => {
   it('maxChars <= 0 直接抛错，不静默退化成逐词断行', () => {
     expect(() => segmentLines([w('包子', 0, 500)], 0)).toThrow()
     expect(() => segmentLines([w('包子', 0, 500)], -1)).toThrow()
+  })
+})
+
+describe('语义切分的落地：吸附词边界', () => {
+  /** 造一行：每个词 2 字、每词 500ms */
+  const line = (texts: string[]): SubtitleLine => ({
+    startMs: 0,
+    endMs: texts.length * 500,
+    words: texts.map((t, i) => ({ text: t, offsetMs: i * 500, durationMs: 500, isPunctuation: false })),
+  })
+  const textsOf = (ls: SubtitleLine[]): string[] => ls.map((l) => l.words.map((w) => w.text).join(''))
+
+  const L = line(['他把', '那只', '木箱', '推到', '墙角'])   // 10 字，5 个词，缝在 2/4/6/8
+
+  it('断点正好落在词缝上 → 原样切开', () => {
+    expect(textsOf(applyCuts(L, [6]))).toEqual(['他把那只木箱', '推到墙角'])
+  })
+
+  /*
+   * ⚠️ 模型看到的是纯文本，它不知道 Azure 把哪几个字当一个词。
+   * 切在词中间就没有时间戳可用了——必须吸附到最近的那条缝。
+   */
+  it('断点落在词中间 → 吸到最近的缝', () => {
+    expect(textsOf(applyCuts(L, [5]))).toEqual(['他把那只木箱', '推到墙角'])   // 4 和 6 等距 → 取靠后
+    expect(textsOf(applyCuts(L, [7]))).toEqual(['他把那只木箱推到', '墙角'])   // 6 和 8 等距 → 取靠后
+  })
+
+  it('切多刀', () => {
+    expect(textsOf(applyCuts(L, [4, 8]))).toEqual(['他把那只', '木箱推到', '墙角'])
+  })
+
+  it('时间轴跟着词走，不是平均分的', () => {
+    const [a, b] = applyCuts(L, [6])
+    expect(a!.startMs).toBe(0)
+    expect(a!.endMs).toBe(1500)     // 第 3 个词结束
+    expect(b!.startMs).toBe(1500)
+    expect(b!.endMs).toBe(2500)
+  })
+
+  it.each([
+    ['落在开头', [0]],
+    ['落在末尾', [10]],
+    ['超出范围', [99]],
+    ['负数', [-3]],
+  ])('%s 的断点丢掉，不产出空行', (_label, pts) => {
+    expect(applyCuts(L, pts)).toHaveLength(1)
+  })
+
+  it('两个断点吸到同一条缝 → 只算一刀', () => {
+    expect(applyCuts(L, [5, 6])).toHaveLength(2)
+  })
+})
+
+describe('挑出机械切完仍然超限的行', () => {
+  it('有标点的早就断干净了，只有硬断出来的才要送去语义切', () => {
+    const words: WordTiming[] = [
+      { text: '短句', offsetMs: 0, durationMs: 100, isPunctuation: false },
+      { text: '。', offsetMs: 100, durationMs: 10, isPunctuation: true },
+      ...Array.from({ length: 12 }, (_, i) => ({
+        text: '长', offsetMs: 200 + i * 100, durationMs: 100, isPunctuation: false,
+      })),
+    ]
+    const lines = segmentLines(words, 12)
+    const over = overlongLines(lines, 8)
+    expect(over.length).toBeGreaterThan(0)
+    // 那条短的不该被挑出来
+    expect(over).not.toContain(0)
   })
 })

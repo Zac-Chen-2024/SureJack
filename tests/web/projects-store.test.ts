@@ -78,3 +78,16 @@ describe('subtitleHeightLabel（相对说法，不露像素数）', () => {
     expect(subtitleHeightLabel(0, 0)).toBe('贴底')
   })
 })
+
+describe('前后端常量必须对齐', () => {
+  /*
+   * 前端不能 import 后端（打包进不去），所以同一个常量两边各存一份。
+   * 这条测试是唯一让它们不悄悄跑偏的东西——改一边忘了另一边，
+   * 表现是"新建项目的水印默认值和实际烧出来的不一样"，很难往这儿想。
+   */
+  it('水印默认值两边一样', async () => {
+    const web = await import('../../web/src/store/projects')
+    const backend = await import('../../src/subtitles/watermark.js')
+    expect(web.DEFAULT_WATERMARK).toBe(backend.DEFAULT_WATERMARK)
+  })
+})

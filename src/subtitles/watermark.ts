@@ -24,6 +24,14 @@
  *   画面中部，正是字幕所在的地方；水印盖住字幕比字幕盖住水印难受得多。
  */
 
+/**
+ * 新项目默认打的水印文字。
+ *
+ * 【为什么给默认值而不是留空】：留空等于这个功能默认关着，而它是每条片子
+ * 都该有的防搬运标记——用户新建项目时会在标题那一屏看到它，想改随时改。
+ */
+export const DEFAULT_WATERMARK = '周周'
+
 /** 字号。比拟合出来的 59 小一点，配上更重的描边正好（用户选的第四档） */
 export const WATERMARK_FONT_SIZE = 52
 
@@ -119,13 +127,23 @@ export function watermarkSegments (durationMs: number): WatermarkSegment[] {
       const startMs = base + (WATERMARK_OFFSETS_MS[i] ?? 0)
       if (startMs >= durationMs) break
       const nextMs = base + (WATERMARK_OFFSETS_MS[i + 1] ?? WATERMARK_CYCLE_MS)
+      /*
+       * 【最后一段停住不动，到点瞬移回左上】。
+       *
+       * 中间几段都是匀速滑过去的；但一轮走完要回到左上，那是一条横穿整个
+       * 画面的对角线——滑回去等于把观众的视线拽着走一遍，而且"回到原点"
+       * 本身不是运动，是重来一轮。用户的原话：到溢出的时间节点就瞬移。
+       *
+       * 表达方式：这一段的终点 = 起点（原地不动），下一轮的第一段直接从
+       * 左上开始画，两条 Dialogue 之间自然就是一次瞬移。
+       */
+      const isLast = i === n - 1
       out.push({
         startMs,
         endMs: Math.min(nextMs, durationMs),
         legMs: nextMs - startMs,
         from,
-        // 最后一个角滑向【下一轮的第一个角】，循环才接得上
-        to: WATERMARK_ANCHORS[(i + 1) % n] as WatermarkAnchor,
+        to: isLast ? from : (WATERMARK_ANCHORS[i + 1] as WatermarkAnchor),
       })
     }
   }

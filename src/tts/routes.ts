@@ -10,6 +10,9 @@ import { synthesize, synthesizeLong } from './index.js'
 import { isAllowedVoice, clampRate, clampVolume, clampPitch } from './voices.js'
 import { normalizeScript } from '../importers/sanitize.js'
 import { enqueueFilm, type FilmDeps } from '../compose/film.js'
+import { deriveSubtitleLines } from '../subtitles/project-ass.js'
+import { overlongLines, lineText } from '../subtitles/segment.js'
+import { planCuts, SUBTITLE_CUT_MAX } from '../subtitles/cut-ai.js'
 
 interface Deps extends FilmDeps {
   /** 仅供测试注入假合成，生产不传——真调 Azure 会烧配额 */
@@ -146,6 +149,8 @@ export function registerTtsRoutes (app: FastifyInstance, deps: Deps): void {
          * 等他挑完还得重烧一遍——白烧十几分钟，他还会先看到一条不是自己
          * 挑的片子。挑完（或按了「用默认素材」）由那个接口负责排。
          */
+        planSubtitleCuts(name, whitelist, req.params.id, req.log)
+
         if (openingPending(name, whitelist, req.params.id)) {
           req.log.info({ project: req.params.id }, '开头待挑，先不排合成')
         } else {
@@ -200,6 +205,47 @@ export function registerTtsRoutes (app: FastifyInstance, deps: Deps): void {
  * 抽出来是为了让【续集】能走完全一样的一条路。复制一份的话，两处迟早
  * 分叉——而分叉的表现是"续集的字幕/时间轴和主片规则不一样"，极难发现。
  */
+/**
+ * 配音完成后算一次字幕的语义断点。
+ *
+ * ⚠️【只能在这一刻算】：断点要落在词边界上，而词级时间戳是配音才有的。
+ * 也不能放到渲染时算——烧录和预览都是同步读 ASS，那儿不能有网络调用。
+ *
+ * ⚠️【失败不能影响配音】：这一步只让字幕更好看，算不出来就退回机械切法。
+ * 所以整段包在 try 里，也不 await——配音接口不该为它多等十几秒。
+ */
+function planSubtitleCuts (userName: string, whitelist: string[], projectId: string, log: {
+  info: (o: object, m: string) => void
+  warn: (o: object, m: string) => void
+}): void {
+  void (async () => {
+    try {
+      const db = openUserDb(userName, whitelist)
+      let project
+      try { project = db.getProject(projectId) } finally { db.close() }
+      if (!project || project.subtitleMode === 'line') return
+
+      const lines = deriveSubtitleLines(project)
+      const over = overlongLines(lines, SUBTITLE_CUT_MAX)
+      if (over.length === 0) return
+      const texts = over.map((i) => lineText(lines[i]!))
+      const cuts = await planCuts(texts)
+      if (cuts.size === 0) return
+
+      const map: Record<string, number[]> = {}
+      for (const [k, pts] of cuts) {
+        const t = texts[k]
+        if (t !== undefined) map[t] = pts
+      }
+      const db2 = openUserDb(userName, whitelist)
+      try { db2.updateProject(projectId, { subtitleCutsJson: JSON.stringify(map) }) } finally { db2.close() }
+      log.info({ project: projectId, 超限行: over.length, 切成功: cuts.size }, '字幕语义切分完成')
+    } catch (e) {
+      log.warn({ err: e, project: projectId }, '字幕语义切分失败，退回机械切法（不影响出片）')
+    }
+  })()
+}
+
 /** 这个项目是不是还等着作者挑开头 */
 function openingPending (userName: string, whitelist: string[], projectId: string): boolean {
   const db = openUserDb(userName, whitelist)
@@ -243,6 +289,8 @@ async function synthesizeProject (
         wordTimingsJson: JSON.stringify(result.words),
       })
     })
+    planSubtitleCuts(userName, whitelist, projectId, console as never)
+
     // 续集同理：开头没挑完就不排，见上面那段
     if (!openingPending(userName, whitelist, projectId)) {
       await enqueueFilm(deps, userName, projectId)

@@ -86,6 +86,13 @@ export function subtitleHeightLabel (value: number, max: number): string {
   return '偏上'
 }
 
+/**
+ * 新项目默认的水印文字。
+ * ⚠️ 必须和后端 src/subtitles/watermark.ts 的 DEFAULT_WATERMARK 一致，
+ * 由 tests/web/projects-store.test.ts 钉住——前端不能 import 后端。
+ */
+export const DEFAULT_WATERMARK = '周周'
+
 export interface Project {
   id: string
   name: string
@@ -117,6 +124,8 @@ export interface Project {
    * 老项目一律 settled——它们从来没有这一步。
    */
   openingState: 'pending' | 'settled'
+  /** 水印文字。空 = 不打水印 */
+  watermarkText: string
   /** 片内标题——顶部常驻那行大字。空串 = 用项目名 */
   inVideoTitle: string
   /** 续集指向它的主片；主片自己是 null */
@@ -162,7 +171,7 @@ interface ProjectsState {
   select: (id: string) => void
   updateScript: (text: string) => Promise<void>
   /** 素材选择类字段的通用补丁（乐观更新）。setBgm / setBgmVolume 的共用底座 */
-  patchProject: (patch: Partial<Pick<Project, 'bgmLibraryId' | 'bgmVolume' | 'subtitleMarginV' | 'subtitleFontSize' | 'coverTitle' | 'inVideoTitle' | 'voiceName' | 'voiceRate' | 'voiceVolume' | 'voicePitch'>>) => Promise<void>
+  patchProject: (patch: Partial<Pick<Project, 'bgmLibraryId' | 'bgmVolume' | 'subtitleMarginV' | 'subtitleFontSize' | 'coverTitle' | 'inVideoTitle' | 'watermarkText' | 'voiceName' | 'voiceRate' | 'voiceVolume' | 'voicePitch'>>) => Promise<void>
   /** 选/取消选背景音乐。null 表示不要 BGM */
   setBgm: (bgmLibraryId: string | null) => Promise<void>
   /** 调背景音乐音量。调用方负责节流——见 AssetPanel 的滑块 */
@@ -258,7 +267,7 @@ export const useProjects = create<ProjectsState>((set, get) => ({
    * 点一下 BGM 要立刻选中、拖滑块要跟手，不能等一个来回。
    * 后端回来的整条项目再覆盖一次，以它为准。
    */
-  async patchProject (patch: Partial<Pick<Project, 'bgmLibraryId' | 'bgmVolume' | 'subtitleMarginV' | 'subtitleFontSize' | 'coverTitle' | 'inVideoTitle' | 'voiceName' | 'voiceRate' | 'voiceVolume' | 'voicePitch'>>) {
+  async patchProject (patch: Partial<Pick<Project, 'bgmLibraryId' | 'bgmVolume' | 'subtitleMarginV' | 'subtitleFontSize' | 'coverTitle' | 'inVideoTitle' | 'watermarkText' | 'voiceName' | 'voiceRate' | 'voiceVolume' | 'voicePitch'>>) {
     const id = get().currentId
     if (!id) return
     set((s) => ({ items: s.items.map((p) => (p.id === id ? { ...p, ...patch } : p)) }))

@@ -45,6 +45,18 @@ describe('水印的位置轮转', () => {
     expect(names(60_000)).toEqual(['左上'])
   })
 
+  /*
+   * 一轮走完不是"滑回左上"，是【停在右下、到点瞬移】。
+   * 滑回去要横穿整个画面，把观众视线拽着走一遍；而回到原点本身不是运动。
+   */
+  it('最后一段停在右下不动（终点=起点），下一轮直接从左上开始', () => {
+    const segs = watermarkSegments(WATERMARK_CYCLE_MS + 100_000)
+    const last = segs[5]!
+    expect(last.from.name).toBe('右下')
+    expect(last.to.name).toBe('右下')       // 原地不动
+    expect(segs[6]!.from.name).toBe('左上')  // 瞬移
+  })
+
   it('比一轮还长就循环回左上', () => {
     const segs = watermarkSegments(WATERMARK_CYCLE_MS + 100_000)
     expect(segs.map((s) => s.from.name).slice(0, 7))
