@@ -129,6 +129,8 @@ export interface FilmFingerprintInput {
    * 所以必须在这儿单独列，而且只在非空时列。
    */
   watermarkText: string
+  /** 字幕的语义断点。**母带层**——它改变字幕的分行，必须重烧 */
+  subtitleCutsJson: string
 }
 
 /**
@@ -179,6 +181,13 @@ export function masterFingerprint (
    * 一旦给某个项目填了水印，这里才追加 → 指纹变 → 只有它自己重烧。
    */
   if (i.watermarkText !== '') parts.push('wm', i.watermarkText)
+  /*
+   * 【字幕语义断点同样是"非空才追加"】。断点不进算指纹的那份 ASS
+   * （见 project-ass.ts 的 useCuts），所以要在这儿单列；而单列就必须
+   * 非空才加，否则十几条历史项目的指纹全变、开机补合把它们全排上队。
+   * 重切了字幕 → 这一项变 → 只有它自己重烧。
+   */
+  if (i.subtitleCutsJson !== '') parts.push('cuts', i.subtitleCutsJson)
   return createHash('sha256').update(JSON.stringify(parts)).digest('hex')
 }
 
@@ -379,6 +388,7 @@ export function resolveFilm (
     bgmPath, bgmVolume: project.bgmVolume,
     coverTitle: coverTitleOf(project),
     watermarkText: project.watermarkText,
+    subtitleCutsJson: project.subtitleCutsJson,
   }
 
   return {

@@ -15,6 +15,7 @@ const BASE: FilmFingerprintInput = {
   bgmVolume: 0.15,
   coverTitle: '后续来啦',
   watermarkText: '',   // 老项目一律没水印，指纹里不会多出这一项
+  subtitleCutsJson: '',   // 同理：没算过语义断点
 }
 
 /** 换一个字段，其余原样 */

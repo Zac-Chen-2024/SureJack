@@ -29,6 +29,7 @@ const BASE: FilmFingerprintInput = {
   bgmVolume: 0.15,
   coverTitle: '后续来啦',
   watermarkText: '',   // 老项目一律没水印，指纹里不会多出这一项
+  subtitleCutsJson: '',   // 同理：没算过语义断点
 }
 
 describe('配音参数进母带指纹（carve-out 保护老项目）', () => {

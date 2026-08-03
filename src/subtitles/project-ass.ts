@@ -150,6 +150,12 @@ export function clampSubtitleMarginV (value: number, aspectRatio: string): numbe
 export function deriveSubtitleLines (
   project: Project,
   maxChars: number = SUBTITLE_MAX_CHARS,
+  /**
+   * 用不用落库的语义断点。**算指纹那条路要传 false**——
+   * 指纹哈希 ASS 全文，断点一变整份就变；历史项目要逐字节不变，
+   * 而"重切了字幕该不该重烧"由 masterFingerprint 单独判断（见 film.ts）。
+   */
+  useCuts = true,
 ): SubtitleLine[] {
   const words: WordTiming[] = JSON.parse(project.wordTimingsJson ?? '[]')
   if (project.subtitleMode === 'line') {
@@ -170,7 +176,7 @@ export function deriveSubtitleLines (
    *
    * 没有断点（老项目、算失败、还没算）就用机械切法，一切照旧。
    */
-  const cuts = parseCuts(project.subtitleCutsJson)
+  const cuts = useCuts ? parseCuts(project.subtitleCutsJson) : new Map<string, number[]>()
   if (cuts.size === 0) return lines
   return lines.flatMap((l) => {
     const pts = cuts.get(lineText(l))
@@ -208,7 +214,8 @@ export function buildAssForProject (
     { content: inVideoTitleOf(project), style: 'Title', startMs: null, endMs: null },
   ]
   return buildAss({
-    lines: deriveSubtitleLines(project, opts.maxChars ?? SUBTITLE_MAX_CHARS),
+    lines: deriveSubtitleLines(
+      project, opts.maxChars ?? SUBTITLE_MAX_CHARS, opts.legacyStyle !== true),
     overlays,
     aspect: aspectOf(project),
     durationMs: project.ttsDurationMs ?? 0,

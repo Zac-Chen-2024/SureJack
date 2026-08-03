@@ -3,6 +3,7 @@ import { openUserDb } from '../db/user-db.js'
 import { getSession, requireAuth } from '../auth/session.js'
 import { analyzeNovel, reviewCleanup, coerceAnalysis, coerceReview, type ReviewResult } from './deepseek.js'
 import { applyRename, stripChapters } from './replace.js'
+import { punctuate } from '../importers/punctuate.js'
 import type { RenameAnalysis } from './types.js'
 import { recommendBgm } from '../bgm/recommend.js'
 import { listBucket } from '../library/scan.js'
@@ -159,6 +160,28 @@ export function registerRenameRoutes (app: FastifyInstance, deps: Deps): void {
       } catch (e) {
         reviewError = e instanceof Error ? e.message : '清理复查失败'
         req.log.warn({ err: e }, '清理复查失败，沿用第一层结果')
+      }
+
+      /*
+       * 第三层：标点体检。这条流水线上【断句全靠原文自带的标点】——
+       * 配音的停顿、字幕的断行、分集的切句，三处都吃它。
+       * 有些抓取源是整段流水账，几百字不见一个句号，那种文本进来之后
+       * 配音会一口气念到底、字幕每行都超限只能硬断。
+       *
+       * ⚠️【必须在配音之前】：补完 Azure 才会在那儿停顿。已经配好音的项目
+       * 再补标点对字幕毫无作用——字幕是从词时间戳推的，不是从文案推的。
+       *
+       * 【健康就一次 API 都不调】，而且模型改了一个字就整篇作废（punctuate
+       * 内部逐字校验），失败也只是沿用原文，不阻塞确认。
+       */
+      try {
+        const fixed = await punctuate(processed)
+        if (fixed !== null) {
+          req.log.info({ project: project.id }, '标点异常，已补标点')
+          processed = fixed
+        }
+      } catch (e) {
+        req.log.warn({ err: e }, '补标点失败，沿用原文')
       }
 
       const updated = withUserDb(name, (db) => db.updateProject(project.id, {
