@@ -10,6 +10,10 @@
 | --- | --- |
 | `list.png` | 项目列表。缩略图是**真封面**（按宽度铺满、纵向居中裁切）；分隔带上下留白；「被取消的那条」显示**未完成** |
 | `cover-repro.png` / `cover-diff.png` | 封面复刻 vs 参考图。差异图里红=参考多出、绿=复刻多出、白=重合——只剩边缘一像素 |
+| `ref-vs-ours-diff.png` | 三列：微信截图参考 / 我们烧出来的同一句字（中灰底）/ 差异分析（红=只有参考、青=只有我们、白=重合，带 ×3 放大和数值）。重跑 `python3 spikes/subtitle/three-col-diff.py`，要先有 `/tmp/verify.png`（拿当前样式烧一帧） |
+| `ref-vs-fit.png` | 同一件事的另一种看法：把我们的字染绿直接盖在参考上 |
+| `luti2/` | 周周撸铁2 成片抽帧：封面帧 + 正文两帧 + 拼图 `strip.png` |
+| `watermark-fit.png` / `watermark-fit-v2.png` | 水印「周周」拟合：v1 没算描边（判据阈值把那圈淡边当噪声扔了），**v2 是准的**。重跑 `python3 spikes/subtitle/watermark-fit2.py` |
 | `episode-1-cover.png` / `episode-2-cover.png` | 分集验收：主片和续集各自的封面第一帧 |
 | `episode-reminder.png` | 续集第 88.6 秒——「分集验收第二集开始啦」念出来、有字幕，背景此时已经是地铁跑酷 |
 | `lab-phone.png` / `lab-desktop.png` | 字幕尺子 `/subtitle-lab`：真实底图 + 真实字体的字幕，两个滑块 |

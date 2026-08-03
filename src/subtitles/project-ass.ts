@@ -176,6 +176,8 @@ export function buildAssForProject (
     hidePunctuation?: boolean; maxChars?: number; wrapStyle?: number
     /** 用改版式之前的样式行。只给算指纹用，见 ass.ts 的 legacyStyleLines */
     legacyStyle?: boolean
+    /** 动态水印文字。只用于渲染，算指纹那份不传，见 subtitles/watermark.ts */
+    watermark?: string
   } = {},
 ): string {
   const overlays: TextOverlay[] = [
@@ -199,5 +201,6 @@ export function buildAssForProject (
     hidePunctuation: opts.hidePunctuation,
     wrapStyle: opts.wrapStyle,
     legacyStyle: opts.legacyStyle,
+    watermark: opts.watermark,
   })
 }

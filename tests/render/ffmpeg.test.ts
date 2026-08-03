@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { parseProgress, buildArgs, createProgressParser } from '../../src/render/ffmpeg.js'
 import { ASPECT_PRESETS } from '../../src/config.js'
 import type { RenderJob } from '../../src/types.js'
+import { FONTS_DIR } from '../../src/config.js'
 
 const job = (over: Partial<RenderJob> = {}): RenderJob => ({
   clips: [{ path: '/tmp/v.mp4', fitMode: 'cover', cropOffsetX: 0.5, cropOffsetY: 0.5 }],
@@ -87,8 +88,13 @@ describe('buildArgs', () => {
     expect(buildArgs(job())).toContain('yuv420p')
   })
 
-  it('烧 ASS 时带 fontsdir', () => {
-    expect(buildArgs(job()).join(' ')).toContain('fontsdir=/usr/share/fonts/opentype/noto')
+  it('烧 ASS 时带 fontsdir，指向仓库里自带的那份字体', () => {
+    /*
+     * 【必须是仓库内的 assets/fonts，不能是系统字体目录】。思源黑体是
+     * 跟着仓库走的，换一台机器、或者系统字体被清掉，指向 /usr/share 的话
+     * libass 会静默回退到别的字体——不报错，只是烧出来的片子字全变了。
+     */
+    expect(buildArgs(job()).join(' ')).toContain(`fontsdir=${FONTS_DIR}`)
   })
 
   it('不 map 背景视频的音轨——原声一律丢弃', () => {

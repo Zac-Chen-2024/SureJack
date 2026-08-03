@@ -91,6 +91,11 @@ export interface Project {
    */
   coverTitle: string
   /**
+   * 动态水印文字。空串 = 不打水印（老项目一律如此）。
+   * 位置/时间表是固定的六角轮转，见 subtitles/watermark.ts。
+   */
+  watermarkText: string
+  /**
    * 片内标题——顶部常驻那行大字。空串 = 用项目名。
    * 【和封面标题是两个东西】：封面是给平台抓缩略图看的，片内是看片的人
    * 全程都在看的那行，作者会想给它们写不一样的话。
@@ -134,6 +139,7 @@ export interface UserDb {
     subtitleMarginV?: number
     subtitleFontSize?: number
     coverTitle?: string
+    watermarkText?: string
     inVideoTitle?: string
     parentProjectId?: string | null
     episodeIndex?: number
@@ -168,6 +174,7 @@ interface Row {
   subtitle_margin_v: number | null
   subtitle_font_size: number | null
   cover_title: string | null
+  watermark_text: string | null
   in_video_title: string | null
   parent_project_id: string | null
   episode_index: number | null
@@ -192,6 +199,7 @@ const toProject = (r: Row): Project => ({
   subtitleMarginV: r.subtitle_margin_v ?? DEFAULT_SUBTITLE_MARGIN_V,
   subtitleFontSize: r.subtitle_font_size ?? DEFAULT_SUBTITLE_FONT_SIZE,
   coverTitle: r.cover_title ?? '',
+  watermarkText: r.watermark_text ?? '',
   inVideoTitle: r.in_video_title ?? '',
   parentProjectId: r.parent_project_id ?? null,
   episodeIndex: r.episode_index ?? 1,
@@ -251,6 +259,7 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
       subtitle_margin_v INTEGER NOT NULL DEFAULT ${DEFAULT_SUBTITLE_MARGIN_V},
       subtitle_font_size INTEGER NOT NULL DEFAULT ${DEFAULT_SUBTITLE_FONT_SIZE},
       cover_title TEXT NOT NULL DEFAULT '',
+      watermark_text TEXT NOT NULL DEFAULT '',
       in_video_title TEXT NOT NULL DEFAULT '',
       parent_project_id TEXT,
       episode_index INTEGER NOT NULL DEFAULT 1,
@@ -325,6 +334,13 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
    * 于是老项目自动拿到以项目名为标题的封面，一行迁移代码都不用写。
    */
   addCol('cover_title', "cover_title TEXT NOT NULL DEFAULT ''")
+  /*
+   * 水印默认【空串 = 不打】。和 cover_title 那次的理由正好相反：空串在这里
+   * 不是"跟着项目名走"，而是"这个项目没有水印"。默认必须是不打——
+   * ALTER TABLE 的默认值会回填进所有老行，填个非空值等于给十几条历史项目
+   * 凭空加上水印，它们的指纹随即失效、全部重烧。
+   */
+  addCol('watermark_text', "watermark_text TEXT NOT NULL DEFAULT ''")
   addCol('in_video_title', "in_video_title TEXT NOT NULL DEFAULT ''")
   /*
    * parent_project_id 【不能】NOT NULL——老项目全是独立的主片，null 就是
@@ -370,6 +386,7 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
         bgmLibraryId: null, subtitleMarginV: DEFAULT_SUBTITLE_MARGIN_V,
         subtitleFontSize: DEFAULT_SUBTITLE_FONT_SIZE,
         coverTitle: '',      // 空 = 跟着项目名走
+        watermarkText: '',   // 空 = 不打水印
         inVideoTitle: '',    // 同上
         parentProjectId: null,
         episodeIndex: 1,
@@ -382,14 +399,14 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
       }
       db.prepare(
         `INSERT INTO projects
-          (id, name, script_text, aspect_ratio, tts_state, tts_duration_ms, word_timings_json, bgm_volume, subtitle_mode, bgm_library_id, subtitle_margin_v, subtitle_font_size, cover_title, in_video_title, parent_project_id, episode_index, voice_name, voice_rate, voice_volume, voice_pitch, rename_enabled, rename_state, rename_analysis_json, rename_map_json, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          (id, name, script_text, aspect_ratio, tts_state, tts_duration_ms, word_timings_json, bgm_volume, subtitle_mode, bgm_library_id, subtitle_margin_v, subtitle_font_size, cover_title, watermark_text, in_video_title, parent_project_id, episode_index, voice_name, voice_rate, voice_volume, voice_pitch, rename_enabled, rename_state, rename_analysis_json, rename_map_json, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         project.id, project.name, project.scriptText, project.aspectRatio,
         project.ttsState, project.ttsDurationMs, project.wordTimingsJson,
         project.bgmVolume, project.subtitleMode, project.bgmLibraryId,
         project.subtitleMarginV, project.subtitleFontSize, project.coverTitle,
-        project.inVideoTitle, project.parentProjectId, project.episodeIndex,
+        project.watermarkText, project.inVideoTitle, project.parentProjectId, project.episodeIndex,
         project.voiceName, project.voiceRate, project.voiceVolume, project.voicePitch,
         project.renameEnabled ? 1 : 0, project.renameState,
         project.renameAnalysisJson, project.renameMapJson,
@@ -409,7 +426,7 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
           tts_state = ?, tts_duration_ms = ?, word_timings_json = ?,
           bgm_volume = ?, subtitle_mode = ?, bgm_library_id = ?,
           subtitle_margin_v = ?, subtitle_font_size = ?, cover_title = ?,
-          in_video_title = ?, parent_project_id = ?, episode_index = ?,
+          watermark_text = ?, in_video_title = ?, parent_project_id = ?, episode_index = ?,
           voice_name = ?, voice_rate = ?, voice_volume = ?, voice_pitch = ?,
           rename_enabled = ?, rename_state = ?, rename_analysis_json = ?, rename_map_json = ?,
           updated_at = ?
@@ -435,6 +452,7 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
           ? patch.subtitleFontSize
           : row.subtitle_font_size ?? DEFAULT_SUBTITLE_FONT_SIZE,
         patch.coverTitle !== undefined ? patch.coverTitle : row.cover_title ?? '',
+        patch.watermarkText !== undefined ? patch.watermarkText : row.watermark_text ?? '',
         patch.inVideoTitle !== undefined ? patch.inVideoTitle : row.in_video_title ?? '',
         patch.parentProjectId !== undefined ? patch.parentProjectId : row.parent_project_id ?? null,
         patch.episodeIndex !== undefined ? patch.episodeIndex : row.episode_index ?? 1,

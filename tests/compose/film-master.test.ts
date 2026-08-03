@@ -28,6 +28,7 @@ const BASE: FilmFingerprintInput = {
   bgmPath: '/data/library/背景音乐/一笑倾城.mp3',
   bgmVolume: 0.15,
   coverTitle: '后续来啦',
+  watermarkText: '',   // 老项目一律没水印，指纹里不会多出这一项
 }
 
 describe('配音参数进母带指纹（carve-out 保护老项目）', () => {
@@ -69,6 +70,34 @@ describe('配音参数进母带指纹（carve-out 保护老项目）', () => {
     const legacy = { ...BASE, voiceParams: { voice: 'zh-CN-XiaoxiaoNeural', rate: 0, volume: 0, pitch: 0 } }
     const changed = { ...BASE, voiceParams: { ...legacy.voiceParams, ...patch } }
     expect(masterFingerprint(changed)).not.toBe(masterFingerprint(legacy))
+  })
+})
+
+describe('水印进母带指纹（同一套 carve-out）', () => {
+  /*
+   * 和配音参数那条一模一样的道理，只是这次的"老默认"是【空串 = 没有水印】。
+   * 水印【不进】算指纹的那份 ASS（见 subtitles/watermark.ts），所以必须在
+   * 指纹里单列；而单列就必须是"非空才追加"，否则十几条历史成片全部重烧。
+   */
+  it('【没水印 = 旧指纹，逐字节相同】过往项目绝不重烧', async () => {
+    const { createHash } = await import('node:crypto')
+    const noWm: FilmFingerprintInput = { ...BASE, watermarkText: '' }
+    const oldStyle = createHash('sha256').update(JSON.stringify([
+      noWm.aspect.width, noWm.aspect.height, noWm.durationMs, noWm.bgKey,
+      createHash('sha256').update(noWm.ass).digest('hex'),
+      noWm.voicePath,
+    ])).digest('hex')
+    expect(masterFingerprint(noWm)).toBe(oldStyle)
+  })
+
+  it('【填了水印 → 母带指纹变】水印烧在画面上，重混音没用', () => {
+    expect(masterFingerprint({ ...BASE, watermarkText: '周周' }))
+      .not.toBe(masterFingerprint({ ...BASE, watermarkText: '' }))
+  })
+
+  it('【改水印文字 → 母带指纹变】', () => {
+    expect(masterFingerprint({ ...BASE, watermarkText: '周周' }))
+      .not.toBe(masterFingerprint({ ...BASE, watermarkText: '诗婕' }))
   })
 })
 

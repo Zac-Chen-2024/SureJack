@@ -1,5 +1,9 @@
 import { FONT_FAMILY } from '../config.js'
 import type { SubtitleLine, TextOverlay, AspectPreset } from '../types.js'
+import {
+  watermarkSegments, watermarkPoint, WATERMARK_FONT_SIZE, WATERMARK_OUTLINE,
+  WATERMARK_ALPHA_HEX, WATERMARK_MARGIN_H, WATERMARK_MARGIN_V,
+} from './watermark.js'
 
 /**
  * 字幕距底边的默认像素数（Sub 样式的 MarginV）。
@@ -59,6 +63,15 @@ export interface BuildAssOptions {
    * 见 legacyStyleLines。
    */
   legacyStyle?: boolean
+  /**
+   * 动态水印文字。空或没传 = 不画。
+   *
+   * ⚠️ **只用于渲染，算指纹的那份从不传**（legacyStyle 分支里也强制不画）。
+   * 指纹哈希的是 ASS 全文，水印会加进来几十行 Dialogue —— 无条件写进去，
+   * 十几条历史成片的指纹立刻失效、全部重烧。水印的变化改由
+   * masterFingerprint 单独追加 watermarkText 来体现，见 compose/film.ts。
+   */
+  watermark?: string
 }
 
 /**
@@ -284,6 +297,37 @@ export function buildAss (opts: BuildAssOptions): string {
    * legacyStyle：只给【算指纹】用，见 legacyStyleLines 上面那段。
    * 渲染永远走新样式。
    */
+  /*
+   * 水印：只在渲染时画。legacyStyle 是【算指纹】那条路，强制不画——
+   * 否则几十行 Dialogue 进哈希，历史成片全部失效重烧。见 watermark.ts 顶部。
+   */
+  const wmText = opts.legacyStyle === true ? '' : (opts.watermark ?? '').trim()
+  const wmStyle = wmText === ''
+    ? ''
+    : `\nStyle: Watermark,${FONT_FAMILY},${WATERMARK_FONT_SIZE},` +
+      `&H${WATERMARK_ALPHA_HEX}FFFFFF,&H${WATERMARK_ALPHA_HEX}FFFFFF,` +
+      `&H${WATERMARK_ALPHA_HEX}000000,&H00000000,0,0,0,0,100,100,0,0,1,` +
+      `${WATERMARK_OUTLINE},0,7,${WATERMARK_MARGIN_H},${WATERMARK_MARGIN_H},${WATERMARK_MARGIN_V},1`
+  /*
+   * 【匀速滑动，不是跳变】。一条 Dialogue 只有一个对齐位，起点和终点的
+   * 对齐位不同就没法表达，所以统一 \an5（中心对齐）+ \move 两点坐标。
+   *
+   * ⚠️ \move 的时间参数写【整段本该走多久】(0..legMs)，不是这条 Dialogue
+   * 的实际时长。片尾把最后一段截断时，两者不相等——用实际时长的话，
+   * 水印会在最后几十秒里加速冲向终点，一眼就看出来了。
+   *
+   * Layer 0 且排在字幕【前面】：斜线路径正好横穿画面中部的字幕区，
+   * 让字幕压住水印，而不是反过来。
+   */
+  const wmLines = wmText === ''
+    ? ''
+    : watermarkSegments(durationMs).map((s) => {
+      const a = watermarkPoint(s.from, wmText, WATERMARK_FONT_SIZE, aspect.width, aspect.height)
+      const b = watermarkPoint(s.to, wmText, WATERMARK_FONT_SIZE, aspect.width, aspect.height)
+      return `Dialogue: 0,${formatAssTime(s.startMs)},${formatAssTime(s.endMs)},Watermark,,0,0,0,,` +
+        `{\\an5\\move(${a.x},${a.y},${b.x},${b.y},0,${s.legMs})}${escapeAssText(wmText)}`
+    }).join('\n') + '\n'
+
   const styleLines = opts.legacyStyle === true
     ? legacyStyleLines(fontSize, marginV)
     : [
@@ -301,11 +345,11 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-${styleLines}
+${styleLines}${wmStyle}
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
-${overlayLines.join('\n')}
+${wmLines}${overlayLines.join('\n')}
 ${dialogues.join('\n')}
 `
 }

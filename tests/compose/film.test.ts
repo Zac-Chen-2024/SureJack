@@ -14,6 +14,7 @@ const BASE: FilmFingerprintInput = {
   bgmPath: '/data/library/4-BGM/雨.mp3',
   bgmVolume: 0.15,
   coverTitle: '后续来啦',
+  watermarkText: '',   // 老项目一律没水印，指纹里不会多出这一项
 }
 
 /** 换一个字段，其余原样 */

@@ -57,14 +57,14 @@ export function registerProjectRoutes (app: FastifyInstance, deps: Deps): void {
     name?: unknown; scriptText?: unknown; aspectRatio?: unknown
     bgmLibraryId?: unknown; bgmVolume?: unknown; subtitleMarginV?: unknown; subtitleFontSize?: unknown
     voiceName?: unknown; voiceRate?: unknown; voiceVolume?: unknown; voicePitch?: unknown
-    coverTitle?: unknown; inVideoTitle?: unknown
+    coverTitle?: unknown; inVideoTitle?: unknown; watermarkText?: unknown
   } }>(
     '/api/projects/:id', { preHandler: requireAuth }, async (req, reply) => {
       const patch: {
         name?: string; scriptText?: string; aspectRatio?: string
         bgmLibraryId?: string | null; bgmVolume?: number; subtitleMarginV?: number; subtitleFontSize?: number
         voiceName?: string; voiceRate?: number; voiceVolume?: number; voicePitch?: number
-        coverTitle?: string; inVideoTitle?: string
+        coverTitle?: string; inVideoTitle?: string; watermarkText?: string
       } = {}
       if (typeof req.body?.name === 'string') patch.name = req.body.name
       if (typeof req.body?.scriptText === 'string') patch.scriptText = req.body.scriptText
@@ -80,6 +80,14 @@ export function registerProjectRoutes (app: FastifyInstance, deps: Deps): void {
       // 片内标题同理。它渲染在顶部一行里，太长会顶到画面外
       if (typeof req.body?.inVideoTitle === 'string') {
         patch.inVideoTitle = req.body.inVideoTitle.trim().slice(0, 20)
+      }
+      /*
+       * 水印文字。空串同样是【有意义的值】——"不打水印"，是所有老项目的现状。
+       * 截到 8 个字：水印是贴边走的，字一多就会横穿画面，
+       * 而它在竖屏两侧的位置本来就只有百来像素的余地。
+       */
+      if (typeof req.body?.watermarkText === 'string') {
+        patch.watermarkText = req.body.watermarkText.trim().slice(0, 8)
       }
       /*
        * bgmLibraryId 的 null 是【有意义的值】——"不要 BGM"。所以不能像上面

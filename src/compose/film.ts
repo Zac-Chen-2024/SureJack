@@ -121,6 +121,14 @@ export interface FilmFingerprintInput {
    * 绝不能让它把十几分钟的烧录也带着重来。
    */
   coverTitle: string
+  /**
+   * 水印文字。**母带层**——它烧在画面上，改了必须重烧，重混一次音没用。
+   *
+   * 【为什么不靠 ass 那一项兜住】：水印【不进】算指纹的那份 ASS
+   * （见 subtitles/watermark.ts 顶部：进去了历史成片就全部失效重烧）。
+   * 所以必须在这儿单独列，而且只在非空时列。
+   */
+  watermarkText: string
 }
 
 /**
@@ -164,6 +172,13 @@ export function masterFingerprint (
     const v = i.voiceParams
     parts.push(v.voice, v.rate, v.volume, v.pitch)
   }
+  /*
+   * ⚠️【水印同样是"偏离默认才追加"】。加水印之前所有项目都没水印
+   * （迁移默认值就是空串，见 user-db.ts），空串 → 不追加 → 数组和从前
+   * 逐字节相同 → 十几条历史成片指纹不变、开机补合扫不到。
+   * 一旦给某个项目填了水印，这里才追加 → 指纹变 → 只有它自己重烧。
+   */
+  if (i.watermarkText !== '') parts.push('wm', i.watermarkText)
   return createHash('sha256').update(JSON.stringify(parts)).digest('hex')
 }
 
@@ -303,7 +318,9 @@ export function resolveFilm (
    *    指纹逐字节不变】、开机补合扫不到、绝不因为这个改动被重烧；而新烧
    *    的片子用的是隐藏版。指纹在这里退化成"变更信号"，不是产物校验和。
    */
-  const ass = buildAssForProject(project, { hidePunctuation: true, wrapStyle: 0 })
+  const ass = buildAssForProject(project, {
+    hidePunctuation: true, wrapStyle: 0, watermark: project.watermarkText,
+  })
   // 指纹那份钉在【老配置】上（14 字上限 + 含标点）→ 已有项目指纹不变、不重烧
   /*
    * ⚠️【指纹用老样式，渲染用新样式】。样式行一改，所有历史项目的母带指纹
@@ -348,6 +365,7 @@ export function resolveFilm (
     },
     bgmPath, bgmVolume: project.bgmVolume,
     coverTitle: coverTitleOf(project),
+    watermarkText: project.watermarkText,
   }
 
   return {
