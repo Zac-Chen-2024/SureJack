@@ -99,6 +99,21 @@ export function registerEpisodeRoutes (app: FastifyInstance, deps: Deps): void {
         if (text === '') return { code: 400 as const, error: '还没有文案，无法拆分' }
 
         const sentences = splitSentences(text)
+        /*
+         * ⚠️【断点必须落在允许范围里】。滚轮本来就只让在这个范围里选，
+         * 所以越界只可能是前端出了岔子或客户端过期——而代价极不对称：
+         * 一个越界的断点会产出一条【12 秒的主片 + 装着全文的续集】，
+         * 配音、烧录、封面全都照做，用户要到成片出来才发现不对。
+         * 线上真出过：断点被平滑滚动的中间值冲成第 5 句。
+         * 宁可让他重选一次，也不能默默做出一条废片。
+         */
+        const allowed = allowedRange(sentences)
+        if (breakIndex < allowed.min || breakIndex > allowed.max) {
+          return {
+            code: 400 as const,
+            error: `断点要落在第 ${allowed.min + 1} ~ ${allowed.max + 1} 句之间（现在是第 ${breakIndex + 1} 句），刷新一下重选`,
+          }
+        }
         const split = splitStory({
           text, breakIndex, introEndIndex,
           mainInVideoTitle: inVideoTitleOf(project), sentences,

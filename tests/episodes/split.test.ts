@@ -225,3 +225,22 @@ describe('模型返回的收拢', () => {
     expect(r.candidates[0]!.reason).not.toBe('')
   })
 })
+
+describe('断点越界要被挡住（服务端那道闸）', () => {
+  /*
+   * 线上真出过：滚轮的平滑滚动中间值把断点冲成了第 5 句，产出一条
+   * 12 秒的主片 + 装着全文 5900 字的续集。前端已经修了，但这道闸必须有——
+   * 代价太不对称：越界的断点会让配音、烧录、封面全都照做一遍，
+   * 用户要到成片出来才发现不对。
+   */
+  it('allowedRange 给出的范围就是 7~10 分钟那一段', () => {
+    // 每句约 1.1 秒（10 字 × 110ms），600 句 ≈ 11 分钟
+    const text = Array.from({ length: 600 }, (_, i) => `这是第${i}句话共十个字`).join('。') + '。'
+    const ss = splitSentences(text)
+    const a = allowedRange(ss)
+    expect(ss[a.min]!.cumulativeMs).toBeGreaterThanOrEqual(7 * 60_000)
+    expect(ss[a.max]!.cumulativeMs).toBeLessThanOrEqual(10 * 60_000)
+    // 第 5 句这种"引子刚结束"的位置必须在范围之外
+    expect(a.min).toBeGreaterThan(5)
+  })
+})

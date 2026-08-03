@@ -50,14 +50,43 @@ function Wheel ({ items, value, onChange, allowed }: {
   const settle = useRef<ReturnType<typeof setTimeout> | null>(null)
   const programmatic = useRef(false)
 
-  // 外部改了选中项（点候选按钮）→ 滚过去。带 smooth，让人看见"跳到了哪儿"
+  /*
+   * 外部改了选中项（点候选按钮、切页签）→ 滚过去。
+   *
+   * ⚠️【解锁必须按"到位"，不能按时间】。原来是 setTimeout 400ms 解锁，
+   * 而平滑滚动的时长取决于距离：从第 5 句滚到第 200 句要滚一万多像素，
+   * 远不止 400ms。锁提前放开，剩下那段【还在自己滚】的过程就被当成了
+   * 用户在拨滚轮，于是把中间值回调出去——断点被冲成个位数。
+   *
+   * 真实后果：主片只剩 12 秒（第 5 句），整篇 5900 字全掉进续集。
+   * 用户看到的症状是挑开头那一屏显示"目标 0 分 04 秒"。
+   *
+   * 现在：到位（或滚动停下）才解锁，另有 3 秒兜底防止永远锁死。
+   */
   useEffect(() => {
     const el = ref.current
     if (!el) return
+    const target = value * ROW
     programmatic.current = true
-    el.scrollTo({ top: value * ROW, behavior: 'smooth' })
-    const t = setTimeout(() => { programmatic.current = false }, 400)
-    return () => clearTimeout(t)
+    el.scrollTo({ top: target, behavior: 'smooth' })
+
+    let done = false
+    const unlock = (): void => {
+      if (done) return
+      done = true
+      programmatic.current = false
+      el.removeEventListener('scrollend', unlock)
+      clearInterval(poll)
+      clearTimeout(bail)
+    }
+    // scrollend 是最准的信号；老 WebView 没有就靠轮询"到位了没"
+    el.addEventListener('scrollend', unlock)
+    const poll = setInterval(() => {
+      if (Math.abs(el.scrollTop - target) <= 2) unlock()
+    }, 100)
+    // 兜底：万一两个信号都没来（元素被隐藏之类），别让滚轮永远失灵
+    const bail = setTimeout(unlock, 3000)
+    return unlock
   }, [value])
 
   return (
