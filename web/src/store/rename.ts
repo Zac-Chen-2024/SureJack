@@ -196,34 +196,18 @@ export const useRename = create<RenameState>((set, get) => ({
  * 返回 [原字, 大名里换成什么, 这条别名里换成什么][]
  */
 /**
- * 这条别名【应该】被改吗。
+ * 这条别名还没填新名（from === to）。
  *
- * ⚠️ 判据是【含不含姓】，不是"含不含名字的字"。踩过一次：
- * 按后者判的话，"囡囡""阿宝"这种和大名【不同源】的乳名会被认作"不用改"，
- * 而它们恰恰最该改——原样留着，观众照样能靠这个称呼搜到原作。
+ * ⚠️【这不是错误，是待办】。模型知道"囡囡"是乳名、但和大名不同源，
+ * 想不出该换成什么——这时它的正确行为就是【原样列出来交给人】，
+ * 而不是硬编一个。所以界面上要显示成"待你填"，不是"⚠ 没换"。
  *
- *   小顾 / 沈二姑娘   含姓、不含名 → 不用改（姓不换、身份称谓不换）
- *   渊儿 / 砚少爷     含名          → 要改
- *   囡囡 / 阿宝       两者都不含    → 要改（独立乳名）
+ * 试过用"含不含姓"来猜哪些不用改（小顾、沈二姑娘），撤了：那是在猜，
+ * 而且会把"囡囡"这种真该改的判成不用改。判断交给人，机器只负责标出来。
  */
-export function pairShouldChange (c: CharacterReplacement, pairIndex: number): boolean {
+export function pairNeedsYou (c: CharacterReplacement, pairIndex: number): boolean {
   const pair = c.pairs[pairIndex]
-  if (pair === undefined) return false
-  const at = givenStart(c.original, c.replacement)
-  const surname = [...c.original].slice(0, at)
-  const given = [...c.original].slice(at)
-  if (given.some((ch) => pair.from.includes(ch))) return true
-  // 只含姓（+ 身份称谓）→ 本来就不用改
-  if (surname.length > 0 && surname.some((ch) => pair.from.includes(ch))) return false
-  return true
-}
-
-/** 姓占几个字：大名和新名开头相同的那一截就是姓 */
-function givenStart (original: string, replacement: string): number {
-  const a = [...original]; const b = [...replacement]
-  let i = 0
-  while (i < a.length && i < b.length && a[i] === b[i]) i++
-  return i
+  return pair !== undefined && pair.to === pair.from
 }
 
 export function pairInconsistencies (

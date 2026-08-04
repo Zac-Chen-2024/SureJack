@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { editCharacterName, renameGates, pairInconsistencies, pairShouldChange, type CharacterReplacement } from '../../web/src/store/rename'
+import { editCharacterName, renameGates, pairInconsistencies, pairNeedsYou, type CharacterReplacement } from '../../web/src/store/rename'
 import type { Project } from '../../web/src/store/projects'
 
 describe('editCharacterName —— 改新名，pairs 一起改，保持一致', () => {
@@ -79,25 +79,26 @@ describe('别名的一致性检查', () => {
   })
 })
 
-describe('这条别名该不该改（判据是含不含姓）', () => {
+describe('改不出来的小名 = 待办，不是错误', () => {
   /*
-   * ⚠️ 踩过一次：按"含不含名字的字"来判，「囡囡」「阿宝」这种和大名
-   * 【不同源】的乳名会被认作"不用改"——而它们恰恰最该改，原样留着，
-   * 观众照样能靠这个称呼搜到原作。
+   * 用户的原话："有一些小名如果不知道改成什么但是知道是小名，就还是那样，
+   * 统计出来但是先不改动，让人来做。"
+   *
+   * 所以 from === to 是【模型的正确行为】，不是缺陷——界面上显示"待你填"。
+   * 试过用"含不含姓"去猜哪些不用改，撤了：那是在猜，而且会把"囡囡"这种
+   * 真该改的判成不用改。
    */
-  const gu = (from: string): CharacterReplacement => ({
+  const gu = (from: string, to: string): CharacterReplacement => ({
     original: '顾文渊', replacement: '顾闻远', role: 'protagonist',
-    pairs: [{ from, to: from, global: true }],
+    pairs: [{ from, to, global: true }],
   })
 
   it.each([
-    ['含名字的字（渊儿）', '渊儿', true],
-    ['含名字的字（文渊哥哥）', '文渊哥哥', true],
-    ['只含姓（小顾）', '小顾', false],
-    ['姓 + 身份称谓（顾少爷）', '顾少爷', false],
-    ['不同源乳名（阿宝）', '阿宝', true],
-    ['叠字乳名（囡囡）', '囡囡', true],
-  ])('%s → %s', (_label, from, want) => {
-    expect(pairShouldChange(gu(from), 0)).toBe(want)
+    ['同源小名改好了', '渊儿', '远儿', false],
+    ['不同源乳名没改', '阿宝', '阿宝', true],
+    ['叠字乳名没改', '囡囡', '囡囡', true],
+    ['只含姓的也一样交给人', '小顾', '小顾', true],
+  ])('%s → 待你填=%s', (_label, from, to, want) => {
+    expect(pairNeedsYou(gu(from, to), 0)).toBe(want)
   })
 })

@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { useProjects } from '../store/projects'
-import { useRename, readReview, pairInconsistencies, pairShouldChange, type CharacterRole, type RenameAnalysis } from '../store/rename'
+import { useRename, readReview, pairInconsistencies, pairNeedsYou, type CharacterRole, type RenameAnalysis } from '../store/rename'
 import { IconLoader, IconCheck, IconEdit } from './ui/Icon'
 
 /**
@@ -157,7 +157,7 @@ export function NameReplacePanel () {
                     {c.pairs.map((p, j) => {
                       if (p.from === c.original) return null
                       const bad = pairInconsistencies(c, j)
-                      const noop = p.to === p.from && pairShouldChange(c, j)
+                      const todo = pairNeedsYou(c, j)
                       return (
                         <div key={p.from + j} className="mt-1 flex items-center gap-2 pl-6">
                           <span className="shrink-0 text-[11px] text-ink-500 line-through">{p.from}</span>
@@ -167,7 +167,7 @@ export function NameReplacePanel () {
                             onChange={(e) => editPair(i, j, e.target.value)}
                             aria-label={`${p.from} 换成`}
                             className={`min-w-0 flex-1 rounded-md border bg-ink-800 px-2 py-0.5 text-[11px] text-ink-50 outline-none focus:border-accent ${
-                              bad.length > 0 || noop ? 'border-[#e0a82e]' : 'border-line'}`}
+                              bad.length > 0 ? 'border-[#e0a82e]' : todo ? 'border-accent' : 'border-line'}`}
                           />
                           <button
                             type="button" onClick={() => removePair(i, j)}
@@ -181,11 +181,11 @@ export function NameReplacePanel () {
                     })}
 
                     {c.pairs.some((p, j) => p.from !== c.original
-                      && ((p.to === p.from && pairShouldChange(c, j)) || pairInconsistencies(c, j).length > 0)) && (
-                      <p className="mt-1 pl-6 text-[10px] leading-relaxed text-[#e0a82e]">
+                      && (pairNeedsYou(c, j) || pairInconsistencies(c, j).length > 0)) && (
+                      <p className="mt-1 pl-6 text-[10px] leading-relaxed text-ink-300">
                         {c.pairs.flatMap((p, j) => {
                           if (p.from === c.original) return []
-                          if (p.to === p.from) return pairShouldChange(c, j) ? [`${p.from} 没换`] : []
+                          if (pairNeedsYou(c, j)) return [`${p.from} 待你填`]
                           return pairInconsistencies(c, j)
                             .map(([ch, want, got]) => `${p.from} 里的「${ch}」换成了「${got}」，大名里是「${want}」`)
                         }).join('；')}

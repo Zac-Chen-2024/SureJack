@@ -7,7 +7,7 @@ for (const l of readFileSync('/root/SureJack/.env', 'utf8').split('\n')) {
   const m = /^([A-Z_]+)=(.*)$/.exec(l.trim()); if (m) process.env[m[1]] = m[2]
 }
 import { analyzeNovel } from '/root/SureJack/src/rename/deepseek.ts'
-import { pairInconsistencies, pairShouldChange } from '/root/SureJack/web/src/store/rename.ts'
+import { pairInconsistencies, pairNeedsYou } from '/root/SureJack/web/src/store/rename.ts'
 
 const CASES = [
   ['同源小名 + 陷阱词', `
@@ -37,8 +37,8 @@ for (const [label, text] of CASES) {
     for (const [j, p] of c.pairs.entries()) {
       if (p.from === c.original) continue
       const bad = pairInconsistencies(c, j)
-      const noop = p.to === p.from && pairShouldChange(c, j)
-      const flag = noop ? '  ⚠ 没换'
+      const todo = pairNeedsYou(c, j)
+      const flag = todo ? '  ← 待你填'
         : bad.length > 0 ? '  ⚠ ' + bad.map(([ch, want, got]) => `「${ch}」→「${got}」，大名里是「${want}」`).join('；')
         : ''
       console.log(`    ${p.from} → ${p.to}   ${p.global ? '全局' : '限上下文'}${flag}`)
