@@ -32,6 +32,11 @@ export interface Stamp {
   error?: string
   /** 做这份产物的作业 id，用来问队列"还在跑吗" */
   jobId?: string
+  /**
+   * status=error 时的【错误码】，形如 E-3f9a21（作业 id 前 6 位）。
+   * 用户把它念给开发者，开发者拿它 grep 日志——比"我点了下然后转圈"有用。
+   */
+  code?: string
 }
 
 export async function writeStamp (dir: string, file: string, stamp: Stamp): Promise<void> {

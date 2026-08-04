@@ -580,8 +580,16 @@ async function runFilmBuild (
      * 哪一份输入"，用户改了任何输入之后指纹自然对不上，就会重新排队。
      */
     const fingerprint = (await readStamp(dir, FILM_STAMP_FILE))?.fingerprint ?? ''
+    /*
+     * 【错误码】：给用户一个能报给开发者、开发者能拿去 grep 日志的短串。
+     * 用作业 id 的前 6 位——它同时出现在队列日志和这份 stamp 里，
+     * 是这次失败唯一的、稳定的标识。
+     *
+     * 用户那边只需要念出"E-3f9a21"，不必描述"我点了什么然后转圈"。
+     */
+    const code = `E-${jobId.slice(0, 6)}`
     await writeStamp(dir, FILM_STAMP_FILE, {
-      fingerprint, status: 'error', error: message, jobId,
+      fingerprint, status: 'error', error: message, jobId, code,
     }).catch(() => { /* 连失败都记不下来，那就当没做过，下次重来 */ })
     throw e
   }
@@ -681,6 +689,11 @@ export interface FilmInfo {
   progress: number
   /** state=error 时的原因，直接显示给用户 */
   error: string | null
+  /**
+   * state=error 时的错误码（E-3f9a21）。给用户念给开发者、开发者拿去
+   * grep 日志用——比"我点了下然后转圈"有用得多。
+   */
+  code?: string | null
   /** state=none 时还缺什么，直接显示给用户 */
   reason: string | null
   /**
@@ -735,7 +748,7 @@ type FilmVerdict =
   | { kind: 'blocked'; reason: string }
   | { kind: 'running'; jobId: string; progress: number }
   | { kind: 'ready'; jobId: string | null }
-  | { kind: 'failed'; jobId: string | null; error: string }
+  | { kind: 'failed'; jobId: string | null; error: string; code?: string | null }
   /** 该有却没有 —— 唯一需要排活的一档 */
   | { kind: 'missing' }
 
@@ -785,7 +798,7 @@ async function judgeFilm (
 
   // 失败的正是【当前这份输入】→ 停在这儿等用户重试
   if (stamp?.status === 'error' && stamp.fingerprint === fingerprint) {
-    return { kind: 'failed', jobId, error: stamp.error ?? '合成失败' }
+    return { kind: 'failed', jobId, error: stamp.error ?? '合成失败', code: stamp.code ?? null }
   }
 
   /*
@@ -832,7 +845,10 @@ export async function filmInfo (
     case 'ready':
       return { state: 'ready', jobId: v.jobId, progress: 100, error: null, reason: null, ...extra }
     case 'failed':
-      return { state: 'error', jobId: v.jobId, progress: 0, error: v.error, reason: null, ...extra }
+      return {
+        state: 'error', jobId: v.jobId, progress: 0, error: v.error, reason: null,
+        code: v.code ?? null, ...extra,
+      }
     case 'missing': {
       // 该有却没有 → 现在排一条
       const newJobId = await enqueueFilm(deps, userName, projectId)

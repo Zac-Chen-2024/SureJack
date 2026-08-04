@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../../api/client'
 import { useProjects } from '../../store/projects'
+import { usePipeline } from '../../store/pipeline'
 import { IconCheck, IconClose, IconLoader, IconPlay } from '../ui/Icon'
 import { OpeningPreview } from './OpeningPreview'
 
@@ -171,6 +172,12 @@ export function OpeningPicker ({ ids, onDone }: {
     setError(null)
     try {
       await api.post(`/api/projects/${current.id}/opening`, { pick: usePick ? pick : [] })
+      /*
+       * 【立刻标成"排队中"】。敲定这一刻队列还没轮到它，/film 回的是
+       * state:'none'，编辑器会判成"还没有成片"——把"还没轮到"当成"没有"。
+       * 先按在排队显示，等第一次轮询回来再以服务端为准。
+       */
+      usePipeline.getState().markQueued(current.id)
       if (step + 1 < projects.length) setStep(step + 1)
       else onDone()
     } catch (e: unknown) {

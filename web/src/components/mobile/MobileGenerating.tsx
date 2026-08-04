@@ -20,6 +20,10 @@ export function MobileGenerating ({ onBack, projectName }: { onBack: () => void;
     const t = setInterval(() => setElapsed((n) => n + 1), 1000)
     return () => clearInterval(t)
   }, [])
+  const retryFilm = usePipeline((s) => s.retryFilm)
+  const errCode = usePipeline((s) => s.film?.code ?? null)
+  const [busy, setBusy] = useState(false)
+  const [retried, setRetried] = useState<string | null>(null)
   const ttsState = useProjects((s) => s.current()?.ttsState ?? 'none')
   const filmState = usePipeline((s) => s.film?.state ?? null)
   const progress = usePipeline((s) => s.film?.progress ?? 0)
@@ -50,11 +54,45 @@ export function MobileGenerating ({ onBack, projectName }: { onBack: () => void;
 
       <div className="flex h-full flex-col items-center justify-center px-8">
         {errored ? (
-          <div className="text-center">
+          /*
+           * 【重试不是"回去点生成配音"】。那是把整条链从头再走一遍
+           * （10 分钟配音 + 十几分钟烧录），而失败的可能只是最后混一次音。
+           * 这个按钮走 /retry，从盘上最远的完好产物接着走。
+           *
+           * 【错误码要显眼】：用户念得出 E-3f9a21，开发者才 grep 得到；
+           * 让他描述"我点了下然后转圈"是没法排查的。
+           */
+          <div className="w-full max-w-[320px] text-center">
             <p className="text-base font-semibold text-danger">生成失败了</p>
+            {errCode !== null && (
+              <p className="mt-2 font-mono text-sm font-bold tracking-wider text-ink-100">{errCode}</p>
+            )}
             <p className="mt-2 text-xs leading-relaxed text-ink-400">
-              网络或服务可能出了点问题。回到列表，进这个项目的「配音」重试一次即可。
+              把上面这个错误码告诉开发人员。也可以先点下面重试一次——
+              已经做完的部分不会重来。
             </p>
+            {retried !== null && (
+              <p className="mt-2 text-[11px] text-accent">{retried}</p>
+            )}
+            <button
+              type="button" disabled={busy}
+              onClick={() => {
+                if (!projectId) return
+                setBusy(true)
+                void retryFilm(projectId)
+                  .then((r) => {
+                    setRetried(r === null
+                      ? null
+                      : r.queued
+                        ? `已从「${r.label}」接着来：${r.next}`
+                        : r.next)
+                  })
+                  .finally(() => setBusy(false))
+              }}
+              className="sj-motion mt-4 w-full rounded-xl bg-accent px-4 py-3 text-sm font-extrabold text-ink-950 transition-colors disabled:opacity-40"
+            >
+              {busy ? '正在接着来…' : '接着上次继续'}
+            </button>
           </div>
         ) : (
           <div className="w-full max-w-[300px]">

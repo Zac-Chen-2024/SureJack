@@ -157,6 +157,8 @@ export interface Film {
   progress: number
   /** state=error 时的原因 */
   error: string | null
+  /** state=error 时的错误码（E-3f9a21）。念给开发者用 */
+  code?: string | null
   /** state=none 时还缺什么 */
   reason: string | null
   /** 母带版本。预览视频 src 键在它上面：换 BGM 不变，改文案/字幕/语速才变 */
@@ -264,6 +266,18 @@ interface PipelineState {
   recomposeFilm: (projectId: string) => Promise<void>
   /** 中断正在进行的合成（排队中就摘掉，正在烧就杀 ffmpeg） */
   cancelFilm: (projectId: string) => Promise<void>
+  /** 失败后从最近的 checkpoint 重试。返回从哪一步接着走，给界面显示 */
+  retryFilm: (projectId: string) => Promise<{ label: string; next: string; queued: boolean } | null>
+  /**
+   * 乐观地标成"排队中"。
+   *
+   * 【为什么需要它】：敲定开头之后前端立刻跳编辑器，而那一刻队列还没
+   * 轮到这个项目，/film 回的是 state:'none' → 编辑器判成"还没有成片"。
+   * 这和"国外用户点进已完成项目看到还没有成片"是同一类错：
+   * **把"还没轮到"当成了"没有"**。先按"在排队"显示，等第一次轮询
+   * 回来再以服务端为准。
+   */
+  markQueued: (projectId: string) => void
   /**
    * 所有项目的成片状态，projectId → {合成中, 进度, 状态}。给项目列表用。
    * state 必须带上——否则列表只能看配音状态，于是"合成被取消/失败"的项目
@@ -419,6 +433,30 @@ export const usePipeline = create<PipelineState>((set, get) => ({
         error: e instanceof ApiError ? e.message : '重新合成失败',
         film: null,   // 拉回未知态，让下一轮轮询问出真相
       })
+    }
+  },
+
+  markQueued (projectId) {
+    if (useProjects.getState().currentId !== projectId) return
+    set({
+      film: {
+        state: 'building', jobId: null, progress: 0, error: null, reason: null,
+        masterReady: false, masterStale: false,
+      },
+    })
+  },
+
+  async retryFilm (projectId) {
+    try {
+      const r = await api.post<{ label: string; next: string; queued: boolean }>(
+        `/api/projects/${projectId}/retry`)
+      if (r.queued) get().markQueued(projectId)
+      await get().loadFilm(projectId)
+      await useProjects.getState().load()
+      return r
+    } catch (e) {
+      set({ error: e instanceof ApiError ? e.message : '重试失败' })
+      return null
     }
   },
 

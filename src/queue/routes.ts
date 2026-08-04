@@ -1,11 +1,13 @@
 import type { FastifyInstance } from 'fastify'
 import { createReadStream, existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { rm } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { spawn } from 'node:child_process'
 import { sendFileRange } from '../assets/storage.js'
 import { openUserDb, type Project } from '../db/user-db.js'
 import { getSession, requireAuth } from '../auth/session.js'
 import { downloadableFilm, playableMaster, enqueueFilm, filmInfo, resolveFilm, FILM_STAMP_FILE, type FilmDeps } from '../compose/film.js'
+import { checkpointOf, CHECKPOINT_LABEL, NEXT_STEP } from '../compose/checkpoint.js'
 import { writeStamp } from '../compose/stamp.js'
 import {
   COVER_IMAGE, COVER_THUMB_FILE, COVER_THUMB_TITLE_FILE, COVER_THUMB_WIDTH,
@@ -35,6 +37,50 @@ export function registerExportRoutes (app: FastifyInstance, deps: Deps): void {
    * force：不问指纹，哪怕盘上那条还对得上也重合。用户会点它，正是因为
    * 他不信任盘上那条；这时候回一句"已经是最新的了"完全是答非所问。
    */
+  /**
+   * 失败之后重试：**从最近的 checkpoint 接着走，不从头再来**。
+   *
+   * 原来给用户的说法是"回项目里点『生成配音』重来一次"——那是把整条链
+   * 从头走一遍：10 分钟配音 + 十几分钟烧录，而实际可能只是最后混一次音
+   * 失败了。盘上本来就有一串天然的 checkpoint（见 compose/checkpoint.ts）。
+   *
+   * 做法：把失败的印记清掉，然后【按正常路径入队】（不是 force）。
+   * 正常路径每一步开工前都拿指纹比对，对得上的直接跳过——于是
+   * "从最远的完好产物接着走"是它本来就有的行为，不需要另写一套。
+   *
+   * ⚠️【不能用 force】。force 的语义是"不问指纹全部重来"，那正好是
+   * 我们要避免的事。
+   */
+  app.post<{ Params: { id: string } }>(
+    '/api/projects/:id/retry', { preHandler: requireAuth }, async (req, reply) => {
+      const name = getSession(req)!
+      const project = withUserDb(name, (db) => db.getProject(req.params.id))
+      if (!project) return reply.code(404).send({ error: '项目不存在' })
+
+      const dir = assetDir(name, deps.whitelist, req.params.id)
+      const from = checkpointOf(dir, { ttsReady: project.ttsState === 'ready' })
+
+      /*
+       * 配音那一步本身没成 → 只能从头。这时不排成片：没有配音就没有
+       * 时间轴、没有排布长度，排下去也是立刻 blocked。
+       */
+      if (from === 'none') {
+        return {
+          from, label: CHECKPOINT_LABEL[from], next: NEXT_STEP[from],
+          queued: false,
+          hint: '配音还没成功，要从生成配音开始重来。',
+        }
+      }
+
+      // 清掉失败印记，让正常路径重新判断
+      await rm(join(dir, FILM_STAMP_FILE), { force: true })
+      const jobId = await enqueueFilm(deps, name, req.params.id)
+      return {
+        from, label: CHECKPOINT_LABEL[from], next: NEXT_STEP[from],
+        queued: jobId !== null, jobId,
+      }
+    })
+
   app.post<{ Params: { id: string } }>(
     '/api/projects/:id/export', { preHandler: requireAuth }, async (req, reply) => {
       const name = getSession(req)!
