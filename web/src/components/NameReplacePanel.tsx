@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { useProjects } from '../store/projects'
-import { useRename, readReview, type CharacterRole, type RenameAnalysis } from '../store/rename'
+import { useRename, readReview, pairInconsistencies, type CharacterRole, type RenameAnalysis } from '../store/rename'
 import { IconLoader, IconCheck, IconEdit } from './ui/Icon'
 
 /**
@@ -21,7 +21,7 @@ const ROLE: Record<CharacterRole, { label: string; cls: string }> = {
 
 export function NameReplacePanel () {
   const project = useProjects((s) => s.current())
-  const { draft, busy, error, step, hydrate, analyze, editReplacement, confirm, toggle, retryReview } = useRename()
+  const { draft, busy, error, step, hydrate, analyze, editReplacement, editPair, removePair, confirm, toggle, retryReview } = useRename()
   // 第二层复查的结果/错误存在 renameAnalysisJson 里，读出来给状态行用
   const { review, error: reviewError } = readReview(project?.renameAnalysisJson ?? null)
 
@@ -130,18 +130,67 @@ export function NameReplacePanel () {
 
               <div className="mt-3 space-y-1.5">
                 {draft.characters.map((c, i) => (
-                  <div key={c.original + i} className="flex items-center gap-2 rounded-lg bg-ink-850 px-2.5 py-1.5">
-                    <span className={`shrink-0 rounded-md border px-1.5 py-0.5 text-[10px] font-semibold ${ROLE[c.role].cls}`}>
-                      {ROLE[c.role].label}
-                    </span>
-                    <span className="shrink-0 text-xs text-ink-400 line-through">{c.original}</span>
-                    <svg viewBox="0 0 24 24" className="size-3 shrink-0 text-ink-600" fill="none" stroke="currentColor" strokeWidth={2}><path d="M5 12h14M13 6l6 6-6 6" /></svg>
-                    <input
-                      value={c.replacement}
-                      onChange={(e) => editReplacement(i, e.target.value)}
-                      aria-label={`${c.original} 的新名`}
-                      className="min-w-0 flex-1 rounded-md border border-line bg-ink-800 px-2 py-1 text-xs text-ink-50 outline-none focus:border-accent"
-                    />
+                  <div key={c.original + i} className="rounded-lg bg-ink-850 px-2.5 py-1.5">
+                    <div className="flex items-center gap-2">
+                      <span className={`shrink-0 rounded-md border px-1.5 py-0.5 text-[10px] font-semibold ${ROLE[c.role].cls}`}>
+                        {ROLE[c.role].label}
+                      </span>
+                      <span className="shrink-0 text-xs text-ink-400 line-through">{c.original}</span>
+                      <svg viewBox="0 0 24 24" className="size-3 shrink-0 text-ink-600" fill="none" stroke="currentColor" strokeWidth={2}><path d="M5 12h14M13 6l6 6-6 6" /></svg>
+                      <input
+                        value={c.replacement}
+                        onChange={(e) => editReplacement(i, e.target.value)}
+                        aria-label={`${c.original} 的新名`}
+                        className="min-w-0 flex-1 rounded-md border border-line bg-ink-800 px-2 py-1 text-xs text-ink-50 outline-none focus:border-accent"
+                      />
+                    </div>
+
+                    {/*
+                      * 【小名/别称也摆出来让人过目】。它们一直都在（模型给的 pairs 里），
+                      * 只是从来没显示过——于是「渊儿→远儿」对不对、「小顾→小顾」这种
+                      * 空替换，用户完全看不见。
+                      *
+                      * 【必须能单独改】：改大名只会传播到"完整包含旧名"的那些 pair，
+                      * 「渊儿」这种只含一个字的传播不到；而不同源的乳名（大名沈知微、
+                      * 小名阿蛮）更是没法从大名推出来。
+                      */}
+                    {c.pairs.map((p, j) => {
+                      if (p.from === c.original) return null
+                      const bad = pairInconsistencies(c, j)
+                      const noop = p.to === p.from
+                      return (
+                        <div key={p.from + j} className="mt-1 flex items-center gap-2 pl-6">
+                          <span className="shrink-0 text-[11px] text-ink-500 line-through">{p.from}</span>
+                          <span className="shrink-0 text-[10px] text-ink-600">{p.global ? '全局' : '限上下文'}</span>
+                          <input
+                            value={p.to}
+                            onChange={(e) => editPair(i, j, e.target.value)}
+                            aria-label={`${p.from} 换成`}
+                            className={`min-w-0 flex-1 rounded-md border bg-ink-800 px-2 py-0.5 text-[11px] text-ink-50 outline-none focus:border-accent ${
+                              bad.length > 0 || noop ? 'border-[#e0a82e]' : 'border-line'}`}
+                          />
+                          <button
+                            type="button" onClick={() => removePair(i, j)}
+                            aria-label={`删掉 ${p.from}`}
+                            className="shrink-0 px-1 text-[13px] leading-none text-ink-500 hover:text-danger"
+                          >
+                            ×
+                          </button>
+                        </div>
+                      )
+                    })}
+
+                    {c.pairs.some((p, j) => p.from !== c.original
+                      && (p.to === p.from || pairInconsistencies(c, j).length > 0)) && (
+                      <p className="mt-1 pl-6 text-[10px] leading-relaxed text-[#e0a82e]">
+                        {c.pairs.flatMap((p, j) => {
+                          if (p.from === c.original) return []
+                          if (p.to === p.from) return [`${p.from} 没换`]
+                          return pairInconsistencies(c, j)
+                            .map(([ch, want, got]) => `${p.from} 里的「${ch}」换成了「${got}」，大名里是「${want}」`)
+                        }).join('；')}
+                      </p>
+                    )}
                   </div>
                 ))}
               </div>

@@ -79,6 +79,10 @@ interface RenameState {
   hydrate: (project: Project | null) => void
   analyze: (id: string) => Promise<void>
   editReplacement: (index: number, newReplacement: string) => void
+  /** 单独改一条别名的新串。别名不一定和大名同源（乳名「阿蛮」），必须能单独改 */
+  editPair: (charIndex: number, pairIndex: number, to: string) => void
+  /** 删掉一条别名。模型偶尔会把身份称谓、甚至别的词当成名字 */
+  removePair: (charIndex: number, pairIndex: number) => void
   confirm: (id: string) => Promise<void>
   toggle: (id: string, enabled: boolean) => Promise<void>
   reset: () => void
@@ -102,6 +106,33 @@ export const useRename = create<RenameState>((set, get) => ({
     } finally {
       set({ busy: false, step: null })
     }
+  },
+
+  editPair (charIndex, pairIndex, to) {
+    const d = get().draft
+    if (!d) return
+    set({
+      draft: {
+        ...d,
+        characters: d.characters.map((c, i) => (i !== charIndex ? c : {
+          ...c,
+          pairs: c.pairs.map((p, j) => (j === pairIndex ? { ...p, to } : p)),
+        })),
+      },
+    })
+  },
+
+  removePair (charIndex, pairIndex) {
+    const d = get().draft
+    if (!d) return
+    set({
+      draft: {
+        ...d,
+        characters: d.characters.map((c, i) => (i !== charIndex ? c : {
+          ...c, pairs: c.pairs.filter((_, j) => j !== pairIndex),
+        })),
+      },
+    })
   },
 
   editReplacement (index, newReplacement) {
@@ -154,3 +185,39 @@ export const useRename = create<RenameState>((set, get) => ({
 
   reset () { set({ draft: null, busy: false, error: null }) },
 }))
+
+/**
+ * 一个角色名下的【不一致】：同一个原字，在大名里换成 A、在别名里换成 B。
+ *
+ * ⚠️ 这是"替换要统一"这条要求唯一能被机器检查的部分。不同源的小名
+ * （大名沈知微、乳名阿蛮）没有共享字，检查不到，那种只能靠人过目——
+ * 所以别名要摆在表里让人看见，不能全指望校验。
+ *
+ * 返回 [原字, 大名里换成什么, 这条别名里换成什么][]
+ */
+export function pairInconsistencies (
+  c: CharacterReplacement, pairIndex: number,
+): Array<[string, string, string]> {
+  const main = charSubstitutions(c.original, c.replacement)
+  const pair = c.pairs[pairIndex]
+  if (pair === undefined) return []
+  const here = charSubstitutions(pair.from, pair.to)
+  const bad: Array<[string, string, string]> = []
+  for (const [ch, to] of here) {
+    const expect = main.get(ch)
+    if (expect !== undefined && expect !== to) bad.push([ch, expect, to])
+  }
+  return bad
+}
+
+/** 等长的两串 → 逐字映射。长度不同就算不出来（谐音替换本来就是等长的） */
+function charSubstitutions (from: string, to: string): Map<string, string> {
+  const a = [...from]; const b = [...to]
+  const m = new Map<string, string>()
+  if (a.length !== b.length) return m
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i]; const y = b[i]
+    if (x !== undefined && y !== undefined && x !== y) m.set(x, y)
+  }
+  return m
+}

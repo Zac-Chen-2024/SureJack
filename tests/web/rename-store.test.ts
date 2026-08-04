@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { editCharacterName, renameGates, type CharacterReplacement } from '../../web/src/store/rename'
+import { editCharacterName, renameGates, pairInconsistencies, type CharacterReplacement } from '../../web/src/store/rename'
 import type { Project } from '../../web/src/store/projects'
 
 describe('editCharacterName —— 改新名，pairs 一起改，保持一致', () => {
@@ -36,5 +36,45 @@ describe('renameGates —— 谁要过"先确认改名"这道门', () => {
   })
   it('null → 不拦', () => {
     expect(renameGates(null)).toBe(false)
+  })
+})
+
+describe('别名的一致性检查', () => {
+  /*
+   * "替换要统一"这条要求里，唯一能被机器检查的部分：同一个原字，
+   * 在大名里换成 A、在别名里换成 B，就是不统一。
+   *
+   * ⚠️ 检查不到的那一半同样重要：不同源的乳名（大名沈知微、小名阿蛮）
+   * 没有共享字，机器无从判断——所以别名必须摆在表里让人过目，
+   * 不能全指望校验。
+   */
+  const person = (pairs: Array<{ from: string; to: string }>): CharacterReplacement => ({
+    original: '顾文渊', replacement: '顾闻远', role: 'protagonist',
+    pairs: pairs.map((p) => ({ ...p, global: true })),
+  })
+
+  it('别名和大名用同一个字 → 没问题', () => {
+    const c = person([{ from: '渊儿', to: '远儿' }])
+    expect(pairInconsistencies(c, 0)).toEqual([])
+  })
+
+  it('同一个字换成了不一样的 → 报出来', () => {
+    const c = person([{ from: '渊儿', to: '缘儿' }])
+    expect(pairInconsistencies(c, 0)).toEqual([['渊', '远', '缘']])
+  })
+
+  it('不同源的小名（没有共享字）→ 检查不到，返回空', () => {
+    const c = person([{ from: '阿蛮', to: '阿曼' }])
+    expect(pairInconsistencies(c, 0)).toEqual([])
+  })
+
+  it('长度不等的（加了字/漏了字）→ 不硬判，返回空', () => {
+    const c = person([{ from: '渊儿', to: '远' }])
+    expect(pairInconsistencies(c, 0)).toEqual([])
+  })
+
+  it('只含姓的别名（小顾）→ 姓本来就不换，没问题', () => {
+    const c = person([{ from: '小顾', to: '小顾' }])
+    expect(pairInconsistencies(c, 0)).toEqual([])
   })
 })
