@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { editCharacterName, renameGates, pairInconsistencies, type CharacterReplacement } from '../../web/src/store/rename'
+import { editCharacterName, renameGates, pairInconsistencies, pairShouldChange, type CharacterReplacement } from '../../web/src/store/rename'
 import type { Project } from '../../web/src/store/projects'
 
 describe('editCharacterName —— 改新名，pairs 一起改，保持一致', () => {
@@ -76,5 +76,28 @@ describe('别名的一致性检查', () => {
   it('只含姓的别名（小顾）→ 姓本来就不换，没问题', () => {
     const c = person([{ from: '小顾', to: '小顾' }])
     expect(pairInconsistencies(c, 0)).toEqual([])
+  })
+})
+
+describe('这条别名该不该改（判据是含不含姓）', () => {
+  /*
+   * ⚠️ 踩过一次：按"含不含名字的字"来判，「囡囡」「阿宝」这种和大名
+   * 【不同源】的乳名会被认作"不用改"——而它们恰恰最该改，原样留着，
+   * 观众照样能靠这个称呼搜到原作。
+   */
+  const gu = (from: string): CharacterReplacement => ({
+    original: '顾文渊', replacement: '顾闻远', role: 'protagonist',
+    pairs: [{ from, to: from, global: true }],
+  })
+
+  it.each([
+    ['含名字的字（渊儿）', '渊儿', true],
+    ['含名字的字（文渊哥哥）', '文渊哥哥', true],
+    ['只含姓（小顾）', '小顾', false],
+    ['姓 + 身份称谓（顾少爷）', '顾少爷', false],
+    ['不同源乳名（阿宝）', '阿宝', true],
+    ['叠字乳名（囡囡）', '囡囡', true],
+  ])('%s → %s', (_label, from, want) => {
+    expect(pairShouldChange(gu(from), 0)).toBe(want)
   })
 })

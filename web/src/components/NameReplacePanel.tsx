@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { useProjects } from '../store/projects'
-import { useRename, readReview, pairInconsistencies, type CharacterRole, type RenameAnalysis } from '../store/rename'
+import { useRename, readReview, pairInconsistencies, pairShouldChange, type CharacterRole, type RenameAnalysis } from '../store/rename'
 import { IconLoader, IconCheck, IconEdit } from './ui/Icon'
 
 /**
@@ -157,7 +157,7 @@ export function NameReplacePanel () {
                     {c.pairs.map((p, j) => {
                       if (p.from === c.original) return null
                       const bad = pairInconsistencies(c, j)
-                      const noop = p.to === p.from
+                      const noop = p.to === p.from && pairShouldChange(c, j)
                       return (
                         <div key={p.from + j} className="mt-1 flex items-center gap-2 pl-6">
                           <span className="shrink-0 text-[11px] text-ink-500 line-through">{p.from}</span>
@@ -181,11 +181,11 @@ export function NameReplacePanel () {
                     })}
 
                     {c.pairs.some((p, j) => p.from !== c.original
-                      && (p.to === p.from || pairInconsistencies(c, j).length > 0)) && (
+                      && ((p.to === p.from && pairShouldChange(c, j)) || pairInconsistencies(c, j).length > 0)) && (
                       <p className="mt-1 pl-6 text-[10px] leading-relaxed text-[#e0a82e]">
                         {c.pairs.flatMap((p, j) => {
                           if (p.from === c.original) return []
-                          if (p.to === p.from) return [`${p.from} 没换`]
+                          if (p.to === p.from) return pairShouldChange(c, j) ? [`${p.from} 没换`] : []
                           return pairInconsistencies(c, j)
                             .map(([ch, want, got]) => `${p.from} 里的「${ch}」换成了「${got}」，大名里是「${want}」`)
                         }).join('；')}
