@@ -1,4 +1,5 @@
 import type { WordTiming, SubtitleLine } from '../types.js'
+import { stripPunctuation } from './ass.js'
 
 /**
  * 把词级时间戳切成字幕行。
@@ -11,7 +12,41 @@ import type { WordTiming, SubtitleLine } from '../types.js'
  *
  * 这是纯函数：无 IO、无状态。结果是推导数据，不入库。
  */
-export function segmentLines (words: WordTiming[], maxChars: number): SubtitleLine[] {
+export function segmentLines (
+  words: WordTiming[],
+  maxChars: number,
+  /**
+   * 段文本 → 段内的字符断点。有它就在这些位置断，不再等字数撞上限。
+   * 断点会吸附到词边界（见 applyCuts 的说明）。
+   */
+  cuts?: Map<string, number[]>,
+): SubtitleLine[] {
+  /*
+   * 有语义断点的段，先按断点切成几截，再各自走一遍机械切法兜底
+   * （模型偶尔会留下一截仍然超限，兜底保证屏幕装得下）。
+   */
+  if (cuts !== undefined && cuts.size > 0) {
+    const out: SubtitleLine[] = []
+    let at = 0
+    for (const run of overlongRuns(words, maxChars)) {
+      const pts = cuts.get(run.text)
+      if (pts === undefined) continue
+      out.push(...segmentLines(words.slice(at, run.from), maxChars))
+      const whole = segmentLines(words.slice(run.from, run.to), Number.MAX_SAFE_INTEGER)
+      for (const piece of whole) {
+        for (const cut of applyCuts(piece, pts)) {
+          out.push(...segmentLines(cut.words, maxChars))
+        }
+      }
+      at = run.to
+    }
+    out.push(...segmentLines(words.slice(at), maxChars))
+    return out
+  }
+  return segmentCore(words, maxChars)
+}
+
+function segmentCore (words: WordTiming[], maxChars: number): SubtitleLine[] {
   if (!Number.isFinite(maxChars) || maxChars <= 0) {
     throw new Error(`maxChars 必须是正数，收到 ${maxChars}`)
   }
@@ -69,20 +104,72 @@ export function segmentLines (words: WordTiming[], maxChars: number): SubtitleLi
   return lines
 }
 
-/** 一行字幕的字数（标点也算，只用来判断"要不要送去语义切"） */
+/**
+ * 一行字幕【实际会显示】的字数。
+ *
+ * ⚠️【必须按渲染结果算，不能按原始词表算】。烧录时 hidePunctuation 会把
+ * 所有标点字形去掉（见 ass.ts 的 stripPunctuation），屏幕上根本没有标点。
+ * 按带标点的长度判超限，会把本来放得下的行送去切——线上真遇到：
+ *   原始词表：「】 【人类和人鱼在一起不能孕育后代，」= 17 字
+ *   屏幕上：  「人类和人鱼在一起不能孕育后代」    = 14 字
+ * 那一行压根不该被切，白花一次 LLM 调用，还多断了一次。
+ * 弹幕体（【】包起来）的小说里这种行成片成片地出现。
+ */
 function lineChars (line: SubtitleLine): number {
-  return line.words.reduce((n, w) => n + [...w.text].length, 0)
+  return line.words.reduce(
+    (n, w) => n + (w.isPunctuation ? 0 : [...stripPunctuation(w.text)].length), 0)
 }
 
 /**
- * 挑出【机械切完仍然超限】的行。它们就是"一整段没有标点可断"的长句——
- * 有标点的早被断干净了，只有这些是被硬断出来的。
+ * 挑出【机械切完仍然超限】的行。
  *
- * 送去做语义切分的就是这些，不是全文的每一句：一篇 6000 字里这种行
- * 通常只有十几条，而句子有几百句。
+ * ⚠️ 正常情况下这个集合是【空的】——机械切分本来就以 maxChars 为上限，
+ * 切完不可能还超过它。留着它只为一种边界：单个词本身就超过上限
+ * （Azure 偶尔会把一长串没有标点的字当成一个词）。
+ *
+ * 【真正要送去语义切分的不是它，是 overlongRuns】。见下面那段。
  */
 export function overlongLines (lines: SubtitleLine[], maxChars: number): number[] {
   return lines.flatMap((l, i) => (lineChars(l) > maxChars ? [i] : []))
+}
+
+/** 一串词【实际会显示】的字数 */
+function runChars (words: readonly WordTiming[]): number {
+  return words.reduce(
+    (n, w) => n + (w.isPunctuation ? 0 : [...stripPunctuation(w.text)].length), 0)
+}
+
+/**
+ * 按标点把词流切成一个个【段】，挑出【机械切法必须硬断】的那些。
+ *
+ * ⚠️ 这才是语义切分该管的那批。绕了一圈才想明白：
+ * 我原来判的是"切完还超不超限"，而机械切法以 maxChars 为上限，切完
+ * 【永远不超限】——那个集合恒为空，整层 LLM 根本不会触发。
+ *
+ * 真正出问题的是这种：一段话连着二十几个字没有任何标点，机械切法只能
+ * 在"第 17 个字"处下刀，那一刀落在哪儿纯看字数——「大力出奇迹」被劈成
+ * 「大力出 / 奇迹」就是这么来的。这些行【切完正好不超限】，所以老判据
+ * 看不见它们。
+ *
+ * @returns 每个要切的段：段文本 + 它在 words 里的下标区间
+ */
+export function overlongRuns (
+  words: WordTiming[], maxChars: number,
+): Array<{ text: string; from: number; to: number }> {
+  const out: Array<{ text: string; from: number; to: number }> = []
+  let from = 0
+  const push = (to: number): void => {
+    const run = words.slice(from, to)
+    if (run.length > 0 && runChars(run) > maxChars) {
+      out.push({ text: run.map((w) => w.text).join(''), from, to })
+    }
+    from = to
+  }
+  for (const [i, w] of words.entries()) {
+    if (w.isPunctuation) push(i + 1)     // 标点归上一段，和 segmentLines 一致
+  }
+  push(words.length)
+  return out
 }
 
 /** 一行的纯文本（拼接词，标点照留）——发给模型看的就是它 */

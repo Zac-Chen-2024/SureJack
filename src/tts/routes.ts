@@ -10,8 +10,8 @@ import { synthesize, synthesizeLong } from './index.js'
 import { isAllowedVoice, clampRate, clampVolume, clampPitch } from './voices.js'
 import { normalizeScript } from '../importers/sanitize.js'
 import { enqueueFilm, type FilmDeps } from '../compose/film.js'
-import { deriveSubtitleLines } from '../subtitles/project-ass.js'
-import { overlongLines, lineText } from '../subtitles/segment.js'
+import { overlongRuns } from '../subtitles/segment.js'
+import type { WordTiming } from '../types.js'
 import { planCuts, SUBTITLE_CUT_MAX } from '../subtitles/cut-ai.js'
 
 interface Deps extends FilmDeps {
@@ -225,10 +225,15 @@ function planSubtitleCuts (userName: string, whitelist: string[], projectId: str
       try { project = db.getProject(projectId) } finally { db.close() }
       if (!project || project.subtitleMode === 'line') return
 
-      const lines = deriveSubtitleLines(project)
-      const over = overlongLines(lines, SUBTITLE_CUT_MAX)
-      if (over.length === 0) return
-      const texts = over.map((i) => lineText(lines[i]!))
+      /*
+       * 送去切的是【机械切法必须硬断的段】，不是"切完还超限的行"——
+       * 后者恒为空（机械切法本来就以上限收口），整层 LLM 会永远不触发。
+       * 绕明白这件事花了一轮，见 segment.ts 的 overlongRuns。
+       */
+      const words: WordTiming[] = JSON.parse(project.wordTimingsJson ?? '[]')
+      const runs = overlongRuns(words, SUBTITLE_CUT_MAX)
+      if (runs.length === 0) return
+      const texts = runs.map((r) => r.text)
       const cuts = await planCuts(texts)
       if (cuts.size === 0) return
 
@@ -239,7 +244,7 @@ function planSubtitleCuts (userName: string, whitelist: string[], projectId: str
       }
       const db2 = openUserDb(userName, whitelist)
       try { db2.updateProject(projectId, { subtitleCutsJson: JSON.stringify(map) }) } finally { db2.close() }
-      log.info({ project: projectId, 超限行: over.length, 切成功: cuts.size }, '字幕语义切分完成')
+      log.info({ project: projectId, 要切的段: runs.length, 切成功: cuts.size }, '字幕语义切分完成')
     } catch (e) {
       log.warn({ err: e, project: projectId }, '字幕语义切分失败，退回机械切法（不影响出片）')
     }

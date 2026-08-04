@@ -21,8 +21,18 @@
  * 变成"字幕烧不出来"。
  */
 
-/** 一条字幕最多几个字。超过就送去切 */
-export const SUBTITLE_CUT_MAX = 19
+/**
+ * 一条字幕最多几个字。超过就送去切。
+ *
+ * 【17 是量出来的，不是拍的】。81 号字、左右各留 60px 安全边距 →
+ * 可用 960px。实测（spikes 里那段 width 脚本）：
+ *   16 字 900px（左右各余 90）
+ *   17 字 959px（左右各余 61）← 正好铺满安全区
+ *   18 字 1014px（余 33）
+ *   19 字 1070px（余 5）  ← 还没被裁，但手机圆角/手势条一压就没了
+ *   20 字 1080px（余 0）  ← 真出界
+ */
+export const SUBTITLE_CUT_MAX = 17
 
 const ENDPOINT = 'https://api.deepseek.com/chat/completions'
 const MODEL = 'deepseek-chat'
@@ -44,7 +54,9 @@ export const CUT_SYSTEM_PROMPT = `你是中文短视频字幕的断句器。
 1. 一个字都不能增、删、改。你只是在原文里插入分隔符 |。
 2. 把你的结果去掉 | 之后，必须和原文逐字相同。
 3. 在语义完整的地方断：主谓之间、动宾之间、分句之间、"的/地/得"之后都可以；
-   成语、人名、数量词、"不/没+动词"这类绝不能劈开。
+   成语、人名、数量词、"不/没+动词"、以及任何一个词（"在一起"、"知道"）
+   都绝不能劈开。
+   ⚠️ 数字数时不要数标点——标点在屏幕上不显示。
 4. 每一段单独看都要成话，不要切出"他"、"的时候"这种碎片。
 5. 段数取最少：能切两段就不要切三段。
 
@@ -54,8 +66,14 @@ export const REVIEW_SYSTEM_PROMPT = `你是中文字幕断句的复查器。
 
 给你若干条已经断好的字幕（| 是断点），逐条判断断得对不对：
 - 有没有把成语、人名、数量词、"不/没+动词"劈成两半
+- 有没有把一个词劈开（"在一/起"、"知/道"这种）
 - 有没有哪一段单独看不成话（"他"、"的时候"这种碎片）
 - 有没有哪一段还超过 ${SUBTITLE_CUT_MAX} 个字
+
+⚠️ 数字数时【不要数标点】：标点在屏幕上不显示，
+"】 【人类和人鱼在一起" 实际只有 9 个字，不是 11 个。
+如果一条去掉标点之后本来就不超过 ${SUBTITLE_CUT_MAX} 个字，
+说明它根本不该被切——请把它原样（不带 |）返回。
 
 有问题的重新给一版；没问题的不要出现在结果里。
 
@@ -82,6 +100,16 @@ export function cutPointsOf (original: string, marked: string): number[] | null 
     acc += [...p].length
     points.push(acc)
   }
+  /*
+   * 【这里【不】做"叠词不许劈"那种拦截】。试过一版：断点两侧同字就否掉。
+   * 撤了，因为它三头不讨好——
+   *   · 太窄：只认"两侧同字"，「知|道」「一|起」这类一个都拦不住；
+   *   · 会误伤：全篇 3159 处词缝里首尾同字的有 12 处，其中「地点|点头」
+   *     「别离开我|我」是两个词的正当交界，切在那儿完全正确；
+   *   · 根本没用：否掉之后回退机械切法，机械切法撞上限时在同一处又切了
+   *     一刀——把 AI 的答案作废，换来一模一样的结果。
+   * 断点合不合语义交给模型和复查那一层，这里只管"没改字、没切出空段"。
+   */
   return points
 }
 
@@ -130,13 +158,20 @@ async function ask (
 }
 
 /**
+ * 一次请求最多塞几段。
+ *
+ * 【统一调用，不逐条调】：一个项目正常只有十几段要切，一次就发完。
+ * 但没标点的流水账文本可能切出几百段，一口气塞进一次请求会撑爆上下文、
+ * 或者换来一坨截断的 JSON。分批是这两者之间唯一稳妥的做法——
+ * 分批 ≠ 逐条，60 段一批，几百段也就三五次。
+ */
+export const CUT_BATCH = 60
+
+/**
  * 给一批长句算断点。
  *
- * @param sentences 过长的句子原文，顺序即编号
- * @returns 下标 → 断点数组。没切成的句子不出现在结果里（调用方回退机械切法）
- *
- * 【批量发，不逐句发】：一篇 6000 字里超过 19 字的句子可能上百句，
- * 逐句调用又慢又贵，还会撞限速。
+ * @param sentences 过长的段原文，顺序即编号
+ * @returns 下标 → 断点数组。没切成的不出现在结果里（调用方回退机械切法）
  */
 export async function planCuts (
   sentences: string[], deps: CutDeps = {},
@@ -144,6 +179,21 @@ export async function planCuts (
   const result = new Map<number, number[]>()
   if (sentences.length === 0) return result
 
+  for (let at = 0; at < sentences.length; at += CUT_BATCH) {
+    const batch = sentences.slice(at, at + CUT_BATCH)
+    try {
+      for (const [i, pts] of await planBatch(batch, deps)) result.set(at + i, pts)
+    } catch {
+      // 一批挂了不影响别批——那些段各自回退机械切法
+    }
+  }
+  return result
+}
+
+async function planBatch (
+  sentences: string[], deps: CutDeps,
+): Promise<Map<number, number[]>> {
+  const result = new Map<number, number[]>()
   const numbered = sentences.map((s, i) => `[${i}] ${s}`).join('\n')
   const first = parseCuts(await ask(CUT_SYSTEM_PROMPT, numbered, deps), 'cuts')
 

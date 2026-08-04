@@ -131,7 +131,11 @@ describe('两层切分', () => {
     expect(called).toBe(0)
   })
 
-  it('上限是 19 字', () => {
-    expect(SUBTITLE_CUT_MAX).toBe(19)
+  /*
+   * 17 是量出来的：81 号字、左右各 60px 安全边距 → 可用 960px，
+   * 17 字正好 959px。改这个数之前先重量一遍，别拍脑袋。
+   */
+  it('上限是 17 字（安全区宽度量出来的）', () => {
+    expect(SUBTITLE_CUT_MAX).toBe(17)
   })
 })

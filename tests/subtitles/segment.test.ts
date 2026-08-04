@@ -166,3 +166,37 @@ describe('挑出机械切完仍然超限的行', () => {
     expect(over).not.toContain(0)
   })
 })
+
+describe('超限判断按【屏幕上真正显示的字】算', () => {
+  /*
+   * ⚠️ 线上真遇到：弹幕体小说里一行是
+   *   原始词表：「】 【人类和人鱼在一起不能孕育后代，」= 17 字
+   *   屏幕上：  「人类和人鱼在一起不能孕育后代」    = 14 字
+   * 渲染时 hidePunctuation 会把标点字形全去掉，所以那一行压根放得下。
+   * 按带标点的长度判超限，等于为放得下的行白花一次 LLM 调用、还多断一次。
+   */
+  const line = (texts: Array<[string, boolean]>): SubtitleLine => ({
+    startMs: 0,
+    endMs: 1000,
+    words: texts.map(([t, p], i) => ({
+      text: t, offsetMs: i * 100, durationMs: 100, isPunctuation: p,
+    })),
+  })
+
+  it('标点不算进长度', () => {
+    const l = line([['】', true], ['【', true], ['人类和人鱼在一起', false],
+      ['不能孕育后代', false], ['，', true]])
+    // 带标点 17 字，去掉标点 14 字
+    expect(overlongLines([l], 15)).toEqual([])
+  })
+
+  it('粘在词里的括号也不算——Azure 不会把它们单独切出来', () => {
+    const l = line([['【人类】', false], ['和人鱼在一起不能孕育后代', false]])
+    expect(overlongLines([l], 15)).toEqual([])
+  })
+
+  it('真超限的还是要挑出来', () => {
+    const l = line([['一二三四五六七八九十一二三四五六七八', false]])
+    expect(overlongLines([l], 17)).toEqual([0])
+  })
+})

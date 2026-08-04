@@ -1,5 +1,5 @@
 import { ASPECT_PRESETS } from '../config.js'
-import { segmentLines, applyCuts, lineText } from './segment.js'
+import { segmentLines } from './segment.js'
 import { buildAss, DEFAULT_SUBTITLE_FONT_SIZE } from './ass.js'
 export { DEFAULT_SUBTITLE_FONT_SIZE }
 import type { Project } from '../db/user-db.js'
@@ -26,14 +26,16 @@ import type { WordTiming, SubtitleLine, TextOverlay, AspectPreset } from '../typ
  *          "大力出 / 奇迹"。
  *   24  —— 放宽 + WrapStyle 改成 0（智能折行），长句折两行而不是腰斩。
  *          但一条 24 字的字幕铺满两行，在手机上仍然糊。
- *   19  —— 现在这版。配合【语义切分】：超限的行不再靠折行硬扛，而是
+ *   17  —— 现在这版。配合【语义切分】：超限的行不再靠折行硬扛，而是
  *          由 LLM 按语义切成几条先后显示（见 cut-ai.ts）。
- *          19 是"一行放得下、不用折行"的量。
+ *          17 是【量出来的】：81 号字、左右各 60px 安全边距 → 可用 960px，
+ *          17 字正好 959px 铺满；18 字就吃掉安全边距，19 字离屏幕边只剩
+ *          5px，20 字被裁。见 cut-ai.ts 的 SUBTITLE_CUT_MAX。
  *
  * 【指纹侧仍然是 14】（LEGACY_SUBTITLE_MAX_CHARS），所以历史项目
  * 一条都不会因为这几次调整被重烧。
  */
-export const SUBTITLE_MAX_CHARS = 19
+export const SUBTITLE_MAX_CHARS = 17
 
 /**
  * 【旧的上限，只用于算母带指纹】。
@@ -165,7 +167,8 @@ export function deriveSubtitleLines (
       words: [w],
     }))
   }
-  const lines = segmentLines(words, maxChars)
+  const cutMap = useCuts ? parseCuts(project.subtitleCutsJson) : new Map<string, number[]>()
+  const lines = segmentLines(words, maxChars, cutMap)
   /*
    * 【语义切分】：机械切完仍然超限的行，用落库的断点再切一次。
    *
@@ -176,12 +179,7 @@ export function deriveSubtitleLines (
    *
    * 没有断点（老项目、算失败、还没算）就用机械切法，一切照旧。
    */
-  const cuts = useCuts ? parseCuts(project.subtitleCutsJson) : new Map<string, number[]>()
-  if (cuts.size === 0) return lines
-  return lines.flatMap((l) => {
-    const pts = cuts.get(lineText(l))
-    return pts === undefined ? [l] : applyCuts(l, pts)
-  })
+  return lines
 }
 
 /**
