@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { usePipeline, shouldPollFilm } from '../store/pipeline'
+import { useProjects } from '../store/projects'
 
 /**
  * 盯着成片状态。
@@ -29,6 +30,12 @@ export function useFilmStatus (project: {
   useEffect(() => {
     if (projectId === null) return
     let cancelled = false
+    /*
+     * 【记住上一次的状态，好抓住"从合成中变成好了"那一刻】。
+     * 只看当前状态是 ready 的话，每次进页面都会弹一条——那不是"完成了"，
+     * 那是"本来就好了"。
+     */
+    let was = usePipeline.getState().film?.state ?? null
     void loadFilm(projectId)
     const timer = setInterval(() => {
       if (cancelled) return
@@ -36,8 +43,30 @@ export function useFilmStatus (project: {
         clearInterval(timer)
         return
       }
-      void loadFilm(projectId)
+      void loadFilm(projectId).then(() => {
+        const now = usePipeline.getState().film?.state ?? null
+        if (was === 'building' && now === 'ready') notifyDone(projectId)
+        was = now
+      })
     }, 2000)
     return () => { cancelled = true; clearInterval(timer) }
   }, [projectId, project?.updatedAt, project?.ttsState, project?.ttsDurationMs, loadFilm])
+}
+
+/**
+ * app 开着的时候，合成一好就立刻弹一条系统通知。
+ *
+ * 【为什么不只靠后台那条周期任务】：它最快 15 分钟才醒一次（Android 对
+ * 周期任务的下限）。人就在 app 里等着的时候，等十几分钟才提示很蠢。
+ *
+ * 【没有原生桥就什么都不做】：浏览器里打开时 SJNative 不存在——不弹就是了，
+ * 页面上本来就看得见状态变化。
+ */
+function notifyDone (projectId: string): void {
+  const bridge = (window as unknown as {
+    SJNative?: { notifyDone?: (name: string, id: string) => void }
+  }).SJNative
+  if (typeof bridge?.notifyDone !== 'function') return
+  const name = useProjects.getState().items.find((p) => p.id === projectId)?.name ?? '视频'
+  try { bridge.notifyDone(name, projectId) } catch { /* 桥挂了不该影响页面 */ }
 }

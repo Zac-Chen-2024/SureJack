@@ -7,6 +7,8 @@
         android:maxSdkVersion="28" />
     <!-- 应用内更新：下载完直接唤起安装（系统仍会弹一次确认，普通应用无法静默装） -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- Android 13+ 发通知要用户点头；13 以下这条会被忽略 -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:allowBackup="true"

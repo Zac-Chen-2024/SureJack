@@ -57,6 +57,8 @@ import androidx.core.splashscreen.SplashScreen;
 public class MainActivity extends AppCompatActivity implements SensorEventListener {
 
     private static final String HOST = "surejack.zacchen.win";
+    /** 后台任务要用同一个源去取 cookie、发请求 */
+    static final String BASE_URL = "https://" + HOST;
     private static final int REQ_FILE = 1001;
 
     private WebView web;
@@ -174,6 +176,17 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
          */
         new Updater(this, HOST).checkInBackground();
 
+        /*
+         * 排上"片子做完了"的周期通知。
+         * Android 13+ 要用户点头才能发通知——在这儿要一次，用户拒了也不影响别的。
+         */
+        if (Build.VERSION.SDK_INT >= 33
+                && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)
+                   != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{ android.Manifest.permission.POST_NOTIFICATIONS }, 1001);
+        }
+        NotifyWorker.schedule(this);
+
         if (savedInstanceState == null) {
             // nativeUpdater=1：网页据此隐藏自己的更新横幅（原生已经接管了）
             web.loadUrl("https://" + HOST + "/?appVersion=" + versionCode() + "&nativeUpdater=1");
@@ -222,6 +235,19 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
      * "下载队列"悬浮框。系统通知栏本来也有进度，但用户要在 App 里看得见。
      */
     public class Bridge {
+        /**
+         * 网页主动弹一条通知。
+         *
+         * 【为什么 app 开着时也要弹】：后台那条周期任务最快 15 分钟才醒一次
+         * （系统下限）。人就在 app 里等着的时候，等十几分钟才提示很蠢——
+         * 前端一看到状态从"合成中"变"已完成"就调这里，立刻弹。
+         */
+        @JavascriptInterface
+        public void notifyDone(String name, String projectId) {
+            NotifyWorker.notifyDone(MainActivity.this, name == null ? "视频" : name,
+                    projectId == null ? "" : projectId);
+        }
+
         @JavascriptInterface
         public String downloads() {
             DownloadManager dm = (DownloadManager) getSystemService(Context.DOWNLOAD_SERVICE);

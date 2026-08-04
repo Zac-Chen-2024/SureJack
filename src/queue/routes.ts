@@ -8,6 +8,7 @@ import { openUserDb, type Project } from '../db/user-db.js'
 import { getSession, requireAuth } from '../auth/session.js'
 import { downloadableFilm, playableMaster, enqueueFilm, filmInfo, resolveFilm, FILM_STAMP_FILE, type FilmDeps } from '../compose/film.js'
 import { checkpointOf, CHECKPOINT_LABEL, NEXT_STEP } from '../compose/checkpoint.js'
+import { finishedSince } from './notify.js'
 import { writeStamp } from '../compose/stamp.js'
 import {
   COVER_IMAGE, COVER_THUMB_FILE, COVER_THUMB_TITLE_FILE, COVER_THUMB_WIDTH,
@@ -37,6 +38,22 @@ export function registerExportRoutes (app: FastifyInstance, deps: Deps): void {
    * force：不问指纹，哪怕盘上那条还对得上也重合。用户会点它，正是因为
    * 他不信任盘上那条；这时候回一句"已经是最新的了"完全是答非所问。
    */
+  /**
+   * 有哪些片子在 since 之后做完了。给 app 的后台轮询用，一次问完。
+   *
+   * since 由客户端带（它记着自己上次看到哪儿），服务端不存"已读"——
+   * 多设备各看各的，服务端也不必为"谁读过了"负责。
+   * 不带 since 时只回最近 6 小时内的，免得第一次装上就弹出几十条历史通知。
+   */
+  app.get<{ Querystring: { since?: string } }>(
+    '/api/notifications', { preHandler: requireAuth }, async (req) => {
+      const name = getSession(req)!
+      const raw = Number(req.query?.since)
+      const since = Number.isFinite(raw) && raw > 0 ? raw : Date.now() - 6 * 3600_000
+      const items = await finishedSince(name, deps.whitelist, since)
+      return { since, now: Date.now(), items }
+    })
+
   /**
    * 失败之后重试：**从最近的 checkpoint 接着走，不从头再来**。
    *

@@ -8,8 +8,8 @@ android {
         applicationId 'win.zacchen.surejack'   // ⚠️ 必须和旧版一致，否则不是"升级"而是另一个 App
         minSdk 23
         targetSdk 35
-        versionCode 8
-        versionName '2.3.0'
+        versionCode 9
+        versionName '2.4.0'
     }
 
     /*
@@ -42,6 +42,8 @@ dependencies {
     implementation 'androidx.core:core-splashscreen:1.0.1'
     implementation 'androidx.appcompat:appcompat:1.7.0'
     implementation 'androidx.webkit:webkit:1.12.1'
+    // 后台周期任务：应用被杀之后照样能醒来查"片子做完没"
+    implementation 'androidx.work:work-runtime:2.9.1'
 
     /*
      * 对齐 Kotlin stdlib：不同 androidx 库分别拉了 kotlin-stdlib 1.8.22 和
