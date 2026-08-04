@@ -129,7 +129,7 @@ export function MobileNewProject ({ onBack, onGo, resumeId }: {
 
   if (picking !== null) {
     // 只传 id：项目数据由 OpeningPicker 自己订阅，配音跑完时长才会出来
-    return <OpeningPicker ids={picking} onDone={() => onGo(picking[0]!)} />
+    return <OpeningPicker ids={picking} onDone={() => onGo(picking[0]!)} onBack={onBack} />
   }
 
   return (
@@ -237,6 +237,7 @@ export function MobileNewProject ({ onBack, onGo, resumeId }: {
               <SplitPicker
                 projectId={createdId}
                 onCancel={() => setSplitting(false)}
+                onBack={onBack}
                 onDone={({ sequelId: sid }) => {
                   setSplitting(false)
                   setSequelId(sid)

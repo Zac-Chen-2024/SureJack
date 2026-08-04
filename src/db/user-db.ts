@@ -117,6 +117,14 @@ export interface Project {
    */
   subtitleCutsJson: string
   /**
+   * 分集那一屏的【草稿】：{"breakIndex":186,"introEnd":5}。空 = 还没动过。
+   *
+   * 【为什么要存】：断点和引子是滚轮选出来的，选一半接个电话、切个 app，
+   * 回来全没了——而这一屏本来就要读几百句、慢慢比对。状态存住，
+   * "随时能离开"才不是个陷阱。
+   */
+  splitDraftJson: string
+  /**
    * 开头是否还等着人挑。'pending' = 挡住自动排队，'settled' = 放行。
    *
    * 【默认必须是 settled】：迁移默认值会回填进所有老行，填 pending 的话
@@ -170,6 +178,7 @@ export interface UserDb {
     watermarkText?: string
     openingPickJson?: string
     subtitleCutsJson?: string
+    splitDraftJson?: string
     openingState?: 'pending' | 'settled'
     inVideoTitle?: string
     parentProjectId?: string | null
@@ -208,6 +217,7 @@ interface Row {
   watermark_text: string | null
   opening_pick_json: string | null
   subtitle_cuts_json: string | null
+  split_draft_json: string | null
   opening_state: string | null
   in_video_title: string | null
   parent_project_id: string | null
@@ -236,6 +246,7 @@ const toProject = (r: Row): Project => ({
   watermarkText: r.watermark_text ?? '',
   openingPickJson: r.opening_pick_json ?? '',
   subtitleCutsJson: r.subtitle_cuts_json ?? '',
+  splitDraftJson: r.split_draft_json ?? '',
   openingState: r.opening_state === 'pending' ? 'pending' : 'settled',
   inVideoTitle: r.in_video_title ?? '',
   parentProjectId: r.parent_project_id ?? null,
@@ -299,6 +310,7 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
       watermark_text TEXT NOT NULL DEFAULT '',
       opening_pick_json TEXT NOT NULL DEFAULT '',
       subtitle_cuts_json TEXT NOT NULL DEFAULT '',
+      split_draft_json TEXT NOT NULL DEFAULT '',
       opening_state TEXT NOT NULL DEFAULT 'settled',
       in_video_title TEXT NOT NULL DEFAULT '',
       parent_project_id TEXT,
@@ -383,6 +395,7 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
   addCol('watermark_text', "watermark_text TEXT NOT NULL DEFAULT ''")
   addCol('opening_pick_json', "opening_pick_json TEXT NOT NULL DEFAULT ''")
   addCol('subtitle_cuts_json', "subtitle_cuts_json TEXT NOT NULL DEFAULT ''")
+  addCol('split_draft_json', "split_draft_json TEXT NOT NULL DEFAULT ''")
   /* settled 是老项目的事实：它们从来没有"等人挑开头"这回事 */
   addCol('opening_state', "opening_state TEXT NOT NULL DEFAULT 'settled'")
   addCol('in_video_title', "in_video_title TEXT NOT NULL DEFAULT ''")
@@ -433,6 +446,7 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
         watermarkText: DEFAULT_WATERMARK,
         openingPickJson: '', // 空 = 用默认随机排布
         subtitleCutsJson: '', // 空 = 还没算语义断点
+        splitDraftJson: '',   // 空 = 分集那一屏还没动过
         openingState: 'settled',  // 走新建项目那条线时才由路由改成 pending
         inVideoTitle: '',    // 同上
         parentProjectId: null,
@@ -446,15 +460,15 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
       }
       db.prepare(
         `INSERT INTO projects
-          (id, name, script_text, aspect_ratio, tts_state, tts_duration_ms, word_timings_json, bgm_volume, subtitle_mode, bgm_library_id, subtitle_margin_v, subtitle_font_size, cover_title, watermark_text, opening_pick_json, opening_state, subtitle_cuts_json, in_video_title, parent_project_id, episode_index, voice_name, voice_rate, voice_volume, voice_pitch, rename_enabled, rename_state, rename_analysis_json, rename_map_json, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          (id, name, script_text, aspect_ratio, tts_state, tts_duration_ms, word_timings_json, bgm_volume, subtitle_mode, bgm_library_id, subtitle_margin_v, subtitle_font_size, cover_title, watermark_text, opening_pick_json, opening_state, subtitle_cuts_json, split_draft_json, in_video_title, parent_project_id, episode_index, voice_name, voice_rate, voice_volume, voice_pitch, rename_enabled, rename_state, rename_analysis_json, rename_map_json, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         project.id, project.name, project.scriptText, project.aspectRatio,
         project.ttsState, project.ttsDurationMs, project.wordTimingsJson,
         project.bgmVolume, project.subtitleMode, project.bgmLibraryId,
         project.subtitleMarginV, project.subtitleFontSize, project.coverTitle,
         project.watermarkText, project.openingPickJson, project.openingState,
-        project.subtitleCutsJson, project.inVideoTitle, project.parentProjectId, project.episodeIndex,
+        project.subtitleCutsJson, project.splitDraftJson, project.inVideoTitle, project.parentProjectId, project.episodeIndex,
         project.voiceName, project.voiceRate, project.voiceVolume, project.voicePitch,
         project.renameEnabled ? 1 : 0, project.renameState,
         project.renameAnalysisJson, project.renameMapJson,
@@ -475,7 +489,7 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
           bgm_volume = ?, subtitle_mode = ?, bgm_library_id = ?,
           subtitle_margin_v = ?, subtitle_font_size = ?, cover_title = ?,
           watermark_text = ?, opening_pick_json = ?, opening_state = ?,
-          subtitle_cuts_json = ?, in_video_title = ?, parent_project_id = ?, episode_index = ?,
+          subtitle_cuts_json = ?, split_draft_json = ?, in_video_title = ?, parent_project_id = ?, episode_index = ?,
           voice_name = ?, voice_rate = ?, voice_volume = ?, voice_pitch = ?,
           rename_enabled = ?, rename_state = ?, rename_analysis_json = ?, rename_map_json = ?,
           updated_at = ?
@@ -505,6 +519,7 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
         patch.openingPickJson !== undefined ? patch.openingPickJson : row.opening_pick_json ?? '',
         patch.openingState !== undefined ? patch.openingState : row.opening_state ?? 'settled',
         patch.subtitleCutsJson !== undefined ? patch.subtitleCutsJson : row.subtitle_cuts_json ?? '',
+        patch.splitDraftJson !== undefined ? patch.splitDraftJson : row.split_draft_json ?? '',
         patch.inVideoTitle !== undefined ? patch.inVideoTitle : row.in_video_title ?? '',
         patch.parentProjectId !== undefined ? patch.parentProjectId : row.parent_project_id ?? null,
         patch.episodeIndex !== undefined ? patch.episodeIndex : row.episode_index ?? 1,

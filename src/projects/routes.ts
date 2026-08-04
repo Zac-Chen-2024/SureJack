@@ -197,6 +197,50 @@ export function registerProjectRoutes (app: FastifyInstance, deps: Deps): void {
    * 算出同一份排布，所见即所得。
    */
   /**
+   * 挑开头的【草稿】：挑一半也存住。
+   *
+   * 【为什么要有】：这一屏要在 68 段素材里翻，挑一半接个电话、切个 app
+   * 是常态。不存的话，回来虽然还停在这一屏（闸门在），但挑过的那几段
+   * 没了——那就等于"随时能离开"是个陷阱。
+   *
+   * 只写清单，【不动 opening_state】——它还是 pending，闸门仍然拦着。
+   * 真正放行是 POST /opening 那一个。
+   */
+  app.post<{ Params: { id: string }; Body: { pick?: unknown } }>(
+    '/api/projects/:id/opening/draft', { preHandler: requireAuth }, async (req, reply) => {
+      const name = getSession(req)!
+      const project = withUserDb(name, (db) => db.getProject(req.params.id))
+      if (!project) return reply.code(404).send({ error: '项目不存在' })
+      const pick = Array.isArray(req.body?.pick)
+        ? req.body.pick.filter((x): x is string => typeof x === 'string')
+        : []
+      withUserDb(name, (db) => db.updateProject(req.params.id, {
+        openingPickJson: JSON.stringify(pick),
+      }))
+      return { saved: pick.length }
+    })
+
+  /**
+   * 分集那一屏的【草稿】：断点和引子选到哪儿就存到哪儿。
+   * 同理——这一屏要读几百句慢慢比对，选一半走人是常态。
+   */
+  app.post<{ Params: { id: string }; Body: { breakIndex?: unknown; introEnd?: unknown } }>(
+    '/api/projects/:id/split/draft', { preHandler: requireAuth }, async (req, reply) => {
+      const name = getSession(req)!
+      const project = withUserDb(name, (db) => db.getProject(req.params.id))
+      if (!project) return reply.code(404).send({ error: '项目不存在' })
+      const breakIndex = Number(req.body?.breakIndex)
+      const introEnd = Number(req.body?.introEnd)
+      if (!Number.isInteger(breakIndex) || !Number.isInteger(introEnd)) {
+        return reply.code(400).send({ error: '草稿值不合法' })
+      }
+      withUserDb(name, (db) => db.updateProject(req.params.id, {
+        splitDraftJson: JSON.stringify({ breakIndex, introEnd }),
+      }))
+      return { saved: true }
+    })
+
+  /**
    * 把这个项目挂起，等作者挑开头。
    *
    * ⚠️【必须在开始配音【之前】调，而且要等它返回】。配音一完成，服务端

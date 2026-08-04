@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { api } from '../../api/client'
 import { useProjects } from '../../store/projects'
 import { usePipeline } from '../../store/pipeline'
-import { IconCheck, IconClose, IconLoader, IconPlay } from '../ui/Icon'
+import { IconCheck, IconChevronLeft, IconClose, IconLoader, IconPlay } from '../ui/Icon'
 import { OpeningPreview } from './OpeningPreview'
 
 /**
@@ -39,10 +39,12 @@ function fmt (ms: number): string {
   return `${Math.floor(s / 60)} 分 ${String(s % 60).padStart(2, '0')} 秒`
 }
 
-export function OpeningPicker ({ ids, onDone }: {
+export function OpeningPicker ({ ids, onDone, onBack }: {
   /** 要挑的项目 id，主片在前、续集在后 */
   ids: string[]
   onDone: () => void
+  /** 退回列表。挑一半随时能走——挑过的会存成草稿 */
+  onBack: () => void
 }) {
   // 【订阅】而不是快照：配音跑完时长才会出来，界面必须跟着变
   const all = useProjects((s) => s.items)
@@ -57,6 +59,8 @@ export function OpeningPicker ({ ids, onDone }: {
     }
   })
   const [items, setItems] = useState<Item[] | null>(null)
+  /** 只在挂载时把库里的草稿灌回来一次，之后以界面为准 */
+  const [restored, setRestored] = useState(false)
   const [step, setStep] = useState(0)
   /** 每个项目各自挑的清单，按项目 id 存 */
   const [picks, setPicks] = useState<Record<string, string[]>>({})
@@ -83,9 +87,41 @@ export function OpeningPicker ({ ids, onDone }: {
     return () => { clearInterval(t) }
   }, [waitingVoice])
 
+  /*
+   * 【把上次挑到一半的灌回来】。这一屏要在 68 段素材里翻，挑一半接个
+   * 电话是常态；不灌回来的话，回到这一屏看到的是空的，等于白挑一次。
+   */
+  useEffect(() => {
+    if (restored || all.length === 0) return
+    const seed: Record<string, string[]> = {}
+    for (const id of ids) {
+      const p = all.find((x) => x.id === id)
+      try {
+        const v: unknown = JSON.parse(p?.openingPickJson ?? '')
+        if (Array.isArray(v) && v.length > 0) seed[id] = v.filter((x): x is string => typeof x === 'string')
+      } catch { /* 没草稿就算了 */ }
+    }
+    setRestored(true)
+    if (Object.keys(seed).length > 0) setPicks(seed)
+  }, [all, ids, restored])
+
   const current = projects[step]
   const pick = current ? picks[current.id] ?? [] : []
   const byId = useMemo(() => new Map((items ?? []).map((it) => [it.id, it])), [items])
+
+  /*
+   * 【挑一下就存一下】（防抖 800ms）。不等"确认"才存——用户随时可能走，
+   * 而"确认"那一步的语义是【放行合成】，不是【保存】。两件事分开。
+   */
+  useEffect(() => {
+    if (!restored || current === undefined) return
+    const t = setTimeout(() => {
+      void api.post(`/api/projects/${current.id}/opening/draft`, { pick }).catch(() => {
+        // 存草稿失败不该打断挑选：真正要紧的那一次写在"确认"里
+      })
+    }, 800)
+    return () => { clearTimeout(t) }
+  }, [pick, restored, current])
 
   const pickedMs = pick.reduce((sum, id) => sum + (byId.get(id)?.durationMs ?? 0), 0)
   /*
@@ -193,6 +229,13 @@ export function OpeningPicker ({ ids, onDone }: {
     <div className="absolute inset-0 flex flex-col bg-ink-950" style={{ paddingTop: 'calc(env(safe-area-inset-top, 0px) + 12px)' }}>
       <div className="flex items-center justify-between px-4 pb-2">
         <div className="flex items-center gap-2">
+          {/* 随时能回列表：挑过的已经存成草稿，回来接着挑 */}
+          <button
+            type="button" onClick={onBack} aria-label="返回项目列表"
+            className="flex size-8 shrink-0 items-center justify-center rounded-full border border-line bg-ink-900 text-ink-100"
+          >
+            <IconChevronLeft className="size-4" strokeWidth={2.2} />
+          </button>
           <h2 className="text-lg font-extrabold text-ink-50">挑这一集的开头</h2>
           {/* 预览是"看一眼"，不是主动作——做成标题旁边的小按钮，
               底部那一排只留真正要做决定的两个 */}

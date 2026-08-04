@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../../api/client'
+import { useProjects } from '../../store/projects'
 import { IconLoader, IconScissors, IconCheck } from '../ui/Icon'
 
 /**
@@ -146,8 +147,10 @@ function Wheel ({ items, value, onChange, allowed }: {
   )
 }
 
-export function SplitPicker ({ projectId, onDone, onCancel }: {
+export function SplitPicker ({ projectId, onDone, onCancel, onBack }: {
   projectId: string
+  /** 退回列表。选一半随时能走——选过的会存成草稿 */
+  onBack?: () => void
   /** 拆完把两条片子的 id 交回去——下一步要给它们分别填标题 */
   onDone: (ids: { mainId: string; sequelId: string }) => void
   onCancel: () => void
@@ -159,14 +162,35 @@ export function SplitPicker ({ projectId, onDone, onCancel }: {
   const [introEnd, setIntroEnd] = useState(0)
   const [tab, setTab] = useState<'break' | 'intro'>('break')
   const [busy, setBusy] = useState(false)
+  const [restored, setRestored] = useState(false)
+
+  /** 库里存的草稿。坏数据当没有——它只影响初始值，不值得为它报错 */
+  function readDraft (): { breakIndex: number; introEnd: number } | null {
+    const raw = useProjects.getState().items.find((x) => x.id === projectId)?.splitDraftJson ?? ''
+    if (raw === '') return null
+    try {
+      const o = JSON.parse(raw) as { breakIndex?: unknown; introEnd?: unknown }
+      if (!Number.isInteger(o.breakIndex) || !Number.isInteger(o.introEnd)) return null
+      return { breakIndex: o.breakIndex as number, introEnd: o.introEnd as number }
+    } catch {
+      return null
+    }
+  }
 
   async function load () {
     setLoading(true); setError(null)
     try {
       const p = await api.get<Plan>(`/api/projects/${projectId}/split/plan`)
       setPlan(p)
-      setBreakIndex(p.candidates[0]?.sentenceIndex ?? Math.floor(p.sentences.length / 2))
-      setIntroEnd(p.introEndIndex)
+      /*
+       * 【上次选到一半的优先】。这一屏要读几百句慢慢比对，选一半接个电话
+       * 是常态；不灌回来的话回来是 AI 的默认值，等于白挑一次。
+       * 草稿里的值仍然要夹进允许范围——库里的可能是旧版本存的。
+       */
+      const draft = readDraft()
+      setBreakIndex(draft?.breakIndex ?? p.candidates[0]?.sentenceIndex
+        ?? Math.floor(p.sentences.length / 2))
+      setIntroEnd(draft?.introEnd ?? p.introEndIndex)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -174,6 +198,21 @@ export function SplitPicker ({ projectId, onDone, onCancel }: {
     }
   }
   useEffect(() => { void load() }, [projectId])
+
+  /*
+   * 【滚到哪儿就存到哪儿】（防抖 800ms）。不等"确认拆分"才存——
+   * "确认"的语义是【真的把项目拆成两条】，不是【保存进度】。两件事分开。
+   */
+  useEffect(() => {
+    if (plan === null) return
+    if (!restored) { setRestored(true); return }   // 首次是灌进来的值，不用回存
+    const t = setTimeout(() => {
+      void api.post(`/api/projects/${projectId}/split/draft`, { breakIndex, introEnd })
+        .then(() => useProjects.getState().load())
+        .catch(() => { /* 存草稿失败不打断选择 */ })
+    }, 800)
+    return () => { clearTimeout(t) }
+  }, [breakIndex, introEnd, plan, restored, projectId])
 
   const mainMs = useMemo(
     () => plan?.sentences[breakIndex]?.cumulativeMs ?? 0, [plan, breakIndex])
@@ -295,6 +334,14 @@ export function SplitPicker ({ projectId, onDone, onCancel }: {
           {busy ? <IconLoader className="size-4 animate-spin" /> : <IconScissors className="size-4" />}
           {busy ? '拆分中…' : '就按这里拆'}
         </button>
+        {onBack !== undefined && (
+          <button
+            type="button" onClick={onBack}
+            className="rounded-xl border border-line px-3 py-2.5 text-[13px] font-bold text-ink-300"
+          >
+            回列表
+          </button>
+        )}
         <button
           type="button" disabled={busy} onClick={onCancel}
           className="rounded-xl border border-line px-4 py-2.5 text-sm font-medium text-ink-300 disabled:opacity-50"

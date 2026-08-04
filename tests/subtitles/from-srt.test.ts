@@ -29,7 +29,7 @@ function makeProject (patch: Partial<Project> = {}): Project {
     id: 'p1', name: '测试项目', scriptText: '', aspectRatio: '9:16',
     ttsState: 'ready', ttsDurationMs: 8000, wordTimingsJson: null,
     bgmVolume: 0.1, bgmLibraryId: null, subtitleMode: 'karaoke',
-    subtitleFontSize: 64, coverTitle: '', watermarkText: '', openingPickJson: '', openingState: 'settled' as const, subtitleCutsJson: '', inVideoTitle: '', parentProjectId: null, episodeIndex: 1, voiceName: 'zh-CN-XiaoxiaoNeural', voiceRate: 0, voiceVolume: 0, voicePitch: 0, subtitleMarginV: DEFAULT_SUBTITLE_MARGIN_V,
+    subtitleFontSize: 64, coverTitle: '', watermarkText: '', openingPickJson: '', openingState: 'settled' as const, subtitleCutsJson: '', splitDraftJson: '', inVideoTitle: '', parentProjectId: null, episodeIndex: 1, voiceName: 'zh-CN-XiaoxiaoNeural', voiceRate: 0, voiceVolume: 0, voicePitch: 0, subtitleMarginV: DEFAULT_SUBTITLE_MARGIN_V,
     renameEnabled: false, renameState: 'none', renameAnalysisJson: null, renameMapJson: null,
     createdAt: '2026-07-19T00:00:00.000Z', updatedAt: '2026-07-19T00:00:00.000Z',
     ...patch,

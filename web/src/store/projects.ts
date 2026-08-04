@@ -126,6 +126,10 @@ export interface Project {
   openingState: 'pending' | 'settled'
   /** 水印文字。空 = 不打水印 */
   watermarkText: string
+  /** 挑开头的草稿清单（挑一半也存住）。JSON 数组 */
+  openingPickJson: string
+  /** 分集那一屏的草稿：{"breakIndex":n,"introEnd":n} */
+  splitDraftJson: string
   /** 片内标题——顶部常驻那行大字。空串 = 用项目名 */
   inVideoTitle: string
   /** 续集指向它的主片；主片自己是 null */

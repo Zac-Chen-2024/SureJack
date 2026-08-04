@@ -191,6 +191,7 @@ export function MobileWorkspace () {
               .filter((x) => x.openingState === 'pending')
               .map((x) => x.id)}
             onDone={() => { replace({ k: 'editor' }) }}
+            onBack={() => { replace({ k: 'list' }) }}
           />
         ) : screen === 'newproject' ? (
           /* 从列表点进一条草稿时带上 id，那一页会把名字和文案填回去接着走 */
