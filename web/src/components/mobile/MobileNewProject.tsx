@@ -87,6 +87,45 @@ export function MobileNewProject ({ onBack, onGo, resumeId }: {
     return id
   }
 
+  /*
+   * 【贴完文案就先把项目建起来】，不等点「分析人名」。
+   *
+   * 原来是点分析那一刻才建，于是在那之前退出去——项目名和文案全丢，
+   * 而这一屏正是最容易被打断的地方（贴一大段文案、想标题，中间接个电话）。
+   * "随时能离开"要成立，前提就是离开不丢东西。
+   *
+   * 【门槛 10 个字】：随手点进来敲两下就退出，不该在列表里留一条垃圾草稿。
+   * 【防抖 1.2 秒】：一边打字一边建项目没有意义，等他停下来。
+   */
+  useEffect(() => {
+    if (createdId !== null || busy !== null) return
+    if (script.trim().length < 10) return
+    const t = setTimeout(() => { void ensureProject() }, 1200)
+    return () => { clearTimeout(t) }
+    // ensureProject 依赖 name/script 的最新值，交给下面那个同步 effect 兜住
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [script, createdId, busy])
+
+  /*
+   * 建好之后，名字和文案继续跟着输入框走（防抖）。
+   * 【为什么名字也要同步】：项目是在"文案够长"那一刻建的，那时用户可能
+   * 还没填名字——建出来叫「未命名项目」。之后他补上了，得跟着改。
+   */
+  useEffect(() => {
+    if (createdId === null) return
+    const t = setTimeout(() => {
+      const p = useProjects.getState().items.find((x) => x.id === createdId)
+      if (p === undefined) return
+      const wanted = name.trim() || '未命名项目'
+      if (p.name !== wanted) {
+        if (useProjects.getState().currentId !== createdId) useProjects.getState().select(createdId)
+        void useProjects.getState().patchProject({ name: wanted })
+      }
+      if ((p.scriptText ?? '') !== script) void updateScript(script)
+    }, 1200)
+    return () => { clearTimeout(t) }
+  }, [name, script, createdId, updateScript])
+
   async function onAnalyze () {
     setBusy('analyze')
     try { const id = await ensureProject(); await analyze(id) } finally { setBusy(null) }
