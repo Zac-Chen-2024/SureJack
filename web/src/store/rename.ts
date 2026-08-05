@@ -236,3 +236,30 @@ function charSubstitutions (from: string, to: string): Map<string, string> {
   }
   return m
 }
+
+/**
+ * 大名里【还留着的原字】。
+ *
+ * 走到这一步说明前面全都没兜住：模型没换、代码的同音字表也挑不出替身
+ * （两万汉字里 56 个字连一个同音字都没有，0.27%）。这时候不能装作没事——
+ * 名字里留着原字，观众照样能搜到原作。界面上必须明着说"这条没搞定"。
+ *
+ * ⚠️【姓要按姓氏表判，不能用"开头相同的一截"去猜】。踩过：用后者的话，
+ * 「江崇桉 → 江崇安」里没换的「崇」会被当成姓的一部分吃掉——而它正是
+ * 要检测的那个字。复姓表和后端 deepseek.ts 的 COMPOUND_SURNAMES 一致。
+ */
+const COMPOUND_SURNAMES = [
+  '欧阳', '司马', '上官', '夏侯', '诸葛', '闻人', '东方', '赫连', '皇甫', '尉迟',
+  '公羊', '澹台', '公孙', '轩辕', '令狐', '宇文', '长孙', '慕容', '司徒', '司空',
+  '独孤', '南宫', '万俟', '拓跋', '第五', '呼延',
+]
+
+export function stuckGivenChars (c: CharacterReplacement): string[] {
+  const a = [...c.original]
+  const b = [...c.replacement]
+  if (a.length !== b.length) return []          // 长度不一样，没法逐位比
+  const start = COMPOUND_SURNAMES.some((s) => c.original.startsWith(s)) ? 2 : 1
+  const out: string[] = []
+  for (let k = start; k < a.length; k++) if (a[k] === b[k]) out.push(a[k]!)
+  return out
+}

@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { useProjects } from '../store/projects'
-import { useRename, readReview, pairInconsistencies, pairNeedsYou, type CharacterRole, type RenameAnalysis } from '../store/rename'
+import { useRename, readReview, pairInconsistencies, pairNeedsYou, stuckGivenChars, type CharacterRole, type RenameAnalysis } from '../store/rename'
 import { IconLoader, IconCheck, IconEdit } from './ui/Icon'
 
 /**
@@ -141,9 +141,23 @@ export function NameReplacePanel () {
                         value={c.replacement}
                         onChange={(e) => editReplacement(i, e.target.value)}
                         aria-label={`${c.original} 的新名`}
-                        className="min-w-0 flex-1 rounded-md border border-line bg-ink-800 px-2 py-1 text-xs text-ink-50 outline-none focus:border-accent"
+                        className={`min-w-0 flex-1 rounded-md border bg-ink-800 px-2 py-1 text-xs text-ink-50 outline-none focus:border-accent ${
+                          stuckGivenChars(c).length > 0 ? 'border-danger' : 'border-line'}`}
                       />
                     </div>
+
+                    {/*
+                      * 【最后的兜底：明说没搞定】。走到这儿说明前面全都没兜住——
+                      * 模型没换，代码的同音字表也挑不出替身（两万汉字里 56 个
+                      * 字连一个同音字都没有）。不吭声的话，名字里留着原字，
+                      * 观众照样能搜到原作，而用户完全不知道。
+                      */}
+                    {stuckGivenChars(c).length > 0 && (
+                      <p className="mt-1 text-[11px] leading-relaxed text-danger">
+                        这条没搞定：「{stuckGivenChars(c).join('」「')}」找不到同音字，
+                        得你亲手改一下（可以换个不同音但读着顺的字）。
+                      </p>
+                    )}
 
                     {/*
                       * 【小名/别称也摆出来让人过目】。它们一直都在（模型给的 pairs 里），

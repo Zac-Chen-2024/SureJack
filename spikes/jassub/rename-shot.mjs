@@ -21,6 +21,13 @@ const ANALYSIS = {
       ],
     },
     {
+      original: '江崇桉', replacement: '江崇安', role: 'related',
+      pairs: [
+        { from: '江崇桉', to: '江崇安', global: true },
+        { from: '桉桉', to: '安安', global: false, contexts: ['「桉桉」'] },
+      ],
+    },
+    {
       original: '温思言', replacement: '温思妍', role: 'related',
       pairs: [
         { from: '温思言', to: '温思妍', global: true },

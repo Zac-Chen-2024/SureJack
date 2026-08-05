@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { editCharacterName, renameGates, pairInconsistencies, pairNeedsYou, type CharacterReplacement } from '../../web/src/store/rename'
+import { editCharacterName, renameGates, pairInconsistencies, pairNeedsYou, stuckGivenChars, type CharacterReplacement } from '../../web/src/store/rename'
 import type { Project } from '../../web/src/store/projects'
 
 describe('editCharacterName —— 改新名，pairs 一起改，保持一致', () => {
@@ -100,5 +100,36 @@ describe('改不出来的小名 = 待办，不是错误', () => {
     ['只含姓的也一样交给人', '小顾', '小顾', true],
   ])('%s → 待你填=%s', (_label, from, to, want) => {
     expect(pairNeedsYou(gu(from, to), 0)).toBe(want)
+  })
+})
+
+describe('最后的兜底：大名没搞定要能检测出来', () => {
+  /*
+   * 走到这一步说明前面全都没兜住：模型没换、代码的同音字表也挑不出替身
+   * （两万汉字里 56 个字连一个同音字都没有，0.27%）。
+   * 界面要明着说"这条没搞定"，不能装作没事——名字里留着原字，
+   * 观众照样能搜到原作。
+   */
+  const c = (original: string, replacement: string): CharacterReplacement =>
+    ({ original, replacement, role: 'protagonist', pairs: [] })
+
+  it('换干净了 → 没有遗留', () => {
+    expect(stuckGivenChars(c('顾文渊', '顾闻远'))).toEqual([])
+  })
+
+  it('有一个字没换 → 报出来', () => {
+    expect(stuckGivenChars(c('江崇桉', '江崇安'))).toEqual(['崇'])
+  })
+
+  it('两个字都没换 → 都报', () => {
+    expect(stuckGivenChars(c('顾文渊', '顾文渊'))).toEqual(['文', '渊'])
+  })
+
+  it('姓相同不算遗留（姓本来就不换）', () => {
+    expect(stuckGivenChars(c('顾文渊', '顾闻缘'))).toEqual([])
+  })
+
+  it('长度对不上就不硬判', () => {
+    expect(stuckGivenChars(c('顾文渊', '顾闻'))).toEqual([])
   })
 })
