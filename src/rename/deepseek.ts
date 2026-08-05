@@ -1,5 +1,6 @@
 import type { RenameAnalysis, CharacterReplacement, ReplacePair, Relationship, CharacterRole } from './types.js'
 import { EMPTY_ANALYSIS } from './types.js'
+import { pickHomophone } from './homophone.js'
 
 /**
  * 调 DeepSeek 做 API-1：去章节名 + 人名/关系/谐音分析。
@@ -343,6 +344,44 @@ async function reviewCleanupOnce (text: string, deps: AnalyzeDeps = {}): Promise
   }
 }
 
+/**
+ * 把还没换掉的字【逐个补上】。整篇重跑改成单字兜底。
+ *
+ * ⚠️【为什么不再靠重跑整篇】：一次 12 秒，而且重跑会把用户已经看顺眼的
+ * 其它名字一起洗掉；更要紧的是它【不保证】能修好——实测同一个"崇"字，
+ * 整篇重跑两次都没换，单独重试也没换。
+ *
+ * ⚠️【为什么不问模型要同音字】：查同音字是确定性的查表活。实测模型经常
+ * 想不起来有哪些字（"知"那次它没想到"之"），还会自述与实际不符：明说
+ * "崈是异体字不符合要求，故保留原字"，然后返回了带"崈"的名字。
+ * 所以这一步纯代码做，结果可复现、可测试。
+ *
+ * 挑不出同音字的（两万字里 56 个，0.27%）原样留着，替换表里标成待人工。
+ */
+export function fillStuckChars (a: RenameAnalysis): RenameAnalysis {
+  const characters = a.characters.map((c) => {
+    const stuck = unchangedGivenChars(c.original, c.replacement)
+    if (stuck.length === 0) return c
+    /*
+     * 同一个原字在【全名和所有别名里】都换成同一个替身——"替换要统一"
+     * 就是在这儿落实的，不是靠提示词求模型自觉。
+     */
+    const map = new Map<string, string>()
+    for (const ch of stuck) {
+      const to = pickHomophone(ch)
+      if (to !== null) map.set(ch, to)
+    }
+    if (map.size === 0) return c
+    const swap = (s: string): string => [...s].map((x) => map.get(x) ?? x).join('')
+    return {
+      ...c,
+      replacement: swap(c.replacement),
+      pairs: c.pairs.map((p) => ({ ...p, to: swap(p.to) })),
+    }
+  })
+  return { ...a, characters }
+}
+
 export async function analyzeNovel (novel: string, deps: AnalyzeDeps = {}): Promise<RenameAnalysis> {
   /*
    * 模型常见两种偷懒：整名原样返回、或只换一个字（顾文渊→顾文远，"文"没动）。
@@ -360,5 +399,9 @@ export async function analyzeNovel (novel: string, deps: AnalyzeDeps = {}): Prom
     if (bad.length < bestBad.length) { best = next; bestBad = bad }
     if (bad.length === 0) break
   }
-  return best
+  /*
+   * 模型尽力之后仍然没换干净的，代码逐字补上。这一步之后，
+   * "名字里还留着原字"只剩一种可能：那个字压根没有同音字。
+   */
+  return fillStuckChars(best)
 }
