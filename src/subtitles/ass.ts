@@ -22,7 +22,14 @@ import {
  * 头像、点赞栏、评论框占着；贴底的字幕在刷的时候经常被压住。抬到中部
  * 反而是"永远看得见"的位置。原来的 300 是凭感觉填的。
  */
-export const DEFAULT_SUBTITLE_MARGIN_V = 999
+/*
+ * 999 → 990（2026-08-06，用户看过 999/990 的对比图后定的）。
+ *
+ * ⚠️【只影响以后新建的项目】。已有项目在 subtitle_margin_v 这一列里存着
+ * 自己的值（实测三条都是实存的 999，没有 NULL），toProject 只在【读到 NULL】
+ * 时才回落到这个常量——所以它们的 ASS 一个字节不变、指纹不变、不会被重烧。
+ */
+export const DEFAULT_SUBTITLE_MARGIN_V = 990
 
 export interface BuildAssOptions {
   lines: SubtitleLine[]
