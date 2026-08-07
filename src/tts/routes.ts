@@ -13,6 +13,7 @@ import { enqueueFilm, type FilmDeps } from '../compose/film.js'
 import { overlongRuns } from '../subtitles/segment.js'
 import type { WordTiming } from '../types.js'
 import { planCuts, SUBTITLE_CUT_MAX } from '../subtitles/cut-ai.js'
+import { ensureAudioStats } from '../audio/routes.js'
 
 interface Deps extends FilmDeps {
   /** 仅供测试注入假合成，生产不传——真调 Azure 会烧配额 */
@@ -150,6 +151,9 @@ export function registerTtsRoutes (app: FastifyInstance, deps: Deps): void {
          * 挑的片子。挑完（或按了「用默认素材」）由那个接口负责排。
          */
         planSubtitleCuts(name, whitelist, req.params.id, req.log)
+        // 【预加载】配音一好就把波形和响度量出来，用户点进音频那一屏时数据已经在了
+        void ensureAudioStats(name, whitelist, req.params.id, deps.libraryDataDir)
+          .catch(() => { /* 量不出不影响出片，接口那边会再试一次 */ })
 
         if (openingPending(name, whitelist, req.params.id)) {
           req.log.info({ project: req.params.id }, '开头待挑，先不排合成')
@@ -295,6 +299,8 @@ async function synthesizeProject (
       })
     })
     planSubtitleCuts(userName, whitelist, projectId, console as never)
+    void ensureAudioStats(userName, whitelist, projectId, deps.libraryDataDir)
+      .catch(() => { /* 同上 */ })
 
     // 续集同理：开头没挑完就不排，见上面那段
     if (!openingPending(userName, whitelist, projectId)) {

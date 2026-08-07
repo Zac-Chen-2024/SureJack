@@ -133,6 +133,15 @@ export interface Project {
    */
   voiceGain: number
   /**
+   * 两条音轨的体检报告（波形 + 响度），JSON。
+   * {"voice":{lufs,truePeak,peaks[],durationMs},"bgm":{...,"libraryId":"..."}}
+   *
+   * 【预先算好】：配音一完成、音乐一选中就算，用户点进音频那一屏时数据
+   * 已经在了。10 分钟的音频让手机现解码画波形会卡住好几秒，而那一屏
+   * 正是要来回拖滑块的地方。
+   */
+  audioStatsJson: string
+  /**
    * 开头是否还等着人挑。'pending' = 挡住自动排队，'settled' = 放行。
    *
    * 【默认必须是 settled】：迁移默认值会回填进所有老行，填 pending 的话
@@ -188,6 +197,7 @@ export interface UserDb {
     subtitleCutsJson?: string
     splitDraftJson?: string
     voiceGain?: number
+    audioStatsJson?: string
     openingState?: 'pending' | 'settled'
     inVideoTitle?: string
     parentProjectId?: string | null
@@ -228,6 +238,7 @@ interface Row {
   subtitle_cuts_json: string | null
   split_draft_json: string | null
   voice_gain: number | null
+  audio_stats_json: string | null
   opening_state: string | null
   in_video_title: string | null
   parent_project_id: string | null
@@ -258,6 +269,7 @@ const toProject = (r: Row): Project => ({
   subtitleCutsJson: r.subtitle_cuts_json ?? '',
   splitDraftJson: r.split_draft_json ?? '',
   voiceGain: r.voice_gain ?? 1,
+  audioStatsJson: r.audio_stats_json ?? '',
   openingState: r.opening_state === 'pending' ? 'pending' : 'settled',
   inVideoTitle: r.in_video_title ?? '',
   parentProjectId: r.parent_project_id ?? null,
@@ -323,6 +335,7 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
       subtitle_cuts_json TEXT NOT NULL DEFAULT '',
       split_draft_json TEXT NOT NULL DEFAULT '',
       voice_gain REAL NOT NULL DEFAULT 1,
+      audio_stats_json TEXT NOT NULL DEFAULT '',
       opening_state TEXT NOT NULL DEFAULT 'settled',
       in_video_title TEXT NOT NULL DEFAULT '',
       parent_project_id TEXT,
@@ -409,6 +422,7 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
   addCol('subtitle_cuts_json', "subtitle_cuts_json TEXT NOT NULL DEFAULT ''")
   addCol('split_draft_json', "split_draft_json TEXT NOT NULL DEFAULT ''")
   addCol('voice_gain', 'voice_gain REAL NOT NULL DEFAULT 1')
+  addCol('audio_stats_json', "audio_stats_json TEXT NOT NULL DEFAULT ''")
   /* settled 是老项目的事实：它们从来没有"等人挑开头"这回事 */
   addCol('opening_state', "opening_state TEXT NOT NULL DEFAULT 'settled'")
   addCol('in_video_title', "in_video_title TEXT NOT NULL DEFAULT ''")
@@ -461,6 +475,7 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
         subtitleCutsJson: '', // 空 = 还没算语义断点
         splitDraftJson: '',   // 空 = 分集那一屏还没动过
         voiceGain: 1,         // 1 = 原样，用户可拖
+        audioStatsJson: '',   // 空 = 还没量过
         openingState: 'settled',  // 走新建项目那条线时才由路由改成 pending
         inVideoTitle: '',    // 同上
         parentProjectId: null,
@@ -474,15 +489,16 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
       }
       db.prepare(
         `INSERT INTO projects
-          (id, name, script_text, aspect_ratio, tts_state, tts_duration_ms, word_timings_json, bgm_volume, subtitle_mode, bgm_library_id, subtitle_margin_v, subtitle_font_size, cover_title, watermark_text, opening_pick_json, opening_state, subtitle_cuts_json, split_draft_json, voice_gain, in_video_title, parent_project_id, episode_index, voice_name, voice_rate, voice_volume, voice_pitch, rename_enabled, rename_state, rename_analysis_json, rename_map_json, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          (id, name, script_text, aspect_ratio, tts_state, tts_duration_ms, word_timings_json, bgm_volume, subtitle_mode, bgm_library_id, subtitle_margin_v, subtitle_font_size, cover_title, watermark_text, opening_pick_json, opening_state, subtitle_cuts_json, split_draft_json, voice_gain, audio_stats_json, in_video_title, parent_project_id, episode_index, voice_name, voice_rate, voice_volume, voice_pitch, rename_enabled, rename_state, rename_analysis_json, rename_map_json, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         project.id, project.name, project.scriptText, project.aspectRatio,
         project.ttsState, project.ttsDurationMs, project.wordTimingsJson,
         project.bgmVolume, project.subtitleMode, project.bgmLibraryId,
         project.subtitleMarginV, project.subtitleFontSize, project.coverTitle,
         project.watermarkText, project.openingPickJson, project.openingState,
-        project.subtitleCutsJson, project.splitDraftJson, project.voiceGain, project.inVideoTitle, project.parentProjectId, project.episodeIndex,
+        project.subtitleCutsJson, project.splitDraftJson, project.voiceGain,
+        project.audioStatsJson, project.inVideoTitle, project.parentProjectId, project.episodeIndex,
         project.voiceName, project.voiceRate, project.voiceVolume, project.voicePitch,
         project.renameEnabled ? 1 : 0, project.renameState,
         project.renameAnalysisJson, project.renameMapJson,
@@ -503,7 +519,8 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
           bgm_volume = ?, subtitle_mode = ?, bgm_library_id = ?,
           subtitle_margin_v = ?, subtitle_font_size = ?, cover_title = ?,
           watermark_text = ?, opening_pick_json = ?, opening_state = ?,
-          subtitle_cuts_json = ?, split_draft_json = ?, voice_gain = ?, in_video_title = ?, parent_project_id = ?, episode_index = ?,
+          subtitle_cuts_json = ?, split_draft_json = ?, voice_gain = ?,
+          audio_stats_json = ?, in_video_title = ?, parent_project_id = ?, episode_index = ?,
           voice_name = ?, voice_rate = ?, voice_volume = ?, voice_pitch = ?,
           rename_enabled = ?, rename_state = ?, rename_analysis_json = ?, rename_map_json = ?,
           updated_at = ?
@@ -535,6 +552,7 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
         patch.subtitleCutsJson !== undefined ? patch.subtitleCutsJson : row.subtitle_cuts_json ?? '',
         patch.splitDraftJson !== undefined ? patch.splitDraftJson : row.split_draft_json ?? '',
         patch.voiceGain !== undefined ? patch.voiceGain : row.voice_gain ?? 1,
+        patch.audioStatsJson !== undefined ? patch.audioStatsJson : row.audio_stats_json ?? '',
         patch.inVideoTitle !== undefined ? patch.inVideoTitle : row.in_video_title ?? '',
         patch.parentProjectId !== undefined ? patch.parentProjectId : row.parent_project_id ?? null,
         patch.episodeIndex !== undefined ? patch.episodeIndex : row.episode_index ?? 1,

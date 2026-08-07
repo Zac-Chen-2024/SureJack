@@ -154,8 +154,8 @@ export function NameReplacePanel () {
                       */}
                     {stuckGivenChars(c).length > 0 && (
                       <p className="mt-1 text-[11px] leading-relaxed text-danger">
-                        这条没搞定：「{stuckGivenChars(c).join('」「')}」找不到同音字，
-                        得你亲手改一下（可以换个不同音但读着顺的字）。
+                        老大，我们失败了！「{stuckGivenChars(c).join('」「')}」找不到同音字，
+                        请手动命名。
                       </p>
                     )}
 

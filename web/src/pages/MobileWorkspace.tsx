@@ -35,22 +35,22 @@ import {
  *
  *   list   项目列表（根）
  *   editor 全屏预览（空项目时叠"起始选择"；成片就绪播成片，否则引导空态）
- *   sheet  底部抽屉（文案/配音/字幕/背景/音乐），叠在 editor 上
+ *   sheet  底部抽屉（文案/配音/字幕/背景/音频），叠在 editor 上
  *
  * 抽屉里全是桌面那几个组件（ScriptEditor / VoicePanel / …），一个不重写；
  * 手机版只提供 BottomSheet 的壳和这套导航。
  */
 
-/** 底栏五格。图标照概念图：文案=三行字、配音=麦、字幕=T、背景=画框、音乐=音符 */
+/** 底栏五格。图标照概念图：文案=三行字、配音=麦、字幕=T、背景=画框、音频=音符 */
 const DOCK: { key: Sheet; label: string; icon: typeof IconMic }[] = [
   { key: 'script', label: '文案', icon: IconTextLines },
   { key: 'voice', label: '配音', icon: IconMic },
   { key: 'subtitle', label: '字幕', icon: IconTypeTool },
   { key: 'background', label: '背景', icon: IconFrame },
-  { key: 'music', label: '音乐', icon: IconMusic },
+  { key: 'music', label: '音频', icon: IconMusic },
 ]
 const SHEET_TITLE: Record<Sheet, string> = {
-  script: '文案', voice: '配音', subtitle: '字幕', background: '背景', music: '音乐',
+  script: '文案', voice: '配音', subtitle: '字幕', background: '背景', music: '音频',
 }
 
 export function MobileWorkspace () {

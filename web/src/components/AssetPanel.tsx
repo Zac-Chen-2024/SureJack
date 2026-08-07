@@ -1,10 +1,10 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect } from 'react'
+import { AudioMix } from './AudioMix'
 import { useProjects } from '../store/projects'
 import {
   useLibrary, parseBgmName, groupPhases, segmentShares, describePlan, formatClock,
 } from '../store/library'
-import { IconFilm, IconMusic, IconVolume, IconLoader } from './ui/Icon'
-import { DEFAULT_BGM_VOLUME } from '../constants'
+import { IconFilm, IconMusic, IconLoader } from './ui/Icon'
 
 /**
  * 素材区。**这里没有上传。**
@@ -196,58 +196,12 @@ function BgmOption ({ title, tags, duration, checked, onSelect }: {
   )
 }
 
-/**
- * 音量平衡滑块。
- *
- * 拖动要跟手，但每一帧都发一次 PATCH 会打出上百个请求。所以【本地状态
- * 立刻跟手、落库节流】：拖动过程中只改本地，停手 300ms 后才发一次。
+/*
+ * 【原来这儿有个 VolumeSlider——只能调背景音乐、显示一个没头没尾的百分比】。
+ * 删了，换成 AudioMix：配音和音乐两条轨各自带波形、响度读数和滑块，
+ * 并把平台基准（-14 LUFS）摆出来。用户报的"声音小且不可调"，
+ * 一半是真的调不了（配音没有入口），一半是不知道该调到哪儿。
  */
-function VolumeSlider () {
-  const project = useProjects((s) => s.current())
-  const setBgmVolume = useProjects((s) => s.setBgmVolume)
-
-  const stored = project?.bgmVolume ?? DEFAULT_BGM_VOLUME
-  const [value, setValue] = useState(stored)
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  // 切项目时把滑块拉回那个项目自己的值。不能只在挂载时取初值——
-  // 这个组件在项目之间是复用的，不重挂
-  useEffect(() => { setValue(stored) }, [project?.id, stored])
-
-  useEffect(() => () => { if (timer.current !== null) clearTimeout(timer.current) }, [])
-
-  function onChange (next: number) {
-    setValue(next)
-    if (timer.current !== null) clearTimeout(timer.current)
-    timer.current = setTimeout(() => { void setBgmVolume(next) }, 300)
-  }
-
-  const disabled = (project?.bgmLibraryId ?? null) === null
-
-  return (
-    <div>
-      <SectionLabel
-        icon={<IconVolume className="size-3.5" />}
-        trailing={<span className="tabular-nums text-ink-400">{Math.round(value * 100)}%</span>}
-      >
-        音量平衡
-      </SectionLabel>
-      <input
-        type="range"
-        min={0} max={100} step={1}
-        value={Math.round(value * 100)}
-        disabled={disabled}
-        onChange={(e) => onChange(Number(e.target.value) / 100)}
-        aria-label="背景音乐音量"
-        className="h-1 w-full cursor-pointer appearance-none rounded-full bg-ink-700 disabled:cursor-not-allowed disabled:opacity-40"
-        style={{ accentColor: 'var(--color-accent)' }}
-      />
-      <p className="mt-1.5 text-[11px] leading-relaxed text-ink-400">
-        {disabled ? '先选一首背景音乐。' : '背景音乐相对配音的音量，配音始终是满音量。'}
-      </p>
-    </div>
-  )
-}
 
 export function AssetPanel () {
   const project = useProjects((s) => s.current())
@@ -257,7 +211,7 @@ export function AssetPanel () {
     <div className="space-y-4">
       <BackgroundStrip projectId={project.id} />
       <BgmPicker />
-      <VolumeSlider />
+      <AudioMix />
     </div>
   )
 }
@@ -273,14 +227,20 @@ export function BackgroundPanel () {
   return <BackgroundStrip projectId={project.id} />
 }
 
-/** 「音乐」抽屉：选背景音乐 + 音量平衡。 */
+/**
+ * 「音频」抽屉：选背景音乐 + 两条轨的波形/响度/音量。
+ *
+ * 【原来叫「音乐」，改名是因为它管的东西变了】：以前只有背景音乐能调，
+ * 配音的音量根本没有入口——而用户报的正是"声音小且不可调"。
+ * 现在配音和音乐是两条平等的轨，名字得跟上。
+ */
 export function MusicPanel () {
   const project = useProjects((s) => s.current())
   if (!project) return null
   return (
     <div className="space-y-4">
       <BgmPicker />
-      <VolumeSlider />
+      <AudioMix />
     </div>
   )
 }

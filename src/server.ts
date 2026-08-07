@@ -17,6 +17,7 @@ import { openLibraryDb } from './library/library-db.js'
 import { registerEpisodeRoutes } from './episodes/routes.js'
 import { registerLabRoutes } from './lab/routes.js'
 import { registerLibraryRoutes } from './library/routes.js'
+import { registerAudioRoutes } from './audio/routes.js'
 import { ExportQueue } from './queue/queue.js'
 import { resetStuckVoices } from './tts/recover.js'
 import { registerExportRoutes } from './queue/routes.js'
@@ -226,6 +227,7 @@ export function buildServer (opts: BuildOpts = {}): FastifyInstance {
     registerAuthRoutes(scope, { authDb, whitelist, welcome, birthdays })
     registerProjectRoutes(scope, { whitelist, libraryDataDir, queue })
     registerSubtitleRoutes(scope, { whitelist })
+    registerAudioRoutes(scope, whitelist, libraryDataDir)
     registerRenameRoutes(scope, {
       whitelist, analyze: opts.analyzeNovel, review: opts.reviewNovel,
       openLibrary: () => openLibraryDb(libraryDataDir),

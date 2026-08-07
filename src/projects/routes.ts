@@ -14,6 +14,7 @@ import {
 import { listBucket } from '../library/scan.js'
 import { bgTrackInfo, type PrebuildDeps } from '../compose/prebuild.js'
 import { enqueueFilm } from '../compose/film.js'
+import { ensureAudioStats } from '../audio/routes.js'
 
 type Deps = PrebuildDeps
 
@@ -75,14 +76,16 @@ export function registerProjectRoutes (app: FastifyInstance, deps: Deps): void {
 
   app.patch<{ Params: { id: string }; Body: {
     name?: unknown; scriptText?: unknown; aspectRatio?: unknown
-    bgmLibraryId?: unknown; bgmVolume?: unknown; subtitleMarginV?: unknown; subtitleFontSize?: unknown
+    bgmLibraryId?: unknown; bgmVolume?: unknown; voiceGain?: unknown
+    subtitleMarginV?: unknown; subtitleFontSize?: unknown
     voiceName?: unknown; voiceRate?: unknown; voiceVolume?: unknown; voicePitch?: unknown
     coverTitle?: unknown; inVideoTitle?: unknown; watermarkText?: unknown
   } }>(
     '/api/projects/:id', { preHandler: requireAuth }, async (req, reply) => {
       const patch: {
         name?: string; scriptText?: string; aspectRatio?: string
-        bgmLibraryId?: string | null; bgmVolume?: number; subtitleMarginV?: number; subtitleFontSize?: number
+        bgmLibraryId?: string | null; bgmVolume?: number; voiceGain?: number
+        subtitleMarginV?: number; subtitleFontSize?: number
         voiceName?: string; voiceRate?: number; voiceVolume?: number; voicePitch?: number
         coverTitle?: string; inVideoTitle?: string; watermarkText?: string
       } = {}
@@ -125,6 +128,20 @@ export function registerProjectRoutes (app: FastifyInstance, deps: Deps): void {
       const vol = req.body?.bgmVolume
       if (typeof vol === 'number' && Number.isFinite(vol)) {
         patch.bgmVolume = Math.min(1, Math.max(0, vol))
+      }
+
+      /*
+       * voiceGain：配音在混音时的增益。
+       *
+       * ⚠️ 和 voiceVolume 不是一回事：那个是 Azure 合成参数（改了要重新
+       * 合成、重新计费），这个只是混音增益（改了几秒重混）。
+       * 同样【必须钳位】——它原样进 ffmpeg 的 volume 滤镜。
+       * 上界 4（+12dB）：再高就是把噪底一起放大，而归一化那步本来就会
+       * 把整体推到平台基准，用不着靠它硬顶。
+       */
+      const vg = req.body?.voiceGain
+      if (typeof vg === 'number' && Number.isFinite(vg)) {
+        patch.voiceGain = Math.min(4, Math.max(0.1, vg))
       }
 
       const name = getSession(req)!
@@ -186,6 +203,16 @@ export function registerProjectRoutes (app: FastifyInstance, deps: Deps): void {
         return db.updateProject(req.params.id, patch)
       })
       if (!updated) return reply.code(404).send({ error: '项目不存在' })
+
+      /*
+       * 【预加载】换了背景音乐就顺手把它的波形和响度量出来。
+       * 不 await——用户点"选这首"不该为了画一条波形多等几秒；
+       * 等他滑到音频那一栏时，多半已经算完了。
+       */
+      if (patch.bgmLibraryId !== undefined) {
+        void ensureAudioStats(name, deps.whitelist, req.params.id, deps.libraryDataDir)
+          .catch(() => { /* 音频面板那边会再试一次 */ })
+      }
       return updated
     })
 
