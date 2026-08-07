@@ -5,7 +5,7 @@ import { mkdtemp, rm, writeFile, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { masterFingerprint, filmFingerprint, type FilmFingerprintInput } from '../../src/compose/film.js'
-import { mixBgm } from '../../src/compose/mix.js'
+import { mixAudio } from '../../src/compose/mix.js'
 
 const run = promisify(execFile)
 
@@ -30,6 +30,7 @@ const BASE: FilmFingerprintInput = {
   coverTitle: '后续来啦',
   watermarkText: '',   // 老项目一律没水印，指纹里不会多出这一项
   subtitleCutsJson: '',   // 同理：没算过语义断点
+  voiceGain: 1,           // 1 = 原样，成片指纹里不会多出这一项
 }
 
 describe('配音参数进母带指纹（carve-out 保护老项目）', () => {
@@ -143,15 +144,17 @@ describe('混音（真跑 ffmpeg）', () => {
     const dir = await mkdtemp(join(tmpdir(), 'mix-'))
     try {
       const master = join(dir, 'master.mp4')
+      const voice = join(dir, 'voice.m4a')
       const bgm = join(dir, 'bgm.mp3')
       const out = join(dir, 'export.mp4')
 
-      // 3 秒的画面 + 一条正弦波当"配音"
+      // ⚠️ 母带【没有音轨】——配音和音乐都是混音那一步才进来的
       await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y',
         '-f', 'lavfi', '-i', 'testsrc=d=3:s=320x568:r=25',
-        '-f', 'lavfi', '-i', 'sine=frequency=440:duration=3',
         '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
-        '-c:a', 'aac', '-shortest', master])
+        '-an', '-t', '3', master])
+      await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y',
+        '-f', 'lavfi', '-i', 'sine=frequency=440:duration=3', '-c:a', 'aac', voice])
       // BGM 故意比母带短，验证循环铺满
       await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y',
         '-f', 'lavfi', '-i', 'sine=frequency=880:duration=1', bgm])
@@ -159,7 +162,8 @@ describe('混音（真跑 ffmpeg）', () => {
       // 先放一个"旧成片"在目标位置，混音期间它必须一直是完整的
       await writeFile(out, 'OLD-FILM-CONTENT')
 
-      await mixBgm({ masterPath: master, bgmPath: bgm, bgmVolume: 0.15, outPath: out })
+      await mixAudio({ masterPath: master, voicePath: voice, voiceGain: 1,
+        bgmPath: bgm, bgmVolume: 0.15, outPath: out, normalize: false })
 
       /*
        * 【比视频码流的 md5，不比 codec/分辨率】。
@@ -201,8 +205,9 @@ describe('混音（真跑 ffmpeg）', () => {
       const out = join(dir, 'export.mp4')
       await writeFile(out, 'OLD-FILM-CONTENT')
 
-      await expect(mixBgm({
+      await expect(mixAudio({
         masterPath: join(dir, '根本不存在.mp4'),
+        voicePath: join(dir, '配音也不存在.m4a'), voiceGain: 1,
         bgmPath: join(dir, '也不存在.mp3'),
         bgmVolume: 0.15, outPath: out,
       })).rejects.toThrow()

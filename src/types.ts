@@ -55,6 +55,11 @@ export interface AspectPreset {
 
 /** 渲染作业的完整描述 */
 export interface RenderJob {
+  /**
+   * 母带只出画面、不带音轨。配音和音乐留到混音那一步各自进来，
+   * 于是两边的音量都能几秒改一次，而不是重烧十几分钟。
+   */
+  silentMaster?: boolean
   clips: Clip[]
   voicePath: string
   bgmPath?: string

@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs'
 /**
  * 成片（export.mp4）——【配音一就绪，后台自己合成】。
  *
@@ -44,7 +45,7 @@ import { hasVideoMaterials, planProjectBackground, parseOpeningPick, type Backgr
 import { buildAssForProject, aspectOf, LEGACY_SUBTITLE_MAX_CHARS } from '../subtitles/project-ass.js'
 import { render } from '../render/index.js'
 import { buildBackgroundTrack } from './build.js'
-import { mixBgm } from './mix.js'
+import { mixAudio } from './mix.js'
 import {
   COVER_CLIP_FILE, COVER_IMAGE, coverTitleOf, prependCover, probeAudio, renderCoverClip,
 } from '../cover/cover.js'
@@ -131,6 +132,11 @@ export interface FilmFingerprintInput {
   watermarkText: string
   /** 字幕的语义断点。**母带层**——它改变字幕的分行，必须重烧 */
   subtitleCutsJson: string
+  /**
+   * 配音增益。**成片层**——母带已经不含音轨了，改它只要重混几秒。
+   * 和 bgmVolume 同一档。
+   */
+  voiceGain: number
 }
 
 /**
@@ -151,7 +157,7 @@ export interface FilmFingerprintInput {
  * 换背景音乐不该让它变——那正是拆两层的全部意义。
  */
 export function masterFingerprint (
-  i: Omit<FilmFingerprintInput, 'bgmPath' | 'bgmVolume'>,
+  i: Omit<FilmFingerprintInput, 'bgmPath' | 'bgmVolume' | 'voiceGain'>,
 ): string {
   const parts: unknown[] = [
     i.aspect.width, i.aspect.height, i.durationMs, i.bgKey,
@@ -196,9 +202,14 @@ export function masterFingerprint (
  * 只有它变、母带指纹没变时，重做一次只要几秒的混音就够了。
  */
 export function filmFingerprint (i: FilmFingerprintInput): string {
-  return createHash('sha256').update(JSON.stringify([
-    masterFingerprint(i), i.bgmPath, i.bgmVolume, i.coverTitle,
-  ])).digest('hex')
+  const parts: unknown[] = [masterFingerprint(i), i.bgmPath, i.bgmVolume, i.coverTitle]
+  /*
+   * 【配音增益也是非默认才追加】，和水印、字幕断点同一套 carve-out：
+   * 1 = 原样 → 数组和从前逐字节相同 → 老片子的成片指纹不变。
+   * 一旦拖过滑块 → 指纹变 → 只重混那几秒。
+   */
+  if (i.voiceGain !== 1) parts.push('vg', i.voiceGain)
+  return createHash('sha256').update(JSON.stringify(parts)).digest('hex')
 }
 
 /** 合成一条成片需要的全部输入，外加它的指纹 */
@@ -389,6 +400,7 @@ export function resolveFilm (
     coverTitle: coverTitleOf(project),
     watermarkText: project.watermarkText,
     subtitleCutsJson: project.subtitleCutsJson,
+    voiceGain: project.voiceGain,
   }
 
   return {
@@ -497,7 +509,12 @@ async function buildFilm (
     await render({
       clips: [f.clip],
       voicePath: f.voicePath,
-      // ⚠️ 母带不含 BGM。混音是第二段的事，混进来就等于把两层又焊死了
+      /*
+       * ⚠️【母带只有画面，两条音轨都不进来】。
+       * 原来配音是烧进母带的，于是"配音大一点"要重烧十几分钟画面，
+       * 等于不可调。现在配音和音乐都留到混音那一步，各自可调、各自几秒。
+       */
+      silentMaster: true,
       bgmVolume: f.project.bgmVolume,
       assPath, aspect: f.aspect, durationMs: f.durationMs, outPath: partial,
     }, f.plan === null
@@ -522,13 +539,20 @@ async function buildFilm (
    * downloadableFilm 要路径，它知道该给哪一个。
    */
   const mixedPath = join(f.dir, 'mixed.mp4')
-  if (f.bgmPath !== null) {
-    await mixBgm({
-      masterPath, bgmPath: f.bgmPath,
-      bgmVolume: f.project.bgmVolume, outPath: mixedPath,
-    })
-  }
-  const body = f.bgmPath !== null ? mixedPath : masterPath
+  /*
+   * 【这一步现在永远要跑】。母带没有音轨了，不混音就是一条哑片——
+   * 不像从前"没选 BGM 就直接用母带"。代价可以接受：视频流 -c:v copy，
+   * 实测十分钟的片子几秒。
+   */
+  await mixAudio({
+    masterPath,
+    voicePath: f.voicePath,
+    voiceGain: f.project.voiceGain,
+    bgmPath: f.bgmPath,
+    bgmVolume: f.project.bgmVolume,
+    outPath: mixedPath,
+  })
+  const body = mixedPath
 
   /*
    * ── 第三段：把封面拼到最前面（也便宜）──────────────────────────
@@ -957,5 +981,19 @@ export async function playableMaster (
   const stamp = await readStamp(dir, MASTER_STAMP_FILE)
   if (stamp === null) return null
   if (stamp.status !== undefined && stamp.status !== 'done') return null
-  return reusableOutput(dir, MASTER_STAMP_FILE, FILM_MASTER_FILE, stamp.fingerprint)
+  const master = await reusableOutput(dir, MASTER_STAMP_FILE, FILM_MASTER_FILE, stamp.fingerprint)
+  if (master === null) return null
+
+  /*
+   * ⚠️【预览要放混好的那一份，不是母带】。
+   *
+   * 母带现在【没有音轨】——配音和音乐都在混音那一步才进来。直接给母带的话
+   * 预览是彻底哑的。而且用户明确要求："app 上播放的音量要保证是正式烧录
+   * 后的音量"——那就只能放真正混过、归一化过的那一份。
+   *
+   * 混好的还没出来（正在烧、或刚改完设置）就退回母带：画面能看，
+   * 声音等混完自然就有了。哑着总比"预览里听着正好、下载下来完全不同"强。
+   */
+  const mixed = join(dir, 'mixed.mp4')
+  return existsSync(mixed) ? mixed : master
 }

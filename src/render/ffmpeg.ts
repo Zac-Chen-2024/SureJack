@@ -59,6 +59,37 @@ export function buildArgs (job: RenderJob): string[] {
   const durationSec = (job.durationMs / 1000).toFixed(1)
   const hasBgm = Boolean(job.bgmPath)
 
+  /*
+   * 【母带不带音轨】（silentMaster）。
+   *
+   * 原来配音是和画面一起烧进母带的，于是"调配音音量"必须重烧十几分钟的
+   * 画面——等于不可调。现在母带只有画面+字幕，配音和音乐都是【混音那一步】
+   * 才进来的独立轨，两边的音量各自可调，改一下只花几秒。
+   *
+   * 这也顺手治了一个真问题：老路子里配音和 BGM 走 amix，而 amix 默认
+   * 把每一路除以路数——实测配音因此被压低 5.9 分贝（-21.8 → -27.7 LUFS）。
+   * 也就是【选了背景音乐的片子比没选的轻 6 分贝】，而没人知道为什么。
+   */
+  if (job.silentMaster === true) {
+    return [
+      '-hide_banner', '-loglevel', 'error', '-y',
+      '-progress', 'pipe:1',
+      '-stream_loop', '-1', '-i', clip.path,
+      '-filter_complex', [
+        buildFitFilter(clip, job.aspect, '0:v', 'fit'),
+        `[fit]ass=${job.assPath}:fontsdir=${FONTS_DIR}[v]`,
+      ].join(';'),
+      '-map', '[v]',
+      '-an',                      // 明确不要音轨
+      '-t', durationSec,
+      '-r', '30',
+      '-c:v', 'libx264', '-preset', 'fast', '-crf', '21',
+      '-pix_fmt', 'yuv420p',
+      '-movflags', '+faststart',
+      job.outPath,
+    ]
+  }
+
   const filters = [
     buildFitFilter(clip, job.aspect, '0:v', 'fit'),
     `[fit]ass=${job.assPath}:fontsdir=${FONTS_DIR}[v]`,
