@@ -20,6 +20,9 @@ import { registerLibraryRoutes } from './library/routes.js'
 import { registerAudioRoutes } from './audio/routes.js'
 import { ExportQueue } from './queue/queue.js'
 import { resetStuckVoices } from './tts/recover.js'
+import { sweepDelivered } from './compose/deliver.js'
+import { openUserDb } from './db/user-db.js'
+import { assetDir } from './assets/storage.js'
 import { registerExportRoutes } from './queue/routes.js'
 import { sweepFilms } from './compose/film.js'
 import { openAuthDb } from './db/auth-db.js'
@@ -265,6 +268,23 @@ export function buildServer (opts: BuildOpts = {}): FastifyInstance {
       if (stuck.length > 0) {
         app.log.warn({ stuck }, '开机复位：这些项目的配音被中断过（多半是上次部署重启），已标成未完成，用户可重试')
       }
+      /*
+       * 清扫上次留下的现混临时文件。成片是下载那一刻现混的、传完就删，
+       * 但进程被杀时那个 rm 不会跑——一份 100MB，攒几次就把盘吃满，
+       * 而磁盘满的症状是 502，和"下载"看着毫无关系。
+       */
+      void (async () => {
+        const dirs: string[] = []
+        for (const u of whitelist) {
+          const db = openUserDb(u, whitelist)
+          try {
+            for (const p of db.listProjects()) dirs.push(assetDir(u, whitelist, p.id))
+          } finally { db.close() }
+        }
+        const n = await sweepDelivered(dirs)
+        if (n > 0) app.log.info({ 清掉: n }, '开机清扫：上次遗留的下载临时文件')
+      })().catch(() => { /* 清扫失败不该拦住启动 */ })
+
       void sweepFilms({ whitelist, libraryDataDir, queue }, whitelist)
         .then((r) => {
           if (r.enqueued.length > 0) {

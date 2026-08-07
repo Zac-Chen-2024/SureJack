@@ -9,6 +9,7 @@ import { getSession, requireAuth } from '../auth/session.js'
 import { downloadableFilm, playableMaster, enqueueFilm, filmInfo, resolveFilm, FILM_STAMP_FILE, type FilmDeps } from '../compose/film.js'
 import { checkpointOf, CHECKPOINT_LABEL, NEXT_STEP } from '../compose/checkpoint.js'
 import { finishedSince } from './notify.js'
+import { deliverFilm, dropDelivered } from '../compose/deliver.js'
 import { writeStamp } from '../compose/stamp.js'
 import {
   COVER_IMAGE, COVER_THUMB_FILE, COVER_THUMB_TITLE_FILE, COVER_THUMB_WIDTH,
@@ -136,8 +137,39 @@ export function registerExportRoutes (app: FastifyInstance, deps: Deps): void {
       const project = withUserDb(name, (db) => db.getProject(req.params.id))
       if (!project) return reply.code(404).send({ error: '项目不存在' })
 
-      const path = await downloadableFilm(deps, name, req.params.id)
-      if (path === null) return reply.code(404).send({ error: '成片还没合好' })
+      /*
+       * ⚠️【成片是这一刻现混出来的，盘上不常驻】。
+       *
+       * 用户的要求：界面里的视频永远只是画面，配音和音乐独立，只有下载时
+       * 才真的烧进去，给完就删。所以这里不是"找一个现成文件"，而是
+       * 【按此刻的音量设置现混一份】——顺带保证了下载到的永远不是过期版本。
+       *
+       * 代价：一条十分钟的片子现混要几秒（视频流 -c:v copy，不重编码），
+       * 用户点下载到开始传之间会多等这几秒。值得：它换来的是调音量零成本，
+       * 而调音量是高频操作、下载是低频操作。
+       */
+      const r = resolveFilm(deps, name, req.params.id)
+      if (!r.ok) return reply.code(404).send({ error: r.error })
+      let path: string
+      try {
+        path = await deliverFilm({
+          dir: r.film.dir,
+          voicePath: r.film.voicePath, voiceGain: project.voiceGain,
+          bgmPath: r.film.bgmPath, bgmVolume: project.bgmVolume,
+          coverTitle: r.film.coverTitle, aspect: r.film.aspect,
+        })
+      } catch (e) {
+        req.log.error({ err: e }, '下载时现混失败')
+        return reply.code(409).send({ error: e instanceof Error ? e.message : '还不能下载' })
+      }
+
+      /*
+       * 【传完就删】。用 'close' 而不是 'end'：客户端中途断开时 'end' 不会
+       * 触发，临时文件会一直留在盘上，下几次就把磁盘堆满了——那正是这套
+       * 改动本来要解决的问题。
+       */
+      const stream = createReadStream(path)
+      stream.on('close', () => { void dropDelivered(path) })
 
       reply.header('Content-Type', 'video/mp4')
       reply.header('Content-Disposition',
@@ -150,8 +182,11 @@ export function registerExportRoutes (app: FastifyInstance, deps: Deps): void {
        * Accept-Ranges 顺手给上：断了能续传，不用整条重来。
        */
       reply.header('Content-Length', statSync(path).size)
-      reply.header('Accept-Ranges', 'bytes')
-      return reply.send(createReadStream(path))
+      /*
+       * ⚠️【不再给 Accept-Ranges】。文件是现混的、传完就删，第二个 Range
+       * 请求进来时它已经不在了——续传只会拿到 404。宁可不声称支持。
+       */
+      return reply.send(stream)
     })
 
   /**

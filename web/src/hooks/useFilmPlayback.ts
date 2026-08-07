@@ -31,6 +31,8 @@ import { usePipeline } from '../store/pipeline'
 export interface FilmPlayback {
   videoRef: RefObject<HTMLVideoElement | null>
   bgmRef: RefObject<HTMLAudioElement | null>
+  /** 配音轨。母带只有画面，配音是独立的一条流 */
+  voiceRef: RefObject<HTMLAudioElement | null>
   playing: boolean
   /** 当前秒 / 总秒 */
   cur: number
@@ -39,6 +41,8 @@ export interface FilmPlayback {
   src: string | null
   /** 选中的库 BGM，没选就 null */
   bgmSrc: string | null
+  /** 配音流的地址。还没配音时是 null */
+  voiceSrc: string | null
   /** 首帧封面（服务端 ffmpeg 抓的）。给 <video poster> 用——进页面立刻是画面，
    *  而不是安卓 WebView 那个丑的默认播放键占位图 */
   poster: string | null
@@ -88,53 +92,89 @@ export function useFilmPlayback (
 
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const bgmRef = useRef<HTMLAudioElement | null>(null)
+  /*
+   * ⚠️【配音现在是独立的一条轨，不在画面里】。
+   *
+   * 母带只有画面（见 compose/film.ts）——配音和音乐都只在【下载】那一刻
+   * 才烧进文件。所以预览要自己把三条流叠起来播：画面 + 配音 + 音乐。
+   *
+   * 这么做换来的是【调音量零成本】：从前拖一下滑块要重混一个 100MB 的文件，
+   * 现在只是改一个 gain。代价是同步得自己管，见下面的漂移纠正。
+   */
+  const voiceRef = useRef<HTMLAudioElement | null>(null)
   const [playing, setPlaying] = useState(false)
   const [cur, setCur] = useState(0)
   const [dur, setDur] = useState(0)
 
   // ── Web Audio 图：source(=bgm 元素) → gain → destination ─────────────
   const ctxRef = useRef<AudioContext | null>(null)
-  const gainRef = useRef<GainNode | null>(null)
-  const srcNodeRef = useRef<MediaElementAudioSourceNode | null>(null)
-  // 记住 source 是给哪个元素建的——换 BGM 会重挂 <audio>，元素变了就得重建
-  const srcElRef = useRef<HTMLAudioElement | null>(null)
+  /** 每条轨一套 {gain, source, 建给了哪个元素}。换源会重挂 <audio>，元素变了要重建 */
+  interface Lane {
+    gain: GainNode | null
+    src: MediaElementAudioSourceNode | null
+    el: HTMLAudioElement | null
+  }
+  const bgmLane = useRef<Lane>({ gain: null, src: null, el: null })
+  const voiceLane = useRef<Lane>({ gain: null, src: null, el: null })
 
   const bgmVol = Math.min(1, Math.max(0, project?.bgmVolume ?? 0.15))
   const bgmVolRef = useRef(bgmVol)
   bgmVolRef.current = bgmVol
+  /*
+   * ⚠️【上限 4，和后端钳位一致】。播放器和混音必须用【同一个数】，
+   * 否则"听到的 = 下载到的"当场破功——这正是这套改动的全部意义。
+   */
+  const voiceVol = Math.min(4, Math.max(0, project?.voiceGain ?? 1))
+  const voiceVolRef = useRef(voiceVol)
+  voiceVolRef.current = voiceVol
 
-  /** 把当前 bgm 元素接进 Web Audio 图（幂等）。拿不到就返回 false，走回退。 */
-  function ensureGraph (): boolean {
-    const el = bgmRef.current
+  /** 把一个音频元素接进 Web Audio 图（幂等）。拿不到就返回 false，走回退 */
+  function ensureLane (lane: { current: Lane }, el: HTMLAudioElement | null): boolean {
     if (!el) return false
     try {
       const AC = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
       if (!AC) return false
-      if (!ctxRef.current) {
-        ctxRef.current = new AC()
-        gainRef.current = ctxRef.current.createGain()
-        gainRef.current.connect(ctxRef.current.destination)
+      if (!ctxRef.current) ctxRef.current = new AC()
+      if (!lane.current.gain) {
+        lane.current.gain = ctxRef.current.createGain()
+        lane.current.gain.connect(ctxRef.current.destination)
       }
-      if (srcElRef.current !== el) {
-        try { srcNodeRef.current?.disconnect() } catch { /* 旧节点已随元素卸载 */ }
-        srcNodeRef.current = ctxRef.current.createMediaElementSource(el)
-        srcNodeRef.current.connect(gainRef.current!)
-        srcElRef.current = el
+      if (lane.current.el !== el) {
+        try { lane.current.src?.disconnect() } catch { /* 旧节点已随元素卸载 */ }
+        lane.current.src = ctxRef.current.createMediaElementSource(el)
+        lane.current.src.connect(lane.current.gain)
+        lane.current.el = el
       }
       void ctxRef.current.resume()
       return true
     } catch { return false }
   }
 
-  /** 上音量：有 gain 就走 gain（元素放满），否则回退到 element.volume */
+  /**
+   * 上音量：有 gain 就走 gain（元素放满），否则回退到 element.volume。
+   * ⚠️ 回退路径【夹到 1】：HTMLMediaElement.volume 超过 1 会抛，
+   * 而配音增益是可以到 4 的。拿不到 Web Audio 的老环境只能放弃增益，
+   * 但不能因此让整个播放器崩掉。
+   */
   function applyVolume (): void {
-    const el = bgmRef.current
-    if (gainRef.current) {
-      gainRef.current.gain.value = bgmVolRef.current
-      if (el) el.volume = 1
-    } else if (el) {
-      el.volume = bgmVolRef.current
-    }
+    const b = bgmRef.current
+    if (bgmLane.current.gain) {
+      bgmLane.current.gain.gain.value = bgmVolRef.current
+      if (b) b.volume = 1
+    } else if (b) b.volume = Math.min(1, bgmVolRef.current)
+
+    const v = voiceRef.current
+    if (voiceLane.current.gain) {
+      voiceLane.current.gain.gain.value = voiceVolRef.current
+      if (v) v.volume = 1
+    } else if (v) v.volume = Math.min(1, voiceVolRef.current)
+  }
+
+  /** 两条轨一起接图 */
+  function ensureGraph (): boolean {
+    const a = ensureLane(bgmLane, bgmRef.current)
+    const b = ensureLane(voiceLane, voiceRef.current)
+    return a || b
   }
 
   // 卸载时收掉 AudioContext，别让它挂着
@@ -143,12 +183,21 @@ export function useFilmPlayback (
   // 换项目：停下、回到开头
   useEffect(() => { setPlaying(false); setCur(0); setDur(0) }, [project?.id])
 
-  // 调 BGM 音量：优先 gain，回退 element.volume
-  useEffect(() => { applyVolume() }, [project?.bgmVolume])
+  // 调音量：优先 gain，回退 element.volume。两条轨任一变了都要重上
+  useEffect(() => { applyVolume() }, [project?.bgmVolume, project?.voiceGain])
 
-  function syncBgm (videoSec: number): void {
+  /**
+   * 把两条音轨拉到视频的位置。
+   *
+   * ⚠️ 两者【对齐方式不同】：BGM 比片子短会循环铺满（和烧录时的
+   * -stream_loop -1 一致），所以取模；配音和画面是一一对应的，直接对齐。
+   * 取模用错地方会让配音在长片子里从头开始重播。
+   */
+  function syncAudio (videoSec: number): void {
     const b = bgmRef.current
     if (b && b.duration > 0 && Number.isFinite(b.duration)) b.currentTime = videoSec % b.duration
+    const v = voiceRef.current
+    if (v && Number.isFinite(v.duration)) v.currentTime = Math.min(videoSec, v.duration)
   }
 
   // 外部跳转（点字幕某一行）。只认 nonce 变化
@@ -158,7 +207,7 @@ export function useFilmPlayback (
     lastNonce.current = seek.nonce
     const v = videoRef.current
     if (v) v.currentTime = seek.ms / 1000
-    syncBgm(seek.ms / 1000)
+    syncAudio(seek.ms / 1000)
   }, [seek])
 
   const ver = masterOnDisk ?? project?.updatedAt ?? '0'
@@ -169,33 +218,56 @@ export function useFilmPlayback (
    */
   const src = project ? `/api/projects/${project.id}/film/master/stream?v=${encodeURIComponent(ver)}#t=0.001` : null
   const bgmSrc = project?.bgmLibraryId ? `/api/library/items/${project.bgmLibraryId}` : null
+  /*
+   * 配音的流。键在 ttsState 上：重新配音会换一条新的 voice.mp3，
+   * 不带键的话浏览器会一直用缓存里那条旧的。
+   */
+  const voiceSrc = project && project.ttsState === 'ready'
+    ? `/api/projects/${project.id}/voice/stream?v=${encodeURIComponent(project.updatedAt)}`
+    : null
   // 键在母带版本上：母带重烧才换新封面，否则长缓存命中、瞬开
   const poster = project ? `/api/projects/${project.id}/film/poster.jpg?v=${encodeURIComponent(ver)}` : null
 
   const toggle = (): void => {
-    const v = videoRef.current, b = bgmRef.current
+    const v = videoRef.current
     if (!v) return
+    const b = bgmRef.current, a = voiceRef.current
     if (v.paused) {
+      /*
+       * ⚠️【三条流必须在同一个用户手势里一起 play】。浏览器的自动播放策略
+       * 只放行"用户点击直接触发"的播放；放到 await 之后或定时器里再启动
+       * 配音，iOS 会静默拒绝——画面在动、没有声音，而且完全不报错。
+       */
+      ensureGraph(); applyVolume(); syncAudio(v.currentTime)
       void v.play()
-      if (b) { ensureGraph(); applyVolume(); syncBgm(v.currentTime); void b.play() }
+      if (b) void b.play()
+      if (a) void a.play()
       setPlaying(true)
     } else {
-      v.pause(); b?.pause(); setPlaying(false)
+      v.pause(); b?.pause(); a?.pause(); setPlaying(false)
     }
   }
   const seekTo = (sec: number): void => {
     const v = videoRef.current
     if (v) v.currentTime = sec
-    syncBgm(sec); setCur(sec)
+    syncAudio(sec); setCur(sec)
   }
   const onTimeUpdate = (sec: number): void => {
     setCur(sec)
     onTimeChange?.(Math.round(sec * 1000))
-    // 持续纠偏：只在漂移超阈值时硬拉回，避免频繁 set 造成咔哒
+    /*
+     * 持续纠偏：只在漂移超阈值时硬拉回，避免频繁 set 造成咔哒。
+     * 【视频是主时钟】——三个媒体元素各走各的，不定期拉回的话，
+     * 十几分钟的片子到后面能差出几百毫秒，字幕和人声就对不上了。
+     */
     const b = bgmRef.current
     if (b && !b.paused && b.duration > 0 && Number.isFinite(b.duration)) {
       const expected = sec % b.duration
       if (Math.abs(b.currentTime - expected) > DRIFT_TOLERANCE) b.currentTime = expected
+    }
+    const a = voiceRef.current
+    if (a && !a.paused && Number.isFinite(a.duration)) {
+      if (Math.abs(a.currentTime - sec) > DRIFT_TOLERANCE) a.currentTime = Math.min(sec, a.duration)
     }
   }
   /*
@@ -218,25 +290,44 @@ export function useFilmPlayback (
   const onCanPlay = (): void => { setBuffering(false) }
 
   const handlePlay = (): void => { setPlaying(true) }
-  const handleStop = (): void => { setPlaying(false); bgmRef.current?.pause() }
+  /*
+   * ⚠️【暂停/卡顿要把【两条】音轨都停住】。漏掉配音那条的后果很难受：
+   * 视频缓冲转圈时人声还在自顾自地念，回来之后就永远对不上了。
+   */
+  const handleStop = (): void => {
+    setPlaying(false); bgmRef.current?.pause(); voiceRef.current?.pause()
+  }
   // 视频缓冲：BGM 先停，别让它在黑屏时独自往前跑
-  const handleWaiting = (): void => { setBuffering(true); bgmRef.current?.pause() }
+  const handleWaiting = (): void => {
+    setBuffering(true); bgmRef.current?.pause(); voiceRef.current?.pause()
+  }
   // 缓冲结束：对齐当前视频位置再续上（仅当我们本就该在播）
   const handlePlaying = (): void => {
-    const v = videoRef.current, b = bgmRef.current
+    const v = videoRef.current
     setPlaying(true)
     setBuffering(false)
-    if (v && b) { ensureGraph(); applyVolume(); syncBgm(v.currentTime); void b.play() }
+    if (v) {
+      ensureGraph(); applyVolume(); syncAudio(v.currentTime)
+      void bgmRef.current?.play()
+      void voiceRef.current?.play()
+    }
   }
+  /**
+   * 某条音轨的元数据到了（换了曲子、或配音刚生成）。
+   * 立刻接图、上音量；正在播的话对到当前进度接着放。
+   */
   const onBgmReady = (): void => {
     ensureGraph(); applyVolume()
-    // 用户在播放中途换的曲子：立刻对到当前进度并接着放
-    const v = videoRef.current, b = bgmRef.current
-    if (playing && v && b) { syncBgm(v.currentTime); void b.play() }
+    const v = videoRef.current
+    if (playing && v) {
+      syncAudio(v.currentTime)
+      void bgmRef.current?.play()
+      void voiceRef.current?.play()
+    }
   }
 
   return {
-    videoRef, bgmRef, playing, cur, dur, src, bgmSrc, poster, composing, progress,
+    videoRef, bgmRef, voiceRef, playing, cur, dur, src, bgmSrc, voiceSrc, poster, composing, progress,
     toggle, seekTo, onLoadedMeta: setDur, onTimeUpdate,
     handlePlay, handleStop, handleWaiting, handlePlaying, onBgmReady,
     metaReady: dur > 0, buffering, bufferedPct, onProgress, onCanPlay,

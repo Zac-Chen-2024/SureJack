@@ -3,6 +3,8 @@ import { mkdir, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
+import { existsSync } from 'node:fs'
+import { sendFileRange } from '../assets/storage.js'
 import { openUserDb } from '../db/user-db.js'
 import { getSession, requireAuth } from '../auth/session.js'
 import { assetDir } from '../assets/storage.js'
@@ -68,6 +70,25 @@ export function registerTtsRoutes (app: FastifyInstance, deps: Deps): void {
       } finally {
         await rm(dir, { recursive: true, force: true }).catch(() => {})
       }
+    })
+
+  /**
+   * 配音的【音频流】。给播放器单独拉一条轨用。
+   *
+   * ⚠️ 母带现在只有画面，配音不在里面——预览要自己把画面/配音/音乐三条
+   * 叠起来播（见 hooks/useFilmPlayback.ts）。所以这条接口是预览能出声的前提，
+   * 不是可选的附属品。
+   *
+   * 走 sendFileRange：播放器要 seek，必须支持 Range，否则拖进度条会整条重下。
+   */
+  app.get<{ Params: { id: string } }>(
+    '/api/projects/:id/voice/stream', { preHandler: requireAuth }, async (req, reply) => {
+      const name = getSession(req)!
+      const project = withUserDb(name, (db) => db.getProject(req.params.id))
+      if (!project) return reply.code(404).send({ error: '项目不存在' })
+      const path = join(assetDir(name, whitelist, req.params.id), 'voice.mp3')
+      if (!existsSync(path)) return reply.code(404).send({ error: '还没有配音' })
+      return sendFileRange(reply, path, req.headers.range, 'audio/mpeg')
     })
 
   /**

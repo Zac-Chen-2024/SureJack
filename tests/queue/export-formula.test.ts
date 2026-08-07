@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach, beforeEach } from 'vitest'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { mkdtemp, mkdir, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, rm, writeFile, readdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { FastifyInstance } from 'fastify'
@@ -12,6 +12,13 @@ import { bucketDir } from '../../src/library/paths.js'
 import { assetDir } from '../../src/assets/storage.js'
 
 const run = promisify(execFile)
+
+/** 一个媒体文件里有哪些流。用来断言"母带只有画面" */
+async function streamKinds (path: string): Promise<string[]> {
+  const { stdout } = await run('ffprobe', ['-v', 'error',
+    '-show_entries', 'stream=codec_type', '-of', 'csv=p=0', path])
+  return stdout.split('\n').map((x) => x.trim()).filter(Boolean)
+}
 
 let app: FastifyInstance
 let dataDir = ''
@@ -246,25 +253,78 @@ describe('导出 —— 公式模式端到端', () => {
       .toEqual(['1-开头', '2-常规', '3-地铁跑酷'])
   }, 180_000)
 
-  it('没选 BGM 时成片是静音的（配音本身就是静音）', async () => {
-    const a = await makeApp()
-    const cookie = await loginAs(a, '测试公式甲')
-    const id = await projectWithVoice(a, cookie)
-    const job = await exportAndWait(a, cookie, id)
-    expect(job.status).toBe('done')
-    // 静音轨在 volumedetect 下是 -91dB 上下
-    expect(await meanVolumeDb(job.outputPath ?? '')).toBeLessThan(-80)
-  }, 180_000)
-
-  it('选了素材库 BGM 时成片真的有背景音乐', async () => {
+  /*
+   * ⚠️【合成产物是【纯画面】，没有音轨】。
+   *
+   * 这两条断言原来查的是"合成出来的成片有没有背景音乐"。契约变了：
+   * 配音和音乐只在【下载】那一刻才烧进去，盘上常驻的只有画面。
+   * 所以"有没有声音"这件事搬到了下载那一侧（见下面那个 describe），
+   * 这里改成守新契约：合成产物必须【一条音轨都没有】。
+   *
+   * 为什么值得守：母带要是意外带上了音轨，下载时再混一次就会出现
+   * 两份配音叠在一起——而这种错听起来像"回声"，很容易被当成素材问题。
+   */
+  it('【合成只出画面】母带里一条音轨都没有', async () => {
     const a = await makeApp()
     const cookie = await loginAs(a, '测试公式甲')
     const id = await projectWithVoice(a, cookie, { bgmLibraryId: '背景音乐/一笑倾城 现言 甜文.wav' })
     const job = await exportAndWait(a, cookie, id)
-    expect(job.error).toBe(null)
     expect(job.status).toBe('done')
-    // 配音是静音的，所以只要有声音就一定来自素材库的 BGM
-    expect(await meanVolumeDb(job.outputPath ?? '')).toBeGreaterThan(-60)
+    expect(await streamKinds(job.outputPath ?? '')).toEqual(['video'])
+  }, 180_000)
+})
+
+describe('下载时才把声音烧进去', () => {
+  /*
+   * 老契约里这条查的是"合成出来的成片有没有背景音乐"。现在盘上没有成片，
+   * 同一件事要在【现混出来的那一份】上查——而且它更接近用户真正拿到的东西。
+   */
+  it('【选了 BGM，下载到的那份就真的有音乐】', async () => {
+    const a = await makeApp()
+    const cookie = await loginAs(a, '测试公式甲')
+    const id = await projectWithVoice(a, cookie, { bgmLibraryId: '背景音乐/一笑倾城 现言 甜文.wav' })
+    const job = await exportAndWait(a, cookie, id)
+    expect(job.status).toBe('done')
+
+    const res = await a.inject({
+      method: 'GET', url: `/api/projects/${id}/film/download`, headers: { cookie: `sj_session=${cookie}` },
+    })
+    expect(res.statusCode).toBe(200)
+    const tmp = join(tmpdir(), `dl-${Date.now()}.mp4`)
+    await writeFile(tmp, res.rawPayload)
+    try {
+      // 配音本身是静音的，所以只要有声音就一定来自素材库的 BGM
+      expect(await meanVolumeDb(tmp)).toBeGreaterThan(-60)
+    } finally {
+      await rm(tmp, { force: true })
+    }
+  }, 180_000)
+
+  /*
+   * 【混完就删】：盘上不该留下现混的临时文件。不守这条的话，下几次就把
+   * 磁盘堆满了——而"磁盘满"的症状是 502，和下载看着毫无关系（踩过）。
+   */
+  it('【下载完不留临时文件】', async () => {
+    const a = await makeApp()
+    const cookie = await loginAs(a, '测试公式甲')
+    const id = await projectWithVoice(a, cookie)
+    await exportAndWait(a, cookie, id)
+    const res = await a.inject({
+      method: 'GET', url: `/api/projects/${id}/film/download`, headers: { cookie: `sj_session=${cookie}` },
+    })
+    expect(res.statusCode).toBe(200)
+    /*
+     * 删除挂在流的 close 上，发生在响应之后——inject 返回时可能还没删完。
+     * 所以给它一小段时间，而不是断言"立刻就没了"（那样只会写出一条
+     * 时好时坏的测试）。超过 3 秒还在，就是真没删。
+     */
+    const dir = assetDir('测试公式甲', ['测试公式甲'], id)
+    const left = async (): Promise<string[]> =>
+      (await readdir(dir)).filter((f) => f.startsWith('deliver-'))
+    for (let i = 0; i < 30 && (await left()).length > 0; i++) {
+      await new Promise((r) => setTimeout(r, 100))
+    }
+    expect(await left()).toEqual([])
   }, 180_000)
 })
 

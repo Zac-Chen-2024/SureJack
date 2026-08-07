@@ -534,44 +534,21 @@ async function buildFilm (
    * ── 第二段：混 BGM（便宜）─────────────────────────────────────────
    * 视频流 -c:v copy，只重编码音频。实测 10 分钟的片子 9 秒。
    *
-   * 【没有 BGM 时不复制一份】：直接把母带当成片。复制 500MB 只为得到
-   * 一个字节相同的文件，纯浪费磁盘和时间。下载/播放那两个接口会问
-   * downloadableFilm 要路径，它知道该给哪一个。
-   */
-  const mixedPath = join(f.dir, 'mixed.mp4')
   /*
-   * 【这一步现在永远要跑】。母带没有音轨了，不混音就是一条哑片——
-   * 不像从前"没选 BGM 就直接用母带"。代价可以接受：视频流 -c:v copy，
-   * 实测十分钟的片子几秒。
-   */
-  await mixAudio({
-    masterPath,
-    voicePath: f.voicePath,
-    voiceGain: f.project.voiceGain,
-    bgmPath: f.bgmPath,
-    bgmVolume: f.project.bgmVolume,
-    outPath: mixedPath,
-  })
-  const body = mixedPath
-
-  /*
-   * ── 第三段：把封面拼到最前面（也便宜）──────────────────────────
-   * 两帧封面图 + 标题，让平台抓缩略图时拿到我们设计过的那一帧。
-   * 拼接走 concat + `-c copy`，十几分钟的片子一两秒；封面本身只有两帧，
-   * 编码代价可以忽略。
+   * ── 合成到【画面】为止 ─────────────────────────────────────────────
    *
-   * 【封面必须在混音之后】：混音是 -c:v copy，它不动视频流；要是先拼封面
-   * 再混音，混音那步会把封面帧一起重新封装，白搭一次 IO。反过来则是纯增量。
+   * ⚠️【不在这里混音、也不在这里拼成片】。用户的要求：
+   * "bgm 和配音只有在下载的时候才烧录，下载完就删除，界面里的视频永远
+   * 只是视频，和音频、音乐都是独立的。"
    *
-   * 【音频参数照抄正片】：见 cover.ts 的 probeAudio——写死 44100/stereo
-   * 遇上 Azure 的 24000/mono 会拼出没声音的后半段。
+   * 好处不只是省盘（实测一条两分钟的片子，master+mixed+export 三份 302MB，
+   * 后两份几乎就是 master 加条音轨）——更要紧的是【调音量变成零成本】：
+   * 从前拖一下滑块就要重混一个 100MB 的文件，现在纯客户端改增益。
+   *
+   * 【封面也留到下载时拼】，而且是被迫的：封面片段必须照抄正片的音频参数
+   * （采样率/声道，见 cover.ts 的 probeAudio），而合成阶段【根本还没有音频】。
+   * 这条约束正好印证了新的分工——封面属于"成品"那一侧，不属于"画面"这一侧。
    */
-  const coverPath = join(f.dir, COVER_CLIP_FILE)
-  await renderCoverClip({
-    imagePath: COVER_IMAGE, title: f.coverTitle, aspect: f.aspect,
-    outPath: coverPath, audio: await probeAudio(body),
-  })
-  await prependCover({ coverPath, filmPath: body, outPath })
   onProgress(100)
 
   /*
@@ -580,12 +557,11 @@ async function buildFilm (
    */
   await writeStamp(f.dir, FILM_STAMP_FILE, { fingerprint: f.fingerprint, status: 'done', jobId })
   /*
-   * 【成片一定是 outPath】。加封面之前，没有 BGM 时会把母带直接当成片
-   * （省一次 500MB 的复制）；现在成片一定比母带多两帧，两者不再是同一个
-   * 文件，必须回到 outPath。
+   * 【登记的是母带】。盘上现在【没有成片文件】——它在下载那一刻才现混，
+   * 混完就删。所以这里登记母带：它是这条片子在盘上唯一常驻的画面产物。
    */
-  registerFilmAsset(deps, userName, projectId, outPath, f.durationMs, `${f.project.name}.mp4`)
-  return outPath
+  registerFilmAsset(deps, userName, projectId, masterPath, f.durationMs, `${f.project.name}.mp4`)
+  return masterPath
 }
 
 /** 合 + 把失败原因写进指纹文件。失败照旧往上抛，队列要据此置 error。 */
@@ -981,19 +957,17 @@ export async function playableMaster (
   const stamp = await readStamp(dir, MASTER_STAMP_FILE)
   if (stamp === null) return null
   if (stamp.status !== undefined && stamp.status !== 'done') return null
-  const master = await reusableOutput(dir, MASTER_STAMP_FILE, FILM_MASTER_FILE, stamp.fingerprint)
-  if (master === null) return null
-
   /*
-   * ⚠️【预览要放混好的那一份，不是母带】。
+   * ⚠️【永远返回母带，绝不返回混好的文件】。
    *
-   * 母带现在【没有音轨】——配音和音乐都在混音那一步才进来。直接给母带的话
-   * 预览是彻底哑的。而且用户明确要求："app 上播放的音量要保证是正式烧录
-   * 后的音量"——那就只能放真正混过、归一化过的那一份。
+   * 中间试过一版"有 mixed.mp4 就播它"——那一版母带是哑的、成片是混好的，
+   * 逻辑上说得通。但架构又变了：现在预览【自己叠两条音轨】（见
+   * hooks/useFilmPlayback.ts），如果这里返回一个已经含配音的文件，
+   * 播放器会在它之上再叠一条配音——【声音重影】，而且听起来像回声，
+   * 很容易被当成素材问题去查。
    *
-   * 混好的还没出来（正在烧、或刚改完设置）就退回母带：画面能看，
-   * 声音等混完自然就有了。哑着总比"预览里听着正好、下载下来完全不同"强。
+   * 盘上可能还留着老架构产出的 mixed.mp4 / export.mp4（开机会清掉，
+   * 见 server.ts 的清扫），这里也【绝不去碰它们】。
    */
-  const mixed = join(dir, 'mixed.mp4')
-  return existsSync(mixed) ? mixed : master
+  return reusableOutput(dir, MASTER_STAMP_FILE, FILM_MASTER_FILE, stamp.fingerprint)
 }

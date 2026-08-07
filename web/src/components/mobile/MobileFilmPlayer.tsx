@@ -74,6 +74,20 @@ export function MobileFilmPlayer ({ onBack }: { onBack: () => void }) {
         onLoadedData={(e) => pb.onProgress(e.currentTarget)}
       />
 
+      {/*
+        * 配音：母带【只有画面】，配音是独立的一条流，在这儿叠回来。
+        * 不 loop——它和画面一一对应，循环只会在片尾重播开头。
+        */}
+      {pb.voiceSrc && (
+        <audio
+          key={pb.voiceSrc}
+          ref={pb.voiceRef}
+          src={pb.voiceSrc}
+          preload="auto"
+          onLoadedMetadata={pb.onBgmReady}
+        />
+      )}
+
       {/* 背景音乐：另叠一条，接进 Web Audio 图混音（音量走 gain，iOS 才有效）。
           key 换源即重建，避免相位串味；onBgmReady 负责接图/上音量/续播。 */}
       {pb.bgmSrc && (
