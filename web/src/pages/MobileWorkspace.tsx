@@ -125,6 +125,8 @@ export function MobileWorkspace () {
    * 未知就老老实实显示封面 + 转圈，等问出来再决定。
    */
   const filmUnknown = usePipeline((s) => s.film === null)
+  /** 后端算好的"还缺什么"。空态那一屏直接显示它，别再讲一句放之四海的废话 */
+  const filmReason = usePipeline((s) => s.film?.reason ?? null)
   // 流程在跑（配音中/合成中/出错）→ 盖进度蒙层，而不是"还没成片"的空态
   const inProgress = !!project && (
     project.ttsState === 'generating' || project.ttsState === 'error'
@@ -218,7 +220,17 @@ export function MobileWorkspace () {
                 ? <MobileGenerating onBack={back} projectName={project.name} />
                 : filmUnknown
                   ? <PreviewLoading onBack={back} projectId={project.id} projectName={project.name} />
-                  : <EmptyPreview onBack={back} projectName={project.name} onWriteScript={() => push({ k: 'sheet', name: 'script' })} />}
+                  : (
+                    <EmptyPreview
+                      onBack={back} projectName={project.name}
+                      reason={filmReason}
+                      hasScript={(project.scriptText ?? '').trim().length > 0}
+                      onWriteScript={() => push({
+                        k: 'sheet',
+                        name: (project.scriptText ?? '').trim().length > 0 ? 'voice' : 'script',
+                      })}
+                    />
+                  )}
 
             <nav
               className="absolute inset-x-0 bottom-0 z-30 flex justify-around px-2.5 pt-3.5"
@@ -350,8 +362,21 @@ function PreviewLoading ({ onBack, projectId, projectName }: {
 }
 
 /** 成片还没好时的引导空态。顶栏药丸（返回列表）+ 引导。 */
-function EmptyPreview ({ onBack, projectName, onWriteScript }: {
+/**
+ * 兜底的空态：这条片子现在没有东西可放。
+ *
+ * ⚠️【必须说清楚"为什么没有"】。原来这一屏无论如何都写"还没有成片，
+ * 写好文案后点配音"——对一条【已经有文案、有配音、只是卡住没烧】的项目，
+ * 这句话既不对、也没给出路，用户点进来只看到一屏废话。
+ *
+ * 后端在 /film 里已经算好了 reason（"还没有配音，先点「生成配音」"
+ * 之类），这里直接把它摆出来：他卡在哪一步、下一步做什么，一眼看到。
+ */
+function EmptyPreview ({ onBack, projectName, onWriteScript, reason, hasScript }: {
   onBack: () => void; projectName: string; onWriteScript: () => void
+  /** 后端说的"还缺什么"。null = 它也没话说 */
+  reason: string | null
+  hasScript: boolean
 }) {
   return (
     <div className="absolute inset-0 bg-ink-950">
@@ -370,14 +395,18 @@ function EmptyPreview ({ onBack, projectName, onWriteScript }: {
         <IconPreview className="size-9 text-ink-600" />
         <p className="text-sm font-medium text-ink-100">还没有成片</p>
         <p className="text-xs leading-relaxed text-ink-400">
-          写好文案后点「配音」生成，或在「配音」里选入你自己的音频和字幕。合成好了这里就会自动出现成片。
+          {reason ?? '写好文案后点「配音」生成，或在「配音」里选入你自己的音频和字幕。合成好了这里就会自动出现成片。'}
         </p>
+        {/*
+          * 【有文案的就别劝他"开始写文案"了】。他卡住的是别的事，
+          * 按钮指向下一步该做的那件——配音那一栏。
+          */}
         <button
           type="button"
           onClick={onWriteScript}
           className="mt-1 rounded-xl bg-accent px-5 py-2.5 text-sm font-bold text-ink-950 transition-colors hover:bg-accent-dim"
         >
-          开始写文案
+          {hasScript ? '去配音那一栏' : '开始写文案'}
         </button>
       </div>
     </div>

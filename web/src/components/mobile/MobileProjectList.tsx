@@ -44,7 +44,23 @@ function statusOf (p: Project, film?: { composing: boolean; state: string }): St
    * 只看 ttsState 就会显示成「已完成」——和事实相反，用户会以为片子能下载。
    */
   if (p.ttsState === 'error' || film?.state === 'error') return 'failed'
-  if (p.ttsState === 'ready') return 'done'
+  /*
+   * ⚠️【「已完成」判的是【成片在不在】，不是配音好没好】。
+   *
+   * 这里踩过三次，每次都是同一个错——把中间态归进最好的那一档：
+   *   一次是"等你挑开头"被显示成已完成（上面第一条）；
+   *   一次是"合成失败/取消"被显示成已完成（上面这条）；
+   *   第三次就是这里：配音好了、成片根本没烧，列表照样说已完成，
+   *   点进去才发现什么都没有。
+   *
+   * 补丁打在特例上是治不完的。判据只能有一个：【盘上有没有成片】。
+   */
+  if (film?.state === 'ready') return 'done'
+  /*
+   * 配音好了但还没有成片 = 还在合成（或马上会被补合排上）。
+   * film 还没轮询到时也走这条——"还不知道"绝不能当成"已完成"。
+   */
+  if (p.ttsState === 'ready') return 'render'
   return 'draft'
 }
 

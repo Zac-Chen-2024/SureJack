@@ -437,6 +437,26 @@ export const usePipeline = create<PipelineState>((set, get) => ({
   },
 
   markQueued (projectId) {
+    /*
+     * ⚠️【列表那边也要立刻改】。用户点完「用默认开头」退回列表，看到的
+     * 还是"等你挑开头"——因为列表读的是 store 里的 openingState，
+     * 而那次点击只发了请求、本地一个字没动，要等下一次 load 才对。
+     *
+     * 一个按钮点下去，屏幕上该变的东西必须【当场】变。让用户对着一个
+     * 明知已经点过的状态发呆，比慢几百毫秒糟得多。
+     */
+    useProjects.setState((st) => ({
+      items: st.items.map((p) => (p.id === projectId
+        ? { ...p, openingState: 'settled' as const }
+        : p)),
+    }))
+    /* 列表的进度条也先按"排队中"画，别等第一次轮询 */
+    set((st) => ({
+      filmProgress: {
+        ...st.filmProgress,
+        [projectId]: { composing: true, progress: 0, state: 'building' as const },
+      },
+    }))
     if (useProjects.getState().currentId !== projectId) return
     set({
       film: {
@@ -461,6 +481,20 @@ export const usePipeline = create<PipelineState>((set, get) => ({
   },
 
   async cancelFilm (projectId) {
+    /*
+     * 【先把界面切过去，再发请求】。取消要走几百毫秒（服务端要落盘印记、
+     * 杀进程），这期间进度条还在动，用户会以为没点上、然后再点一次。
+     * 请求失败时下一次轮询自会把真实状态盖回来。
+     */
+    set((st) => ({
+      filmProgress: {
+        ...st.filmProgress,
+        [projectId]: { composing: false, progress: 0, state: 'cancelled' as const },
+      },
+      film: useProjects.getState().currentId === projectId && st.film !== null
+        ? { ...st.film, state: 'none', progress: 0, reason: '已取消合成' }
+        : st.film,
+    }))
     try {
       await api.post(`/api/projects/${projectId}/film/cancel`)
       await get().loadFilm(projectId)

@@ -217,20 +217,29 @@ export function registerExportRoutes (app: FastifyInstance, deps: Deps): void {
       const name = getSession(req)!
       const job = withUserDb(name, (db) => db.latestJob(req.params.id))
       if (!job) return reply.code(404).send({ error: '这个项目没有在合成' })
+      /*
+       * ⚠️【先写"已取消"的印记，再停队列】。顺序反了就有一个真实的窗口：
+       *
+       *   queue.cancel()  → ffmpeg 被杀
+       *   ...（几百毫秒）
+       *   writeStamp()    → 才落盘
+       *
+       * 前端每 2 秒轮一次 /film，落在这中间的那一次看到的是"该有成片却没有、
+       * 也没有取消印记"，于是【立刻又排一条】。用户看到的就是"我按了中断，
+       * 进度条照样在走"——线上真发生了，库里能看到一条 cancelled 紧跟着
+       * 一条新的 running。
+       *
+       * 印记先落盘，那一次轮询就会看到"已取消"，不会重排。
+       */
+      const r = resolveFilm(deps, name, req.params.id)
+      if (r.ok) {
+        await writeStamp(r.film.dir, FILM_STAMP_FILE, {
+          fingerprint: r.film.fingerprint, status: 'cancelled', jobId: job.id,
+        })
+      }
       const stopped = queue.cancel(job.id)
       if (stopped) {
         withUserDb(name, (db) => db.updateJob(job.id, { status: 'cancelled', progress: 0 }))
-        /*
-         * 【必须把"已取消"写进指纹文件】。只停队列不落盘的话，下一次状态
-         * 轮询发现"该有成片却没有"，立刻又排一条——取消等于没点。
-         * 指纹一起写：用户改了任何输入就会重排，符合直觉。
-         */
-        const r = resolveFilm(deps, name, req.params.id)
-        if (r.ok) {
-          await writeStamp(r.film.dir, FILM_STAMP_FILE, {
-            fingerprint: r.film.fingerprint, status: 'cancelled', jobId: job.id,
-          })
-        }
       }
       // 没停到什么也回 200：用户想要的结果（现在没有在跑）已经成立
       return { cancelled: stopped, jobId: job.id }
