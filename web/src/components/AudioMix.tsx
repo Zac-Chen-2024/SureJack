@@ -32,6 +32,8 @@ interface AudioInfo {
   voiceGain: number
   bgmVolume: number
   target: { lufs: number, truePeak: number }
+  /** 当前实测的响度差（LU）。服务端算的初值，拖滑块时前端自己重算 */
+  gapLu: number | null
   recommended: { voiceGain: number, bgmVolume: number, musicBelowVoiceDb: number }
 }
 
@@ -158,6 +160,40 @@ export function AudioMix () {
   const [voiceGain, setVoiceGain] = useState(1)
   const [bgmVolume, setBgmVolume] = useState(0.15)
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  /**
+   * 我的音频配置：一组调好的增益。
+   * ⚠️【存下来不会自动套到任何项目】——要用得点「应用」。自动套的话，
+   * 用户改一条片子的音量会莫名其妙影响到别的，那是最难查的一类怪事。
+   */
+  const [preset, setPreset] = useState<{ voiceGain: number, bgmVolume: number } | null>(null)
+  const [note, setNote] = useState<string | null>(null)
+
+  useEffect(() => {
+    void api.get<{ preset: { voiceGain: number, bgmVolume: number } | null }>('/api/audio-preset')
+      .then((r) => setPreset(r.preset))
+      .catch(() => { /* 没有就没有 */ })
+  }, [])
+
+  /** 一句话提示，两秒后自己消失。不弹窗——这是个轻动作 */
+  function flash (msg: string): void {
+    setNote(msg)
+    setTimeout(() => setNote(null), 2000)
+  }
+
+  function savePreset (): void {
+    const p = { voiceGain, bgmVolume }
+    void api.put<{ preset: typeof p }>('/api/audio-preset', p)
+      .then(() => { setPreset(p); flash('已存为你的配置') })
+      .catch(() => flash('没存上，再试一次'))
+  }
+
+  function applyPreset (): void {
+    if (preset === null) return
+    setVoiceGain(preset.voiceGain)
+    setBgmVolume(preset.bgmVolume)
+    void patch({ voiceGain: preset.voiceGain, bgmVolume: preset.bgmVolume })
+    flash('已套用你的配置')
+  }
 
   const id = project?.id ?? null
   useEffect(() => {
@@ -183,6 +219,15 @@ export function AudioMix () {
   if (project === null) return null
 
   const t = info?.target.lufs ?? -14
+  /*
+   * 【响度差实时重算】。服务端给的 gapLu 是【打开这一屏那一刻】的值；
+   * 用户一拖滑块它就过期了。所以这里跟着本地的两个增益自己算，
+   * 不然又会变成"面板上那个数永远不动"。
+   */
+  const gap = (info?.voice == null || info?.bgm == null)
+    ? null
+    : (info.voice.lufs + 20 * Math.log10(Math.max(1e-6, voiceGain)))
+      - (info.bgm.lufs + 20 * Math.log10(Math.max(1e-6, bgmVolume)))
   const mixLufs = (() => {
     const v = info?.voice === null || info?.voice === undefined
       ? null : afterGain(info.voice.lufs, voiceGain)
@@ -200,32 +245,64 @@ export function AudioMix () {
       <div className="rounded-xl border border-line bg-ink-850 p-3">
         <div className="flex items-baseline justify-between">
           <span className="text-xs font-bold text-ink-100">响度</span>
-          <span className="tabular-nums text-[11px] text-accent">
-            成片会归一化到 {t} LUFS
-          </span>
+          <span className="text-[11px] text-ink-400">你调多少，成片就是多少</span>
         </div>
         <dl className="mt-2 grid grid-cols-3 gap-2 text-center">
           <div className="rounded-lg bg-ink-900 py-2">
-            <dt className="text-[10px] text-ink-500">流媒体基准</dt>
-            <dd className="tabular-nums text-sm font-bold text-ink-100">{t}</dd>
+            <dt className="text-[10px] text-ink-500">平台参考</dt>
+            <dd className="tabular-nums text-sm font-bold text-ink-400">{t}</dd>
           </div>
           <div className="rounded-lg bg-ink-900 py-2">
-            <dt className="text-[10px] text-ink-500">当前配音</dt>
-            <dd className="tabular-nums text-sm font-bold text-ink-100">
+            <dt className="text-[10px] text-ink-500">成片配音</dt>
+            <dd className={`tabular-nums text-sm font-bold ${
+              mixLufs !== null && Math.abs(mixLufs - t) <= 2 ? 'text-accent' : 'text-ink-100'}`}
+            >
               {mixLufs === null ? '—' : fmtLufs(mixLufs)}
             </dd>
           </div>
+          {/*
+            * ⚠️【这个数必须是【实测差】，不能显示那个建议常量】。
+            * 踩过：面板上永远写着 10 dB，不管用户把滑块拖到哪儿——
+            * 它显示的是 MUSIC_BELOW_VOICE_DB 这个常量，而不是当前两条轨
+            * 调完增益之后的实际响度差。
+            *
+            * 这个量的专业名字是【响度差】，基准 ITU-R BS.1770 / EBU R128，
+            * 单位 LU：两条轨各自的 LUFS 相减。广播里旁白配乐床的惯例是
+            * 低 10–15 LU。
+            */}
           <div className="rounded-lg bg-ink-900 py-2">
             <dt className="text-[10px] text-ink-500">音乐低于人声</dt>
-            <dd className="tabular-nums text-sm font-bold text-ink-100">
-              {info?.recommended.musicBelowVoiceDb ?? 10} dB
+            <dd className={`tabular-nums text-sm font-bold ${
+              gap !== null && gap >= 8 && gap <= 16 ? 'text-accent' : 'text-ink-100'}`}
+            >
+              {gap === null ? '—' : `${gap.toFixed(1)} LU`}
             </dd>
           </div>
         </dl>
         <p className="mt-2 text-[11px] leading-relaxed text-ink-400">
-          抖音 / B站 / YouTube 都按 −14 LUFS 上下回放，比这响会被平台压回去、
-          比这轻则听着发闷。成片最后会自动对到这个基准，下面两条是在此之上的配比。
+          {/* ⚠️ JSX 里是纯文本，写 **加粗** 会把星号原样显示出来。要强调就用元素 */}
+          平台按 −14 LUFS 上下回放，这里只作参考、
+          <span className="text-ink-200">不会自动帮你压到那儿</span>
+          ；滑块给多少，成片就是多少。乐床通常压在人声之下 10–15 LU
+          （ITU-R BS.1770 响度差），太响会盖住人声、太轻等于没有。
         </p>
+
+        {/* 保存 / 应用配置：调好一次，之后别的项目直接套 */}
+        <div className="mt-2.5 flex gap-2">
+          <button
+            type="button" onClick={savePreset}
+            className="flex-1 rounded-lg border border-line py-2 text-[11px] font-bold text-ink-200 transition-colors hover:border-accent hover:text-accent"
+          >
+            保存为我的配置
+          </button>
+          <button
+            type="button" onClick={applyPreset} disabled={preset === null}
+            className="flex-1 rounded-lg border border-line py-2 text-[11px] font-bold text-ink-200 transition-colors hover:border-accent hover:text-accent disabled:opacity-40"
+          >
+            {preset === null ? '还没存过配置' : '应用我的配置'}
+          </button>
+        </div>
+        {note !== null && <p className="mt-1.5 text-center text-[11px] text-accent">{note}</p>}
       </div>
 
       <TrackRow

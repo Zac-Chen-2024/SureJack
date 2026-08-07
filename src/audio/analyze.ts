@@ -79,15 +79,31 @@ export async function analyzeAudio (path: string): Promise<AudioStats> {
 }
 
 /**
- * 【音乐该压多低】。
+ * 【音乐该比人声低多少】——建议目标，单位 LU。
  *
- * 行业惯例是人声之下 10 分贝左右——再响就压住人声，再轻就等于没有。
- * 这里按两条轨的实测响度反推增益：让音乐落在「配音 − 10 dB」。
+ * 这个量的专业名字是【响度差】，基准是 ITU-R BS.1770 / EBU R128：
+ * 两条轨各自的整体响度（LUFS）相减即得，单位记作 LU。广播里旁白配乐床的
+ * 惯例是【乐床低于人声 10–15 LU】：再响会盖住人声，再轻等于没有。
+ * 取下限 10 是因为短视频要在嘈杂环境外放，乐床太弱就完全听不到。
  *
- * ⚠️ 返回的是【建议】，不是自动套用。用户拖过滑块之后就该以他为准——
- * 替他改掉他刚定好的东西，比不给建议更糟。
+ * ⚠️【这是建议值，不是实测值】。界面上"音乐低于人声"那个读数必须用
+ * 【当前两条轨调完增益之后的实际差】算，不能直接显示这个常量——
+ * 踩过：面板上永远写着 10 dB，不管用户把滑块拖到哪儿。
+ *
+ * ⚠️ 也不自动套用。用户拖过滑块之后就该以他为准。
  */
 export const MUSIC_BELOW_VOICE_DB = 10
+
+/**
+ * 两条轨【调完增益之后】的响度差，单位 LU。正数 = 音乐比人声轻。
+ * 这才是界面上该显示的那个数。
+ */
+export function loudnessGapLu (
+  voiceLufs: number, voiceGain: number, bgmLufs: number, bgmGain: number,
+): number {
+  const db = (g: number): number => (g > 0 ? 20 * Math.log10(g) : Number.NEGATIVE_INFINITY)
+  return (voiceLufs + db(voiceGain)) - (bgmLufs + db(bgmGain))
+}
 
 export function recommendBgmVolume (voiceLufs: number, bgmLufs: number): number {
   if (!Number.isFinite(voiceLufs) || !Number.isFinite(bgmLufs)) return 0.15
@@ -99,10 +115,11 @@ export function recommendBgmVolume (voiceLufs: number, bgmLufs: number): number 
 }
 
 /**
- * 【配音增益建议】：把配音本身推到接近平台基准。
+ * 【配音增益建议】：把配音推到平台惯用响度（-14 LUFS 上下）。
  *
- * 归一化那一步已经会把成品对到 -14，所以这里给的是"让归一化少干活"的值——
- * 归一化提得越少，动态压缩带来的副作用越小。
+ * ⚠️ 现在【没有自动归一化兜底了】——用户明确要求成片响度由他自己定。
+ * 所以这个建议值就是"照抄它就能达到平台惯例"的那个数，不再是
+ * "让归一化少干点活"。用不用由他决定。
  */
 export function recommendVoiceGain (voiceLufs: number): number {
   if (!Number.isFinite(voiceLufs)) return 1

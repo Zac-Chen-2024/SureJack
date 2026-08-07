@@ -9,7 +9,7 @@ import { getLibraryItem } from '../library/scan.js'
 import { libraryItemPath } from '../library/paths.js'
 import {
   analyzeAudio, recommendBgmVolume, recommendVoiceGain,
-  MUSIC_BELOW_VOICE_DB, type AudioStats,
+  MUSIC_BELOW_VOICE_DB, loudnessGapLu, type AudioStats,
 } from './analyze.js'
 import { TARGET_LUFS, TARGET_TP } from '../compose/mix.js'
 
@@ -100,9 +100,51 @@ export async function ensureAudioStats (
   return next
 }
 
+/** 存在用户库 settings 表里的键 */
+const PRESET_KEY = 'audio'
+
 export function registerAudioRoutes (
   app: FastifyInstance, whitelist: string[], libraryDataDir: string,
 ): void {
+  /**
+   * 存/读【音频配置】：一组调好的增益，之后可以套到别的项目上。
+   *
+   * ⚠️【不自动套用】。存下来只是存下来，要用得在音频面板点「应用」。
+   * 自动套的话，用户改一条片子的音量会莫名其妙影响到别的，
+   * 那是最难查的一类怪事。
+   */
+  app.get('/api/audio-preset', { preHandler: requireAuth }, async (req) => {
+    const name = getSession(req)!
+    const db = openUserDb(name, whitelist)
+    let raw: string | null
+    try { raw = db.getSetting(PRESET_KEY) } finally { db.close() }
+    if (raw === null) return { preset: null }
+    try {
+      return { preset: JSON.parse(raw) as unknown }
+    } catch {
+      return { preset: null }
+    }
+  })
+
+  app.put<{ Body: { voiceGain?: unknown, bgmVolume?: unknown } }>(
+    '/api/audio-preset', { preHandler: requireAuth }, async (req, reply) => {
+      const name = getSession(req)!
+      const vg = Number(req.body?.voiceGain)
+      const bv = Number(req.body?.bgmVolume)
+      if (!Number.isFinite(vg) || !Number.isFinite(bv)) {
+        return reply.code(400).send({ error: '配置值不合法' })
+      }
+      // 和 PATCH 项目那边同一套钳位，脏值不落库
+      const preset = {
+        voiceGain: Math.min(4, Math.max(0.1, vg)),
+        bgmVolume: Math.min(1, Math.max(0, bv)),
+        savedAt: new Date().toISOString(),
+      }
+      const db = openUserDb(name, whitelist)
+      try { db.setSetting(PRESET_KEY, JSON.stringify(preset)) } finally { db.close() }
+      return { preset }
+    })
+
   /**
    * 音频面板的数据源。
    *
@@ -129,9 +171,20 @@ export function registerAudioRoutes (
         /** 当前设置 */
         voiceGain: project.voiceGain,
         bgmVolume: project.bgmVolume,
-        /** 平台基准。成片最后会被归一化到这里 */
+        /**
+         * 平台【参考线】。⚠️ 不再自动往这儿压——用户明确要求自己调。
+         * 摆出来只是让他知道惯例在哪儿。
+         */
         target: { lufs: TARGET_LUFS, truePeak: TARGET_TP },
-        /** 建议：音乐压在人声之下 MUSIC_BELOW_VOICE_DB 分贝 */
+        /**
+         * 【当前实测的响度差】，单位 LU（ITU-R BS.1770 / EBU R128）。
+         * 正数 = 音乐比人声轻。⚠️ 这是【算出来的】，不是那个建议常量——
+         * 踩过：面板上永远写着 10 dB，不管用户把滑块拖到哪儿。
+         */
+        gapLu: (vl === undefined || bl === undefined)
+          ? null
+          : loudnessGapLu(vl, project.voiceGain, bl, project.bgmVolume),
+        /** 建议：音乐压在人声之下 MUSIC_BELOW_VOICE_DB LU */
         recommended: {
           voiceGain: vl === undefined ? 1 : recommendVoiceGain(vl),
           bgmVolume: (vl === undefined || bl === undefined) ? 0.15 : recommendBgmVolume(vl, bl),

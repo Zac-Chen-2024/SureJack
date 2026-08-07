@@ -210,8 +210,8 @@ export function AssetPanel () {
   return (
     <div className="space-y-4">
       <BackgroundStrip projectId={project.id} />
-      <BgmPicker />
       <AudioMix />
+      <BgmPicker />
     </div>
   )
 }
@@ -237,10 +237,14 @@ export function BackgroundPanel () {
 export function MusicPanel () {
   const project = useProjects((s) => s.current())
   if (!project) return null
+  /*
+   * 【选曲放最下面】。上面是波形和音量——那是每次进来都要看、要拖的东西；
+   * 选哪首歌通常只做一次。常用的在上、偶尔用的在下。
+   */
   return (
     <div className="space-y-4">
-      <BgmPicker />
       <AudioMix />
+      <BgmPicker />
     </div>
   )
 }

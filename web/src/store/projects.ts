@@ -124,6 +124,8 @@ export interface Project {
    * 老项目一律 settled——它们从来没有这一步。
    */
   openingState: 'pending' | 'settled'
+  /** 配音在混音时的增益，1 = 原样。和 voiceVolume（Azure 合成参数）不是一回事 */
+  voiceGain: number
   /** 水印文字。空 = 不打水印 */
   watermarkText: string
   /** 挑开头的草稿清单（挑一半也存住）。JSON 数组 */
@@ -175,7 +177,7 @@ interface ProjectsState {
   select: (id: string) => void
   updateScript: (text: string) => Promise<void>
   /** 素材选择类字段的通用补丁（乐观更新）。setBgm / setBgmVolume 的共用底座 */
-  patchProject: (patch: Partial<Pick<Project, 'bgmLibraryId' | 'bgmVolume' | 'subtitleMarginV' | 'subtitleFontSize' | 'name' | 'coverTitle' | 'inVideoTitle' | 'watermarkText' | 'voiceName' | 'voiceRate' | 'voiceVolume' | 'voicePitch'>>) => Promise<void>
+  patchProject: (patch: Partial<Pick<Project, 'bgmLibraryId' | 'bgmVolume' | 'subtitleMarginV' | 'subtitleFontSize' | 'name' | 'voiceGain' | 'coverTitle' | 'inVideoTitle' | 'watermarkText' | 'voiceName' | 'voiceRate' | 'voiceVolume' | 'voicePitch'>>) => Promise<void>
   /** 选/取消选背景音乐。null 表示不要 BGM */
   setBgm: (bgmLibraryId: string | null) => Promise<void>
   /** 调背景音乐音量。调用方负责节流——见 AssetPanel 的滑块 */
@@ -271,7 +273,7 @@ export const useProjects = create<ProjectsState>((set, get) => ({
    * 点一下 BGM 要立刻选中、拖滑块要跟手，不能等一个来回。
    * 后端回来的整条项目再覆盖一次，以它为准。
    */
-  async patchProject (patch: Partial<Pick<Project, 'bgmLibraryId' | 'bgmVolume' | 'subtitleMarginV' | 'subtitleFontSize' | 'name' | 'coverTitle' | 'inVideoTitle' | 'watermarkText' | 'voiceName' | 'voiceRate' | 'voiceVolume' | 'voicePitch'>>) {
+  async patchProject (patch: Partial<Pick<Project, 'bgmLibraryId' | 'bgmVolume' | 'subtitleMarginV' | 'subtitleFontSize' | 'name' | 'voiceGain' | 'coverTitle' | 'inVideoTitle' | 'watermarkText' | 'voiceName' | 'voiceRate' | 'voiceVolume' | 'voicePitch'>>) {
     const id = get().currentId
     if (!id) return
     set((s) => ({ items: s.items.map((p) => (p.id === id ? { ...p, ...patch } : p)) }))

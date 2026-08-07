@@ -8,14 +8,15 @@ const AUDIO={
     peaks:peaks(i=>0.25+0.55*Math.abs(Math.sin(i/9))*(0.6+0.4*Math.sin(i/57)))},
   bgm:{lufs:-12.4,truePeak:-1.1,durationMs:480000,
     peaks:peaks(i=>0.45+0.35*Math.abs(Math.sin(i/23)))},
-  voiceGain:1, bgmVolume:0.15,
+  voiceGain:1.55, bgmVolume:0.08,
+  gapLu:12.3,
   target:{lufs:-14,truePeak:-1},
   recommended:{voiceGain:1.55,bgmVolume:0.08,musicBelowVoiceDb:10},
 }
 const P={id:'p1',name:'周周花心',createdAt:now,updatedAt:now,coverTitle:'',inVideoTitle:'',
   watermarkText:'周周',openingPickJson:'',splitDraftJson:'',openingState:'settled',
   parentProjectId:null,episodeIndex:1,scriptText:'测试',ttsState:'ready',ttsDurationMs:633000,
-  subtitleMode:'karaoke',renameEnabled:false,renameState:'none',bgmLibraryId:'bgm-1',bgmVolume:0.15,voiceGain:1}
+  subtitleMode:'karaoke',renameEnabled:false,renameState:'none',bgmLibraryId:'bgm-1',bgmVolume:0.08,voiceGain:1.55}
 const b=await chromium.launch()
 const pg=await b.newPage({viewport:{width:412,height:915},deviceScaleFactor:2.5,isMobile:true,hasTouch:true})
 await pg.route('**/*',async(r)=>{
@@ -25,6 +26,7 @@ await pg.route('**/*',async(r)=>{
   if(p==='/api/whoami') return j({name:'陈梓昂',honorific:'主人'})
   if(p==='/api/projects') return j([P])
   if(p.endsWith('/audio')) return j(AUDIO)
+  if(p==='/api/audio-preset') return j({preset:{voiceGain:1.6,bgmVolume:0.1}})
   if(p.endsWith('/film')) return j({state:'none',jobId:null,progress:0,error:null,reason:null})
   // 素材库返回的是【文件名】，前端自己切曲名（parseBgmName 用 lastIndexOf）
   if(p.includes('/library')) return j({items:[

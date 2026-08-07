@@ -17,13 +17,23 @@ import { rename, rm } from 'node:fs/promises'
  * 也就是【选了背景音乐的片子比没选的整整轻 6 分贝】，而没有任何提示。
  * 所以这里一律 normalize=0，各路的增益完全由我们自己给。
  *
- * ── 归一化 ──────────────────────────────────────────────────────────
- * 光修好 amix 还不够：-21.8 LUFS 本身就比短视频平台的惯用响度（约 -14）
- * 低了近 8 分贝。所以混完再走一道 EBU R128 归一化对到 TARGET_LUFS。
- * 两条滑块是在这个基准【之上】微调，而不是让用户自己把整体推响。
+ * ── ⚠️ 不做自动归一化 ───────────────────────────────────────────────
+ * 试过一版：混完自动走 EBU R128 对到 -14 LUFS。撤了——用户要的是
+ * 【自己调、调完存成配置、需要时套用】，而不是系统在最后替他决定。
+ *
+ * 自动归一化还有个隐蔽的坏处：它让面板上的读数变成"中间值"。用户把配音
+ * 推到 -16，成片却是 -14，他看到的和听到的对不上，也就没法凭读数干活。
+ * 现在【滑块给多少就是多少】，面板上那个数就是成片的真实响度。
+ *
+ * TARGET_LUFS 保留，但降级成【参考线】：面板上标出来告诉用户平台惯例在哪儿，
+ * 不再拿它去压任何东西。normalize 选项也留着（默认关），将来真要做批量
+ * 统一时还能用。
  */
 
-/** 短视频平台的惯用响度。抖音/B站/YouTube 都在 -14 上下 */
+/**
+ * 短视频平台的惯用响度。抖音/B站/YouTube 都在 -14 上下。
+ * ⚠️【只是参考线，不再自动往这儿压】——见上面的说明。
+ */
 export const TARGET_LUFS = -14
 /** 真峰值上限。-1 dBTP 留一点余量，避免转码后削顶 */
 export const TARGET_TP = -1
@@ -41,7 +51,10 @@ export interface MixOptions {
   /** 音乐增益，相对配音 */
   bgmVolume: number
   outPath: string
-  /** 关掉归一化。只给测试用——归一化要跑两遍 ffmpeg，测试里没必要 */
+  /**
+   * 走一道 EBU R128 归一化。**默认关**——用户明确要求"不要最后归一化，
+   * 我自己调"。留着这个开关是为了将来可能的批量统一，日常路径不用它。
+   */
   normalize?: boolean
 }
 
@@ -86,7 +99,8 @@ export async function mixAudio (o: MixOptions): Promise<void> {
     ...(hasBgm ? ['-stream_loop', '-1', '-i', o.bgmPath!] : []),
     '-filter_complex', buildMixFilter({
       voiceGain: o.voiceGain, bgmVolume: o.bgmVolume, hasBgm,
-      normalize: o.normalize !== false,
+      // 【默认不归一化】。要不要压完全由调用方说了算，见文件头的说明
+      normalize: o.normalize === true,
     }),
     '-map', '0:v', '-map', '[a]',
     '-c:v', 'copy',              // ⚠️ 这一句是整个优化的全部，别动

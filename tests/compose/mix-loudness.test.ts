@@ -36,10 +36,23 @@ describe('混音滤镜', () => {
     expect(f).not.toContain('amix')
   })
 
-  it('归一化对到平台惯用响度', () => {
+  it('要压的时候压到平台惯用响度', () => {
     const f = buildMixFilter({ voiceGain: 1, bgmVolume: 0.15, hasBgm: true, normalize: true })
     expect(f).toContain(`loudnorm=I=${TARGET_LUFS}`)
     expect(TARGET_LUFS).toBe(-14)
+  })
+
+  /*
+   * ⚠️【默认不归一化】。用户明确要求："响度不要最后归一化了，用户可以自己
+   * 调整、保存配置、应用配置，按用户的操作来，最后不需要做自动化。"
+   *
+   * 这条断言守的是那个决定：滑块给多少，成片就是多少。自动归一化还会让
+   * 面板上的读数变成中间值——用户把配音推到 -16、成片却是 -14，
+   * 看到的和听到的对不上，也就没法凭读数干活。
+   */
+  it('【默认不归一化】滑块给多少就是多少', () => {
+    const f = buildMixFilter({ voiceGain: 1, bgmVolume: 0.15, hasBgm: true, normalize: false })
+    expect(f).not.toContain('loudnorm')
   })
 })
 
@@ -84,7 +97,7 @@ describe('真跑 ffmpeg：响度', () => {
     }
   }, 120_000)
 
-  it('【归一化能把小声的片子提上来】', async () => {
+  it('【显式要求归一化时，能把小声的片子提上来】', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'norm-'))
     try {
       const master = join(dir, 'm.mp4')
@@ -100,12 +113,44 @@ describe('真跑 ffmpeg：响度', () => {
         '-af', 'volume=-30dB', '-c:a', 'aac', voice])
 
       await mixAudio({ masterPath: master, voicePath: voice, voiceGain: 1,
-        bgmPath: null, bgmVolume: 0, outPath: out })
+        bgmPath: null, bgmVolume: 0, outPath: out, normalize: true })
       const after = await lufs(out)
 
       // 归一化之后该落在目标附近（loudnorm 单遍有几分贝误差，给 5 分贝窗口）
       expect(after).toBeGreaterThan(TARGET_LUFS - 5)
       expect(after).toBeLessThan(TARGET_LUFS + 5)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  }, 120_000)
+})
+
+describe('真跑 ffmpeg：默认不动用户的响度', () => {
+  /*
+   * 这条和上面那条"归一化能提上来"是一对：能力还在，但【默认不用】。
+   * 用户调多少，成片就是多少——这是他明确要的行为。
+   */
+  it('一条很轻的配音，默认混完还是那么轻（没有被偷偷推响）', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'nonorm-'))
+    try {
+      const master = join(dir, 'm.mp4')
+      const voice = join(dir, 'v.m4a')
+      const out = join(dir, 'out.mp4')
+      await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y',
+        '-f', 'lavfi', '-i', 'testsrc=d=3:s=320x568:r=25',
+        '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
+        '-an', '-t', '3', master])
+      await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y',
+        '-f', 'lavfi', '-i', 'sine=frequency=440:duration=3',
+        '-af', 'volume=-30dB', '-c:a', 'aac', voice])
+
+      const before = await lufs(voice)
+      await mixAudio({ masterPath: master, voicePath: voice, voiceGain: 1,
+        bgmPath: null, bgmVolume: 0, outPath: out })
+      const after = await lufs(out)
+
+      // 和原始配音在同一个量级（±1.5 分贝给编码波动），不是被提到 -14
+      expect(Math.abs(after - before)).toBeLessThan(1.5)
     } finally {
       await rm(dir, { recursive: true, force: true })
     }

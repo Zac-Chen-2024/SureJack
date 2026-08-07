@@ -222,6 +222,15 @@ export interface UserDb {
   updateJob (id: string, patch: { status?: JobStatus; progress?: number; error?: string; outputPath?: string }): ExportJob | null
   getJob (id: string): ExportJob | null
   latestJob (projectId: string): ExportJob | null
+  /**
+   * 用户级别的偏好，key → JSON 串。目前只有音频配置（audio）。
+   *
+   * 【和项目字段的区别】：项目字段是"这条片子用什么"，偏好是"我习惯用什么"。
+   * 偏好【不会自动套到任何项目上】——用户在音频面板点「应用」才生效。
+   * 自动套的话，他改一条片子的音量会莫名其妙影响到别的，那是最难查的一类怪事。
+   */
+  getSetting (key: string): string | null
+  setSetting (key: string, value: string): void
   close (): void
 }
 
@@ -653,6 +662,18 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
         // 隐藏列，按插入顺序单调递增，且无需 ALTER TABLE 就能用。
         'SELECT * FROM export_jobs WHERE project_id = ? ORDER BY rowid DESC LIMIT 1').get(projectId)
       return row ? toJob(row as Record<string, unknown>) : null
+    },
+
+    getSetting (key) {
+      const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as
+        { value?: string } | undefined
+      return row?.value ?? null
+    },
+
+    setSetting (key, value) {
+      db.prepare(
+        'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+      ).run(key, value)
     },
 
     close () { db.close() },
