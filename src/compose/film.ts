@@ -764,7 +764,7 @@ async function judgeFilm (
   }
   if (!r.ok) return { kind: 'blocked', reason: r.error }
 
-  const { dir, fingerprint } = r.film
+  const { dir, fingerprint, masterFingerprint: mfp } = r.film
   const stamp = await readStamp(dir, FILM_STAMP_FILE)
   const jobId = stamp?.jobId ?? null
   const snap = jobId === null ? null : deps.queue.snapshot(jobId)
@@ -783,7 +783,25 @@ async function judgeFilm (
     return { kind: 'running', jobId: jobId!, progress: snap.progress }
   }
 
-  if (await reusableOutput(dir, FILM_STAMP_FILE, FILM_FILE, fingerprint) !== null) {
+  /*
+   * ⚠️【就绪 = 母带在盘上，不是 export.mp4 在盘上】。
+   *
+   * 这里踩过一次，而且是自己挖的坑：把合成改成"只出画面、成片在下载那一刻
+   * 现混"之后，盘上【再也不会有 export.mp4】，而这条判据还在等它——于是
+   *   · 预览能播（走母带，母带在）
+   *   · 下载按钮永远灰着（它看的是"就绪"）
+   *   · 列表永远显示合成 0%（判不成就绪 → 落到 missing → 又排一条 →
+   *     跑完还是没有 export.mp4 → 无限重排，后台空转烧片）
+   * 三个症状看着毫不相干，根子是同一行。
+   *
+   * 【改了产物的定义，就必须同时改判定它的那一行】——否则系统会一直
+   * 追一个永远不会出现的文件。
+   *
+   * 现在的判据只认母带：它是这条片子在盘上唯一常驻的产物。BGM、音量、
+   * 封面标题都不再影响盘上的东西（它们在下载时才生效），所以也不该
+   * 让它们把"就绪"打翻。
+   */
+  if (await reusableOutput(dir, MASTER_STAMP_FILE, FILM_MASTER_FILE, mfp) !== null) {
     return { kind: 'ready', jobId }
   }
 
@@ -791,9 +809,7 @@ async function judgeFilm (
    * ⚠️【这里【不能】再有"没选 BGM 时成片就是母带"那条捷径】。
    *
    * 加封面之前它是对的：无 BGM 时 buildFilm 不复制 export.mp4，成片直接
-   * 用 master.mp4。现在成片一定比母带多两帧封面，两者不再是同一个文件——
-   * 留着那条判断，所有无-BGM 的项目都会被判成"已就绪"，于是永远不去拼封面，
-   * 用户永远看不到这个功能生效。删掉它，让它们照常走一次几秒的拼接。
+   * 用 master.mp4。（这段历史留着当注脚：判据跟着产物走，产物变了它就得变。）
    */
 
   // 失败的正是【当前这份输入】→ 停在这儿等用户重试
@@ -913,31 +929,24 @@ export async function sweepFilms (
 export async function downloadableFilm (
   deps: FilmDeps, userName: string, projectId: string,
 ): Promise<string | null> {
+  /*
+   * ⚠️【返回的是【母带】，不是成片】。
+   *
+   * 盘上再也没有 export.mp4 了——成片在下载那一刻由 deliverFilm 现混
+   * （画面 + 配音 + 音乐 + 封面），传完就删。所以这个函数的语义变成了
+   * "有没有可以拿去现混的画面"。
+   *
+   * 名字保留 downloadableFilm 不改：调用方问的正是"现在能不能下载"，
+   * 答案仍然由它给。
+   */
   const dir = assetDir(userName, deps.whitelist, projectId)
-  const stamp = await readStamp(dir, FILM_STAMP_FILE)
-  if (stamp === null) return null
+  const masterStamp = await readStamp(dir, MASTER_STAMP_FILE)
+  if (masterStamp === null) return null
   /*
    * 【只看 status，不比指纹】。指纹对不上说明"有更新的版本正在合"，
    * 但盘上这条是完整的、能播的。这时候把下载按钮变成 404 是在惩罚用户
-   * ——他刚点了下载而已。按钮该显示什么由 filmInfo 决定，这个接口只
-   * 负责"有完整文件就给"。
+   * ——他刚点了下载而已。
    */
-  if (stamp.status !== undefined && stamp.status !== 'done') return null
-
-  const mixed = await reusableOutput(dir, FILM_STAMP_FILE, FILM_FILE, stamp.fingerprint)
-  if (mixed !== null) return mixed
-
-  /*
-   * 【回落到母带】。加封面之前，没选 BGM 的项目不会复制一份 export.mp4
-   * （省 500MB），成片直接就是母带。现在成片一定带封面、一定是 export.mp4，
-   * 但盘上还留着一批那时候的项目——在它们重拼出带封面的成片之前，
-   * 这条回落让"下载"仍然可用（拿到的是没有封面的老片子，总好过 404）。
-   *
-   * ⚠️ 顺序不能反：先问 export.mp4。两个文件都在时，先问母带的话
-   * 用户下到的是一条没有背景音乐、也没有封面的片子。
-   */
-  const masterStamp = await readStamp(dir, MASTER_STAMP_FILE)
-  if (masterStamp === null) return null
   if (masterStamp.status !== undefined && masterStamp.status !== 'done') return null
   return reusableOutput(dir, MASTER_STAMP_FILE, FILM_MASTER_FILE, masterStamp.fingerprint)
 }

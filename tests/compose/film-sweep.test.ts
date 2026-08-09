@@ -108,9 +108,22 @@ describe('开机补合扫描', () => {
     const deps = q.deps(dataDir)
     const id = await makeReadyProject('已经好了的')
     const dir = assetDir(USER, LIST, id)
-    await writeFile(join(dir, FILM_FILE), 'pretend-mp4')
-    await writeStamp(dir, FILM_STAMP_FILE, {
-      fingerprint: fingerprintOf(deps, id), status: 'done', jobId: 'old-job',
+    /*
+     * ⚠️【夹具必须造【合成端真正产出的东西】】。
+     *
+     * 这条守卫本该抓住一次线上回归，却没抓住：那时它手工造一个 export.mp4，
+     * 而代码也在找 export.mp4——两边一致，测试当然绿。它测不到的是
+     * 【合成端已经不再产出那个文件了】，于是判据永远不成立 →
+     * 每次轮询都重排一条 → 后台无限空转，用户看到进度条永远 0%。
+     *
+     * 照着旧世界造数据的夹具，永远发现不了"产物定义变了"。
+     * 现在造的是母带（画面）——那才是合成端唯一常驻的产物。
+     */
+    const rr = resolveFilm(deps, USER, id)
+    if (!rr.ok) throw new Error('前置不成立：' + rr.error)
+    await writeFile(join(dir, FILM_MASTER_FILE), 'pretend-master')
+    await writeStamp(dir, MASTER_STAMP_FILE, {
+      fingerprint: rr.film.masterFingerprint, status: 'done', jobId: 'old-job',
     })
 
     const r = await sweepFilms(deps, LIST)
@@ -206,21 +219,21 @@ describe('开机补合扫描', () => {
   })
 })
 
-describe('成片一定是 export.mp4（封面让它和母带不再是同一个文件）', () => {
+describe('就绪 = 母带在，不是 export.mp4 在', () => {
   /*
-   * ⚠️ 这条断言【翻过一次面】，两次都是对的，只是前提变了。
+   * ⚠️ 这条断言【翻过两次面】，每次都是对的，只是产物的定义变了：
    *
-   * 加封面之前：没选 BGM 的项目不生成 export.mp4，成片就是 master.mp4
-   * （省一份 500MB 拷贝）。那时 judgeFilm 必须认这个回落，否则 filmInfo
-   * 永远报「合成中」、每次轮询还重排一条。
+   *   ① 最早：没选 BGM 的项目不生成 export.mp4，成片就是母带 → 认回落。
+   *   ② 加封面之后：成片一定比母带多两帧，两者不是同一个文件 → 不认回落。
+   *   ③ 现在：成片【在下载那一刻才现混】，盘上根本不存在 export.mp4
+   *      → 判据只能认母带。
    *
-   * 加封面之后：成片 = 封面两帧 + 正片，比母带多两帧，两者不可能是同一个
-   * 文件。要是还认那条回落，所有无-BGM 的项目都会被判成"已就绪"，于是
-   * 永远不去拼封面，用户永远看不到这个功能生效。
+   * 第 ③ 次翻面的代价是一次线上回归：判据还在等一个再也不会出现的文件，
+   * 于是「能播放、但下载灰着、列表永远 0%、后台无限重排」四个症状一起出现。
    *
-   * 所以现在：只有母带、没有 export.mp4 → 必须去合（拼封面，几秒钟）。
+   * 【教训】：改了产物的定义，就必须同时改判定它的那一行——以及【夹具】。
    */
-  it('【只有母带、没有 export.mp4 → 要去拼封面】', async () => {
+  it('【只有母带 → 就绪】成片是下载时才现混的，盘上不该等 export.mp4', async () => {
     const deps = q.deps(dataDir)
     const id = await makeReadyProject('无BGM成片')
     const dir = assetDir(USER, LIST, id)
@@ -229,33 +242,31 @@ describe('成片一定是 export.mp4（封面让它和母带不再是同一个�
 
     await writeFile(join(dir, FILM_MASTER_FILE), 'master-bytes')
     await writeStamp(dir, MASTER_STAMP_FILE, { fingerprint: r.film.masterFingerprint, status: 'done', jobId: 'j-m' })
-    await writeStamp(dir, FILM_STAMP_FILE, { fingerprint: r.film.fingerprint, status: 'done', jobId: 'j-f' })
 
     const info = await filmInfo(deps, USER, id)
-    expect(info.state).toBe('building')
-    // 2 条：背景轨预拼 + 成片本身（和这个文件里其它用例一致）。
-    // 成片那条会走【轻队列】——母带现成，只剩封面渲染 + concat copy。
-    expect(q.enqueued).toHaveLength(2)
+    expect(info.state).toBe('ready')
+    // ⚠️ 已经就绪就不该再排任何活——这正是"无限重排"那次回归的直接症状
+    expect(q.enqueued).toEqual([])
   })
 
-  it('【有 BGM 的项目仍认 export.mp4，不被母带回落误判】', async () => {
+  it('【选了 BGM 也一样就绪】音乐是下载时才混进去的，不影响盘上的画面', async () => {
     const deps = q.deps(dataDir)
     const id = await makeReadyProject('有BGM成片')
     const dir = assetDir(USER, LIST, id)
-    // 给它选一首库里的 BGM，让 bgmPath 非空——此时成片必须是 export.mp4
     const db = openUserDb(USER, LIST)
-    // 没有真实库 BGM，直接塞一个 bgm 素材让 resolveFilm 的 bgmPath 非空
     const bgm = join(dir, 'bgm.mp3'); await writeFile(bgm, 'x')
     db.addAsset({ projectId: id, kind: 'bgm', path: bgm, originalName: 'b.mp3', size: 1 })
     db.close()
     const r = resolveFilm(deps, USER, id)
     if (!r.ok) throw new Error('前置不成立：' + r.error)
-    // 只有母带、没有 export.mp4 —— 有 BGM 的项目这【不算】ready
     await writeFile(join(dir, FILM_MASTER_FILE), 'm')
     await writeStamp(dir, MASTER_STAMP_FILE, { fingerprint: r.film.masterFingerprint, status: 'done', jobId: 'j-m' })
-    await writeStamp(dir, FILM_STAMP_FILE, { fingerprint: r.film.fingerprint, status: 'done', jobId: 'j-f' })
 
     const info = await filmInfo(deps, USER, id)
-    expect(info.state).not.toBe('ready')   // 缺 export.mp4，还没混音，不能算好
+    /*
+     * 换 BGM / 调音量都【不该】把"就绪"打翻：它们在下载那一刻才生效，
+     * 盘上的画面一帧都没变。以前它们进成片指纹、会触发重合，那是旧架构。
+     */
+    expect(info.state).toBe('ready')
   })
 })

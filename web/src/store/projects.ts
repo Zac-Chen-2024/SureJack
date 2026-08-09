@@ -124,6 +124,8 @@ export interface Project {
    * 老项目一律 settled——它们从来没有这一步。
    */
   openingState: 'pending' | 'settled'
+  /** 配音参数的草稿（还没确认的那组值）。JSON，空串 = 没在改 */
+  voiceDraftJson: string
   /** 配音在混音时的增益，1 = 原样。和 voiceVolume（Azure 合成参数）不是一回事 */
   voiceGain: number
   /** 水印文字。空 = 不打水印 */
@@ -177,7 +179,7 @@ interface ProjectsState {
   select: (id: string) => void
   updateScript: (text: string) => Promise<void>
   /** 素材选择类字段的通用补丁（乐观更新）。setBgm / setBgmVolume 的共用底座 */
-  patchProject: (patch: Partial<Pick<Project, 'bgmLibraryId' | 'bgmVolume' | 'subtitleMarginV' | 'subtitleFontSize' | 'name' | 'voiceGain' | 'coverTitle' | 'inVideoTitle' | 'watermarkText' | 'voiceName' | 'voiceRate' | 'voiceVolume' | 'voicePitch'>>) => Promise<void>
+  patchProject: (patch: Partial<Pick<Project, 'bgmLibraryId' | 'bgmVolume' | 'subtitleMarginV' | 'subtitleFontSize' | 'name' | 'voiceGain' | 'voiceDraftJson' | 'coverTitle' | 'inVideoTitle' | 'watermarkText' | 'voiceName' | 'voiceRate' | 'voiceVolume' | 'voicePitch'>>) => Promise<void>
   /** 选/取消选背景音乐。null 表示不要 BGM */
   setBgm: (bgmLibraryId: string | null) => Promise<void>
   /** 调背景音乐音量。调用方负责节流——见 AssetPanel 的滑块 */
@@ -188,6 +190,8 @@ interface ProjectsState {
   /** 配音参数草稿。拖动/选择只改它，确认才落库+重配音 */
   draftVoice: VoiceDraft | null
   setDraftVoice: (patch: Partial<VoiceDraft>) => void
+  /** 进项目时把库里存的配音草稿灌回来 */
+  hydrateDraftVoice: () => void
   resetDraftVoice: () => void
   commitVoiceParams: () => Promise<void>
   /*
@@ -210,6 +214,9 @@ interface ProjectsState {
   remove: (id: string) => Promise<void>
   current: () => Project | null
 }
+
+/** 配音草稿的落库防抖。模块级：整个 app 同时只可能在改一条项目的草稿 */
+let draftTimer: ReturnType<typeof setTimeout> | null = null
 
 export const useProjects = create<ProjectsState>((set, get) => ({
   items: [], currentId: null, loading: false, saving: false,
@@ -251,7 +258,16 @@ export const useProjects = create<ProjectsState>((set, get) => ({
 
   // 切项目要清掉草稿——否则上一个项目那个没确认的高度会跟着过来，
   // 界面显示着 A 的改动、确认下去改的却是 B
-  select (id) { saveLastProjectId(id); set({ currentId: id, draftMarginV: null, draftFontSize: null, draftVoice: null }) },
+  select (id) {
+    saveLastProjectId(id)
+    set({ currentId: id, draftMarginV: null, draftFontSize: null, draftVoice: null })
+    /*
+     * 【切过去之后立刻把这条项目的配音草稿灌回来】。
+     * 上面那句先把 draftVoice 清空是必要的——不清的话，A 项目调到一半的值
+     * 会漏到 B 项目上；清完再按【新项目自己的】草稿灌，两件事都占全。
+     */
+    get().hydrateDraftVoice()
+  },
 
   /**
    * 保存文案。乐观更新：先改本地（打字不卡），再发请求。
@@ -273,7 +289,7 @@ export const useProjects = create<ProjectsState>((set, get) => ({
    * 点一下 BGM 要立刻选中、拖滑块要跟手，不能等一个来回。
    * 后端回来的整条项目再覆盖一次，以它为准。
    */
-  async patchProject (patch: Partial<Pick<Project, 'bgmLibraryId' | 'bgmVolume' | 'subtitleMarginV' | 'subtitleFontSize' | 'name' | 'voiceGain' | 'coverTitle' | 'inVideoTitle' | 'watermarkText' | 'voiceName' | 'voiceRate' | 'voiceVolume' | 'voicePitch'>>) {
+  async patchProject (patch: Partial<Pick<Project, 'bgmLibraryId' | 'bgmVolume' | 'subtitleMarginV' | 'subtitleFontSize' | 'name' | 'voiceGain' | 'voiceDraftJson' | 'coverTitle' | 'inVideoTitle' | 'watermarkText' | 'voiceName' | 'voiceRate' | 'voiceVolume' | 'voicePitch'>>) {
     const id = get().currentId
     if (!id) return
     set((s) => ({ items: s.items.map((p) => (p.id === id ? { ...p, ...patch } : p)) }))
@@ -299,6 +315,35 @@ export const useProjects = create<ProjectsState>((set, get) => ({
   setDraftFontSize (size) { set({ draftFontSize: size }) },
 
   draftVoice: null,
+  /**
+   * 从库里把上次调到一半的配音参数灌回来。
+   *
+   * ⚠️【为什么必须有这一步】：用户拖了滑块、没点「确认」就离开，
+   * 草稿只活在内存里，回来就没了——他只好每次重调一遍。
+   * 和"挑开头挑一半丢了""分集断点选一半丢了"是同一类错：
+   * 把【保存】和【执行】绑在了同一个按钮上。
+   */
+  hydrateDraftVoice () {
+    const p = get().current()
+    if (!p) { set({ draftVoice: null }); return }
+    const raw = p.voiceDraftJson ?? ''
+    if (raw === '') { set({ draftVoice: null }); return }
+    try {
+      const d = JSON.parse(raw) as Partial<VoiceDraft>
+      if (typeof d.voiceRate !== 'number') { set({ draftVoice: null }); return }
+      set({
+        draftVoice: {
+          voiceName: typeof d.voiceName === 'string' ? d.voiceName : p.voiceName,
+          voiceRate: d.voiceRate,
+          voiceVolume: typeof d.voiceVolume === 'number' ? d.voiceVolume : p.voiceVolume,
+          voicePitch: typeof d.voicePitch === 'number' ? d.voicePitch : p.voicePitch,
+        },
+      })
+    } catch {
+      set({ draftVoice: null })     // 坏数据当没有，别把面板搞崩
+    }
+  },
+
   setDraftVoice (patch) {
     // 从已存值起草，再叠上这次的改动——组件不必自己拼完整对象
     const cur = get().current()
@@ -307,9 +352,23 @@ export const useProjects = create<ProjectsState>((set, get) => ({
       voiceVolume: cur.voiceVolume, voicePitch: cur.voicePitch,
     } : null)
     if (!base) return
-    set({ draftVoice: { ...base, ...patch } })
+    const next = { ...base, ...patch }
+    set({ draftVoice: next })
+    /*
+     * 【拖一下存一下】（防抖 500ms）。存的是草稿字段，不进指纹——
+     * 直接写 voice_rate 那几列的话，用户只是拖了下滑块就会让母带指纹失效，
+     * 系统立刻用【老配音】重烧十几分钟，纯属白烧。
+     */
+    if (draftTimer !== null) clearTimeout(draftTimer)
+    draftTimer = setTimeout(() => {
+      void get().patchProject({ voiceDraftJson: JSON.stringify(next) })
+    }, 500)
   },
-  resetDraftVoice () { set({ draftVoice: null }) },
+  resetDraftVoice () {
+    if (draftTimer !== null) clearTimeout(draftTimer)
+    set({ draftVoice: null })
+    void get().patchProject({ voiceDraftJson: '' })
+  },
 
   /*
    * 只把配音参数落库，清掉草稿。【不在这里触发重新生成】——重配音要烧
@@ -322,7 +381,10 @@ export const useProjects = create<ProjectsState>((set, get) => ({
     await get().patchProject({
       voiceName: d.voiceName, voiceRate: d.voiceRate,
       voiceVolume: d.voiceVolume, voicePitch: d.voicePitch,
+      // 已经提交到正式字段了，草稿就该清掉——留着会在下次进来时盖住新值
+      voiceDraftJson: '',
     })
+    if (draftTimer !== null) clearTimeout(draftTimer)
     set({ draftVoice: null })
   },
 

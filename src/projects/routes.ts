@@ -76,7 +76,7 @@ export function registerProjectRoutes (app: FastifyInstance, deps: Deps): void {
 
   app.patch<{ Params: { id: string }; Body: {
     name?: unknown; scriptText?: unknown; aspectRatio?: unknown
-    bgmLibraryId?: unknown; bgmVolume?: unknown; voiceGain?: unknown
+    bgmLibraryId?: unknown; bgmVolume?: unknown; voiceGain?: unknown; voiceDraftJson?: unknown
     subtitleMarginV?: unknown; subtitleFontSize?: unknown
     voiceName?: unknown; voiceRate?: unknown; voiceVolume?: unknown; voicePitch?: unknown
     coverTitle?: unknown; inVideoTitle?: unknown; watermarkText?: unknown
@@ -85,6 +85,7 @@ export function registerProjectRoutes (app: FastifyInstance, deps: Deps): void {
       const patch: {
         name?: string; scriptText?: string; aspectRatio?: string
         bgmLibraryId?: string | null; bgmVolume?: number; voiceGain?: number
+        voiceDraftJson?: string
         subtitleMarginV?: number; subtitleFontSize?: number
         voiceName?: string; voiceRate?: number; voiceVolume?: number; voicePitch?: number
         coverTitle?: string; inVideoTitle?: string; watermarkText?: string
@@ -139,6 +140,14 @@ export function registerProjectRoutes (app: FastifyInstance, deps: Deps): void {
        * 上界 4（+12dB）：再高就是把噪底一起放大，而归一化那步本来就会
        * 把整体推到平台基准，用不着靠它硬顶。
        */
+      /*
+       * voiceDraftJson：配音参数的草稿。存的是【还没确认】的那组值，
+       * 不进指纹、不影响任何产物——它只保证"下次进来还是我上次调的"。
+       * 空串 = 清掉草稿（确认之后调用方会这么做）。
+       */
+      const vd = req.body?.voiceDraftJson
+      if (typeof vd === 'string') patch.voiceDraftJson = vd.slice(0, 2000)
+
       const vg = req.body?.voiceGain
       if (typeof vg === 'number' && Number.isFinite(vg)) {
         patch.voiceGain = Math.min(4, Math.max(0.1, vg))
