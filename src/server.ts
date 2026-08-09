@@ -21,6 +21,7 @@ import { registerAudioRoutes } from './audio/routes.js'
 import { ExportQueue } from './queue/queue.js'
 import { resetStuckVoices } from './tts/recover.js'
 import { sweepDelivered } from './compose/deliver.js'
+import { sweepArchive, sweepOrphanAssets } from './compose/archive.js'
 import { openUserDb } from './db/user-db.js'
 import { assetDir } from './assets/storage.js'
 import { registerExportRoutes } from './queue/routes.js'
@@ -284,6 +285,31 @@ export function buildServer (opts: BuildOpts = {}): FastifyInstance {
         const n = await sweepDelivered(dirs)
         if (n > 0) app.log.info({ 清掉: n }, '开机清扫：上次遗留的下载临时文件')
       })().catch(() => { /* 清扫失败不该拦住启动 */ })
+
+      /*
+       * 【孤儿素材目录】：项目删了、文件还躺在盘上。实测线上就有一个这样的
+       * 目录白占 1.34 GB，而没有任何东西会来认领它。
+       */
+      void sweepOrphanAssets(whitelist)
+        .then((n) => { if (n > 0) app.log.info({ 释放字节: n }, '开机清扫：孤儿素材目录') })
+        .catch(() => { /* 清扫失败不该拦住启动 */ })
+
+      /*
+       * 【归档扫描】：下载过、而且两小时没动过的项目，把可重算的大文件收起来
+       * （一条 13 分钟的片子 1.3GB → 9MB）。每 15 分钟扫一次——
+       * 阈值是两小时，扫得再密也只是白跑。
+       */
+      const archiveTimer = setInterval(() => {
+        void sweepArchive(whitelist)
+          .then((r) => {
+            if (r.length > 0) {
+              const mb = Math.round(r.reduce((n, x) => n + x.freedBytes, 0) / 1048576)
+              app.log.info({ 归档: r.map((x) => x.name), 释放MB: mb }, '归档：久未使用的项目已收起')
+            }
+          })
+          .catch(() => { /* 下一轮再说 */ })
+      }, 15 * 60 * 1000)
+      archiveTimer.unref?.()
 
       void sweepFilms({ whitelist, libraryDataDir, queue }, whitelist)
         .then((r) => {

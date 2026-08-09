@@ -19,6 +19,7 @@ import { MobileProjectList } from '../components/mobile/MobileProjectList'
 import { MobileNewProject } from '../components/mobile/MobileNewProject'
 import { MobileStartSelect } from '../components/mobile/MobileStartSelect'
 import { useDownloads } from '../store/downloads'
+import { api } from '../api/client'
 import { MobileFilmPlayer } from '../components/mobile/MobileFilmPlayer'
 import { MobileGenerating } from '../components/mobile/MobileGenerating'
 import { AppUpdateBanner } from '../components/mobile/AppUpdateBanner'
@@ -147,7 +148,34 @@ export function MobileWorkspace () {
    * 进入了预览/微调的阶段，那才是编辑器的地盘。
    */
   function openProject (id: string) {
+    const p0 = useProjects.getState().items.find((x) => x.id === id)
+    /*
+     * 【归档的先问一句，别默默开始复原】。复原要重拼背景轨 + 重烧母带，
+     * 十几分钟——不问就动手，用户点进来只会看到"合成中"，不知道是自己
+     * 刚触发的、也不知道要等多久。
+     *
+     * 选"不用"就什么都不做：继续保持归档，下次再问。
+     */
+    if (p0 && p0.archivedAt !== '') {
+      const yes = confirm(
+        `老大，「${p0.name}」太久没使用先收起来了，需要恢复吗？\n\n` +
+        '恢复要重新合成画面，大约 15 分钟。文案、配音、字幕都还在，' +
+        '恢复出来的片子和原来一模一样。')
+      if (!yes) return
+      useProjects.getState().select(id)
+      void api.post(`/api/projects/${id}/restore`)
+        .then(() => useProjects.getState().load())
+        .catch(() => { /* 失败了下次轮询会把真实状态显示出来 */ })
+      push({ k: 'editor' })
+      return
+    }
+
     useProjects.getState().select(id)
+    /*
+     * 【记一笔"我动过这条"】。归档扫描按它算多久没动——只按 updatedAt 的话，
+     * 天天在看但没改过的片子会被收起来。
+     */
+    void api.post(`/api/projects/${id}/touch`).catch(() => { /* 记不上不影响使用 */ })
     const p = useProjects.getState().items.find((x) => x.id === id)
     /*
      * 【开头还没挑完的，点进去要回到那一屏】。和上面草稿那条同一个道理：

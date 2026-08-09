@@ -274,6 +274,15 @@ export function registerExportRoutes (app: FastifyInstance, deps: Deps): void {
        * 触发，临时文件会一直留在盘上，下几次就把磁盘堆满了——那正是这套
        * 改动本来要解决的问题。
        */
+      /*
+       * 【下载过的才会被归档】。没下载过说明还在打磨，收走等于帮倒忙——
+       * 用户下次进来要等十几分钟才能接着看。
+       */
+      withUserDb(name, (db) => db.updateProject(req.params.id, {
+        downloadedAt: new Date().toISOString(),
+        touchedAt: new Date().toISOString(),
+      }))
+
       const stream = createReadStream(path)
       stream.on('close', () => {
         /*

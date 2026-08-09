@@ -52,7 +52,12 @@ export const VOICES: VoiceOption[] = [
 export interface VoiceDraft {
   voiceName: string; voiceRate: number; voiceVolume: number; voicePitch: number
 }
-export const DEFAULT_VOICE_RATE = 75
+export const DEFAULT_VOICE_RATE = 65
+/**
+ * 新建项目的默认音调 +5。⚠️ 和 PITCH_RANGE.default（0，中性值）不是一回事——
+ * 后者锚着迁移回填和母带指纹的老默认判定，改了老项目全重烧。
+ */
+export const DEFAULT_VOICE_PITCH = 5
 export const RATE_RANGE = { min: -50, max: 100, default: 0 }
 export const VOLUME_RANGE = { min: -50, max: 50, default: 0 }
 export const PITCH_RANGE = { min: -50, max: 50, default: 0 }
@@ -126,6 +131,10 @@ export interface Project {
   openingState: 'pending' | 'settled'
   /** 配音参数的草稿（还没确认的那组值）。JSON，空串 = 没在改 */
   voiceDraftJson: string
+  /** 归档时间（ISO）。非空 = 已归档：大文件收起来了，要复原才能看 */
+  archivedAt: string
+  /** 最后一次下载的时间（ISO）。归档只收下载过的 */
+  downloadedAt: string
   /** 配音在混音时的增益，1 = 原样。和 voiceVolume（Azure 合成参数）不是一回事 */
   voiceGain: number
   /** 水印文字。空 = 不打水印 */

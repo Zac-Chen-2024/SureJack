@@ -27,9 +27,15 @@ import {
  */
 
 /** 项目此刻处在哪一步。成片状态来自列表轮询（filmProgress） */
-type Status = 'draft' | 'voicing' | 'opening' | 'render' | 'failed' | 'done'
+type Status = 'draft' | 'voicing' | 'opening' | 'render' | 'failed' | 'done' | 'archived'
 
 function statusOf (p: Project, film?: { composing: boolean; state: string }): Status {
+  /*
+   * 【归档要盖过一切】。归档的项目盘上没有画面了，说它"已完成"是骗人——
+   * 点进去什么都放不出来。而它也不是"失败"或"合成中"：内容一个字节没丢，
+   * 只是收起来了，随时能复原。所以它是独立的一档。
+   */
+  if (p.archivedAt !== '' && !film?.composing) return 'archived'
   /*
    * 【"等你挑开头"要盖过其它一切】。这条片子的合成正被闸门拦着：
    * 配音可能已经好了（ttsState==='ready'），但那不等于"已完成"——
@@ -67,6 +73,7 @@ function statusOf (p: Project, film?: { composing: boolean; state: string }): St
 
 const STATUS_STYLE: Record<Status, { label: string; cls: string }> = {
   done: { label: '已完成', cls: 'text-accent bg-accent/12' },
+  archived: { label: '归档', cls: 'text-ink-300 bg-ink-800' },
   // 两个"进行中"阶段共用琥珀（语义色，独立于冷/暖主题），靠标签区分；
   // 强调色留给"完成"。
   voicing: { label: '配音中', cls: 'text-[#e0a82e] bg-[#e0a82e]/12' },

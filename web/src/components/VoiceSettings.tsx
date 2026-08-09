@@ -148,7 +148,7 @@ export function VoiceSettings () {
       <ParamSlider
         label="语速" value={rate} range={RATE_RANGE}
         onChange={(n) => setDraftVoice({ voiceRate: n })}
-        ticks={['-50%', '默认 +75%', '+100%']}
+        ticks={['-50%', '默认 +65%', '+100%']}
       />
       <ParamSlider
         label="音量" value={volume} range={VOLUME_RANGE}
@@ -204,7 +204,7 @@ export function VoiceSettings () {
 }
 
 /** 一个百分比偏移滑块。0 居中，两端是范围端点，显示 +N% / -N%。
-    可选 ticks：滑轨下方一排定位标签（如语速的 -50% / 默认 +75% / +100%），
+    可选 ticks：滑轨下方一排定位标签（如语速的 -50% / 默认 +65% / +100%），
     两端对齐、中间居中，帮用户建立"默认在哪、还能往哪走"的方位感。 */
 function ParamSlider ({ label, value, range, onChange, ticks }: {
   label: string

@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { userDbDir } from '../auth/whitelist.js'
 import { DEFAULT_SUBTITLE_MARGIN_V, DEFAULT_SUBTITLE_FONT_SIZE } from '../subtitles/ass.js'
-import { LEGACY_VOICE, DEFAULT_VOICE, DEFAULT_VOICE_RATE, RATE_RANGE, VOLUME_RANGE, PITCH_RANGE } from '../tts/voices.js'
+import { LEGACY_VOICE, DEFAULT_VOICE, DEFAULT_VOICE_RATE, DEFAULT_VOICE_PITCH, RATE_RANGE, VOLUME_RANGE, PITCH_RANGE } from '../tts/voices.js'
 
 /**
  * 素材种类。
@@ -540,7 +540,7 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
         parentProjectId: null,
         episodeIndex: 1,
         voiceName: DEFAULT_VOICE, voiceRate: DEFAULT_VOICE_RATE,
-        voiceVolume: VOLUME_RANGE.default, voicePitch: PITCH_RANGE.default,
+        voiceVolume: VOLUME_RANGE.default, voicePitch: DEFAULT_VOICE_PITCH,
         // 新项目默认走文本(karaoke)，改名默认开；自备路 adopt 时会关掉/不适用
         renameEnabled: true, renameState: 'none',
         renameAnalysisJson: null, renameMapJson: null,

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  VOICES, DEFAULT_VOICE, LEGACY_VOICE, LEGACY_PARAMS, DEFAULT_VOICE_RATE,
+  VOICES, DEFAULT_VOICE, LEGACY_VOICE, LEGACY_PARAMS, DEFAULT_VOICE_RATE, DEFAULT_VOICE_PITCH,
   isAllowedVoice, clampRate, clampVolume, clampPitch, isLegacyParams, pct,
   RATE_RANGE, VOLUME_RANGE, PITCH_RANGE,
 } from '../../src/tts/voices.js'
@@ -16,7 +16,16 @@ describe('音色清单', () => {
     expect(LEGACY_VOICE).toBe('zh-CN-XiaoxiaoNeural')
     expect(DEFAULT_VOICE).not.toBe(LEGACY_VOICE)
     // 新项目默认语速是 75，但中性/老默认仍是 0（指纹 carve-out 靠它）
-    expect(DEFAULT_VOICE_RATE).toBe(75)
+    expect(DEFAULT_VOICE_RATE).toBe(65)
+    expect(DEFAULT_VOICE_PITCH).toBe(5)
+    /*
+     * ⚠️【中性值绝不能跟着动】。RATE_RANGE.default / PITCH_RANGE.default 锚着
+     * 迁移回填和母带指纹的"老默认"判定——改了它们，所有老项目的指纹一起
+     * 失效，开机补合会把片子全部重烧一遍。
+     * 新项目的默认值是另外两个常量，两者【必须分开】。
+     */
+    expect(RATE_RANGE.default).toBe(0)
+    expect(PITCH_RANGE.default).toBe(0)
     expect(LEGACY_PARAMS.rate).toBe(0)
     expect(FE_DEF_RATE).toBe(DEFAULT_VOICE_RATE)
   })

@@ -60,7 +60,7 @@ export const VOLUME_RANGE = { min: -50, max: 50, default: 0 } as const
 export const PITCH_RANGE = { min: -50, max: 50, default: 0 } as const
 
 /**
- * 【新建文本项目的默认语速】+75%。
+ * 【新建文本项目的默认语速】+65%。
  *
  * ⚠️ 这和 RATE_RANGE.default（0）是两回事，别混：
  *   - RATE_RANGE.default = 0 是「中性值」——迁移回填、母带指纹的老默认判定
@@ -68,10 +68,27 @@ export const PITCH_RANGE = { min: -50, max: 50, default: 0 } as const
  *   - DEFAULT_VOICE_RATE = 75 只在 createProject 给【新】项目用。
  * 就像 DEFAULT_VOICE（晓辰）之于 LEGACY_VOICE（晓晓）——新老分开。
  *
- * 为什么是 75：晓辰原生语速偏慢，一篇 4500 字要念 13 分钟；实测 +86% 追平
- * 真人录的 9.8 分，+75% 略从容一点、约 10 分，是个更稳的起点。用户可再调。
+ * 演进：晓辰原生语速偏慢，一篇 4500 字要念 13 分钟；实测 +86% 追平真人录的
+ * 9.8 分，+75% 略从容、约 10 分。用了一阵之后用户定成 **+65%**——他每条新
+ * 项目都要手动调到这儿，那说明该改的是默认值，不是让他每次动手。
+ *
+ * 实测这一档的差别：同一段文字 +75% 念 5.25 秒、+65% 念 5.57 秒，
+ * 差 6.1%（正好等于 1.75/1.65），十分钟的片子差约 37 秒。
  */
-export const DEFAULT_VOICE_RATE = 75
+export const DEFAULT_VOICE_RATE = 65
+
+/**
+ * 【新建文本项目的默认音调】+5。
+ *
+ * ⚠️ 和 PITCH_RANGE.default（0）是两回事，别混——和语速那一对完全同理：
+ *   - PITCH_RANGE.default = 0 是【中性值】。迁移回填、母带指纹的"老默认"
+ *     判定都锚定它，**绝不能改**：改了所有老项目的指纹一起失效，
+ *     开机补合会把它们全部重烧一遍。
+ *   - DEFAULT_VOICE_PITCH = 5 只在 createProject 给【新】项目用。
+ *
+ * 略微提一点音调，听感上更清亮一些；用户可以再调。
+ */
+export const DEFAULT_VOICE_PITCH = 5
 
 export interface VoiceParams {
   voice: string

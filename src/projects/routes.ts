@@ -243,6 +243,46 @@ export function registerProjectRoutes (app: FastifyInstance, deps: Deps): void {
    * 算出同一份排布，所见即所得。
    */
   /**
+   * 「我动过这条项目了」。归档扫描按它算"多久没动"。
+   *
+   * ⚠️【必须和 updatedAt 分开】：updatedAt 只在改了内容时才动，而"打开看了
+   * 一眼""播放了一下"也算动过。按 updatedAt 算的话，天天在看但没改过的
+   * 片子会被收起来——那是帮倒忙。
+   */
+  app.post<{ Params: { id: string } }>(
+    '/api/projects/:id/touch', { preHandler: requireAuth }, async (req, reply) => {
+      const name = getSession(req)!
+      const ok = withUserDb(name, (db) =>
+        db.updateProject(req.params.id, { touchedAt: new Date().toISOString() }))
+      if (!ok) return reply.code(404).send({ error: '项目不存在' })
+      return { ok: true }
+    })
+
+  /**
+   * 复原一条归档的项目：重拼背景轨 + 重烧母带。
+   *
+   * 【为什么是"无损"】：归档只删可重算的东西（背景轨、母带、预览分段）。
+   * 背景排布在敲定开头时就【物化成一份具体清单】存进库了，字幕从库里的
+   * 词级时间戳推，配音文件原样留着——所以复原出来的片子和原来逐帧一致。
+   * 要是排布还是"拿项目 id 现算"，素材库一变就复原不出原样了。
+   */
+  app.post<{ Params: { id: string } }>(
+    '/api/projects/:id/restore', { preHandler: requireAuth }, async (req, reply) => {
+      const name = getSession(req)!
+      const p = withUserDb(name, (db) => db.getProject(req.params.id))
+      if (!p) return reply.code(404).send({ error: '项目不存在' })
+      withUserDb(name, (db) => db.updateProject(req.params.id, {
+        archivedAt: '', touchedAt: new Date().toISOString(),
+      }))
+      /*
+       * 清掉归档标记之后照常入队：正常路径发现母带不在，自然会重拼、重烧。
+       * 不用为复原另写一条流水线——那样迟早和主线漂开。
+       */
+      const jobId = await enqueueFilm(deps, name, req.params.id)
+      return { queued: jobId !== null, jobId }
+    })
+
+  /**
    * 挑开头的【草稿】：挑一半也存住。
    *
    * 【为什么要有】：这一屏要在 68 段素材里翻，挑一半接个电话、切个 app
