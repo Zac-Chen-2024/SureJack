@@ -15,6 +15,7 @@ import { listBucket } from '../library/scan.js'
 import { bgTrackInfo, type PrebuildDeps } from '../compose/prebuild.js'
 import { enqueueFilm } from '../compose/film.js'
 import { ensureAudioStats } from '../audio/routes.js'
+import { downloadPrep } from '../compose/download-queue.js'
 
 type Deps = PrebuildDeps
 
@@ -218,6 +219,15 @@ export function registerProjectRoutes (app: FastifyInstance, deps: Deps): void {
        * 不 await——用户点"选这首"不该为了画一条波形多等几秒；
        * 等他滑到音频那一栏时，多半已经算完了。
        */
+      /*
+       * 【音量/音乐一改，就把备好的那份作废】。不作废的话，用户刚拖完滑块
+       * 点下载，拿到的还是上一份——而他要验的正是这次的改动。
+       */
+      if (patch.voiceGain !== undefined || patch.bgmVolume !== undefined
+        || patch.bgmLibraryId !== undefined) {
+        downloadPrep.invalidate(req.params.id)
+      }
+
       if (patch.bgmLibraryId !== undefined) {
         void ensureAudioStats(name, deps.whitelist, req.params.id, deps.libraryDataDir)
           .catch(() => { /* 音频面板那边会再试一次 */ })

@@ -9,7 +9,9 @@ import { getSession, requireAuth } from '../auth/session.js'
 import { downloadableFilm, playableMaster, enqueueFilm, filmInfo, resolveFilm, FILM_STAMP_FILE, type FilmDeps } from '../compose/film.js'
 import { checkpointOf, CHECKPOINT_LABEL, NEXT_STEP } from '../compose/checkpoint.js'
 import { finishedSince } from './notify.js'
-import { deliverFilm, dropDelivered } from '../compose/deliver.js'
+import { dropDelivered } from '../compose/deliver.js'
+import { downloadPrep } from '../compose/download-queue.js'
+import { FILM_MASTER_FILE } from '../compose/film.js'
 import { writeStamp } from '../compose/stamp.js'
 import {
   COVER_IMAGE, COVER_THUMB_FILE, COVER_THUMB_TITLE_FILE, COVER_THUMB_WIDTH,
@@ -69,6 +71,55 @@ export function registerExportRoutes (app: FastifyInstance, deps: Deps): void {
    * ⚠️【不能用 force】。force 的语义是"不问指纹全部重来"，那正好是
    * 我们要避免的事。
    */
+  /**
+   * 备货：为下载现混一份成片。**同一条项目重复点会并到同一个任务**。
+   *
+   * 分成"备货"和"取货"两步，是因为混一条十几分钟的片子要几十秒。
+   * 一步到位的话，那几十秒里界面什么都没有——用户以为没点上，连点几下，
+   * 每一下各起一个 ffmpeg，把磁盘撑爆（线上真这么坏过）。
+   *
+   * 现在：点一下立刻回一个状态，客户端据此显示「合成中…」，好了再去取。
+   */
+  app.post<{ Params: { id: string }; Body: { preset?: unknown } }>(
+    '/api/projects/:id/download/prepare', { preHandler: requireAuth }, async (req, reply) => {
+      const name = getSession(req)!
+      const project = withUserDb(name, (db) => db.getProject(req.params.id))
+      if (!project) return reply.code(404).send({ error: '项目不存在' })
+      const r = resolveFilm(deps, name, req.params.id)
+      if (!r.ok) return reply.code(409).send({ error: r.error })
+
+      const master = join(r.film.dir, FILM_MASTER_FILE)
+      if (!existsSync(master)) {
+        return reply.code(409).send({ error: '画面还没合好，稍等一下' })
+      }
+
+      /*
+       * 【音量用哪一组】：默认用这条项目自己的；body.preset='default' 时
+       * 用出厂默认（1 / 0.15）。列表里下载会让用户选——他可能只是想要
+       * 一份"标准"的，不想为此改掉项目的设置。
+       */
+      const useDefault = req.body?.preset === 'default'
+      const entry = downloadPrep.request(req.params.id, {
+        dir: r.film.dir,
+        voicePath: r.film.voicePath,
+        voiceGain: useDefault ? 1 : project.voiceGain,
+        bgmPath: r.film.bgmPath,
+        bgmVolume: useDefault ? 0.15 : project.bgmVolume,
+        coverTitle: r.film.coverTitle,
+        aspect: r.film.aspect,
+      }, statSync(master).size)
+
+      return { state: entry.state, error: entry.error }
+    })
+
+  /** 备货到哪一步了。客户端拿它把「合成中…」换成真正的下载 */
+  app.get<{ Params: { id: string } }>(
+    '/api/projects/:id/download/state', { preHandler: requireAuth }, async (req) => {
+      const e = downloadPrep.snapshot(req.params.id)
+      if (e === null) return { state: 'none' as const, error: null }
+      return { state: e.state, error: e.error }
+    })
+
   app.post<{ Params: { id: string } }>(
     '/api/projects/:id/retry', { preHandler: requireAuth }, async (req, reply) => {
       const name = getSession(req)!
@@ -138,30 +189,34 @@ export function registerExportRoutes (app: FastifyInstance, deps: Deps): void {
       if (!project) return reply.code(404).send({ error: '项目不存在' })
 
       /*
-       * ⚠️【成片是这一刻现混出来的，盘上不常驻】。
+       * ⚠️【取货，不是现混】。
        *
-       * 用户的要求：界面里的视频永远只是画面，配音和音乐独立，只有下载时
-       * 才真的烧进去，给完就删。所以这里不是"找一个现成文件"，而是
-       * 【按此刻的音量设置现混一份】——顺带保证了下载到的永远不是过期版本。
+       * 混音归 /download/prepare 那一步（带去重、带磁盘检查）。这里只负责
+       * 把备好的那份传出去。分开的理由是线上真踩过：一步到位的话，混音那
+       * 几十秒里界面毫无反馈，用户以为没点上就连点几下，每一下各起一个
+       * ffmpeg 各写几百 MB，把磁盘撑爆——而症状只是"下载键点了没反应"。
        *
-       * 代价：一条十分钟的片子现混要几秒（视频流 -c:v copy，不重编码），
-       * 用户点下载到开始传之间会多等这几秒。值得：它换来的是调音量零成本，
-       * 而调音量是高频操作、下载是低频操作。
+       * 没备货就【就地备一次并等它】：安卓 DownloadManager 是直接来拉 URL 的，
+       * 它不会先替我们调 prepare。
        */
-      const r = resolveFilm(deps, name, req.params.id)
-      if (!r.ok) return reply.code(404).send({ error: r.error })
-      let path: string
-      try {
-        path = await deliverFilm({
-          dir: r.film.dir,
-          voicePath: r.film.voicePath, voiceGain: project.voiceGain,
-          bgmPath: r.film.bgmPath, bgmVolume: project.bgmVolume,
-          coverTitle: r.film.coverTitle, aspect: r.film.aspect,
-        })
-      } catch (e) {
-        req.log.error({ err: e }, '下载时现混失败')
-        return reply.code(409).send({ error: e instanceof Error ? e.message : '还不能下载' })
+      let entry = downloadPrep.snapshot(req.params.id)
+      if (entry === null) {
+        const r0 = resolveFilm(deps, name, req.params.id)
+        if (!r0.ok) return reply.code(409).send({ error: r0.error })
+        const m = join(r0.film.dir, FILM_MASTER_FILE)
+        if (!existsSync(m)) return reply.code(409).send({ error: '画面还没合好' })
+        downloadPrep.request(req.params.id, {
+          dir: r0.film.dir, voicePath: r0.film.voicePath, voiceGain: project.voiceGain,
+          bgmPath: r0.film.bgmPath, bgmVolume: project.bgmVolume,
+          coverTitle: r0.film.coverTitle, aspect: r0.film.aspect,
+        }, statSync(m).size)
       }
+      entry = await downloadPrep.wait(req.params.id)
+      if (entry === null || entry.state === 'error' || entry.path === null) {
+        req.log.error({ err: entry?.error }, '下载时现混失败')
+        return reply.code(409).send({ error: entry?.error ?? '还不能下载' })
+      }
+      const path = entry.path
 
       /*
        * 【传完就删】。用 'close' 而不是 'end'：客户端中途断开时 'end' 不会
@@ -169,7 +224,14 @@ export function registerExportRoutes (app: FastifyInstance, deps: Deps): void {
        * 改动本来要解决的问题。
        */
       const stream = createReadStream(path)
-      stream.on('close', () => { void dropDelivered(path) })
+      stream.on('close', () => {
+        /*
+         * 【取走即作废】：删文件、也把备货记录清掉。不清的话，用户改完音量
+         * 再下一次，拿到的还是上一份——而他刚刚才亲手调过。
+         */
+        downloadPrep.drop(req.params.id)
+        void dropDelivered(path)
+      })
 
       reply.header('Content-Type', 'video/mp4')
       reply.header('Content-Disposition',
