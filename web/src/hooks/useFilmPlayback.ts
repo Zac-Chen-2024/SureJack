@@ -180,6 +180,8 @@ export function useFilmPlayback (
   // 卸载时收掉 AudioContext，别让它挂着
   useEffect(() => () => { try { void ctxRef.current?.close() } catch { /* 已关 */ } }, [])
 
+
+
   // 换项目：停下、回到开头
   useEffect(() => { setPlaying(false); setCur(0); setDur(0) }, [project?.id])
 
@@ -216,6 +218,19 @@ export function useFilmPlayback (
    * 作用：让 WebView/浏览器把播放头落在开头并【渲染出第一帧】，于是未播放时
    * 看到的是画面本身，而不是安卓 WebView 那个又大又丑的默认播放键占位图。
    */
+  /*
+   * 【预览走 HLS 分段，不是整条 mp4】。
+   *
+   * 母带实测 7.5 Mbps（13 分钟 726MB），而跨洲可用带宽常常只有 2–5 Mbps——
+   * 播放速度追不上片子的码率，用户在国外看到的就是一直转圈。
+   * 分段版是 540×960 / 约 1 Mbps，小七八倍，而且只拉当前要播的那几段：
+   * 拖到第 10 分钟不用先把前面 9 分钟拉下来。
+   *
+   * 【为什么不用 <video src=m3u8>】：安卓的 WebView / Chrome 【不原生支持
+   * HLS】（Safari 支持）。所以要 hls.js 走 MSE 喂给 video 元素。
+   * 拿不到 MSE 的老环境自动回落到整条 mp4——慢，但能播。
+   */
+  const hlsSrc = project ? `/api/projects/${project.id}/preview/index.m3u8?v=${encodeURIComponent(ver)}` : null
   const src = project ? `/api/projects/${project.id}/film/master/stream?v=${encodeURIComponent(ver)}#t=0.001` : null
   const bgmSrc = project?.bgmLibraryId ? `/api/library/items/${project.bgmLibraryId}` : null
   /*
@@ -225,6 +240,37 @@ export function useFilmPlayback (
   const voiceSrc = project && project.ttsState === 'ready'
     ? `/api/projects/${project.id}/voice/stream?v=${encodeURIComponent(project.updatedAt)}`
     : null
+  /*
+   * 把 HLS 接到 <video> 上。换项目 / 母带重烧（ver 变）都要重新接。
+   *
+   * ⚠️【hls.js 是动态 import 的】：它有几十 KB，而只有真要播视频时才用得上。
+   * 静态 import 会把它塞进首屏包里，拖慢每一次冷启动——包括只是来看看
+   * 列表的那些次。
+   */
+  useEffect(() => {
+    const v = videoRef.current
+    if (v === null || hlsSrc === null) return
+    let killed = false
+    let inst: { destroy: () => void } | null = null
+
+    void (async () => {
+      try {
+        const mod = await import('hls.js')
+        const Hls = mod.default
+        if (killed || videoRef.current === null) return
+        if (!Hls.isSupported()) return          // 老环境：下面的 <video src> 兜底
+        const hls = new Hls({ maxBufferLength: 30 })
+        inst = hls
+        hls.loadSource(hlsSrc)
+        hls.attachMedia(videoRef.current)
+      } catch {
+        // 拉不到 hls.js（离线、被拦）就用整条 mp4，慢但能看
+      }
+    })()
+
+    return () => { killed = true; try { inst?.destroy() } catch { /* 已销毁 */ } }
+  }, [hlsSrc])
+
   // 键在母带版本上：母带重烧才换新封面，否则长缓存命中、瞬开
   const poster = project ? `/api/projects/${project.id}/film/poster.jpg?v=${encodeURIComponent(ver)}` : null
 

@@ -11,6 +11,7 @@ import { checkpointOf, CHECKPOINT_LABEL, NEXT_STEP } from '../compose/checkpoint
 import { finishedSince } from './notify.js'
 import { dropDelivered } from '../compose/deliver.js'
 import { downloadPrep } from '../compose/download-queue.js'
+import { buildPreview, hasPreview, previewDir } from '../compose/preview.js'
 import { FILM_MASTER_FILE } from '../compose/film.js'
 import { writeStamp } from '../compose/stamp.js'
 import {
@@ -110,6 +111,56 @@ export function registerExportRoutes (app: FastifyInstance, deps: Deps): void {
       }, statSync(master).size)
 
       return { state: entry.state, error: entry.error }
+    })
+
+  /**
+   * 预览的 HLS 索引和分段。
+   *
+   * 母带实测 7.5 Mbps，而跨洲可用带宽常常只有 2–5 Mbps——播放速度追不上
+   * 片子的码率，用户看到的就是一直转圈。这里给的是 540×960 / 约 1 Mbps 的
+   * 分段版本，小七八倍，而且只拉当前要播的那几段。
+   *
+   * 【没有就现做】：老项目、或者母带刚重烧过的，第一次点开会等一下；
+   * 之后一直复用。做的过程放在这条请求里等，是因为播放器拿不到索引就没法
+   * 开始——先回一个 404 让它以为没有，反而更糟。
+   */
+  app.get<{ Params: { id: string; file: string } }>(
+    '/api/projects/:id/preview/:file', { preHandler: requireAuth }, async (req, reply) => {
+      const name = getSession(req)!
+      const project = withUserDb(name, (db) => db.getProject(req.params.id))
+      if (!project) return reply.code(404).send({ error: '项目不存在' })
+      /*
+       * ⚠️ 文件名只允许索引和分段两种形态。这是个【拼路径的接口】，
+       * 不挡的话 ../../ 就能读到素材目录外面去。
+       */
+      const f = req.params.file
+      if (!/^(index\.m3u8|seg-\d{4}\.ts)$/.test(f)) {
+        return reply.code(400).send({ error: '非法的分段名' })
+      }
+
+      const dir = assetDir(name, deps.whitelist, req.params.id)
+      const master = join(dir, FILM_MASTER_FILE)
+      if (!hasPreview(dir)) {
+        if (!existsSync(master)) return reply.code(409).send({ error: '画面还没合好' })
+        try {
+          await buildPreview(dir, master)
+        } catch (e) {
+          req.log.error({ err: e }, '生成预览分段失败')
+          return reply.code(500).send({ error: '预览生成失败' })
+        }
+      }
+
+      const path = join(previewDir(dir), f)
+      if (!existsSync(path)) return reply.code(404).send({ error: '分段不存在' })
+      /*
+       * 分段是【内容寻址】的：同一个索引里的 seg-0007.ts 永远是同一段字节，
+       * 母带重烧会把整个目录清掉重来。所以可以放心长缓存。
+       * 索引本身不缓存——它是那份"目录"，重做之后必须立刻拿到新的。
+       */
+      if (f.endsWith('.ts')) reply.header('Cache-Control', 'private, max-age=604800, immutable')
+      else reply.header('Cache-Control', 'no-cache')
+      return sendFileRange(reply, path,  req.headers.range,
+        f.endsWith('.ts') ? 'video/mp2t' : 'application/vnd.apple.mpegurl')
     })
 
   /** 备货到哪一步了。客户端拿它把「合成中…」换成真正的下载 */

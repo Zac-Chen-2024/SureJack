@@ -46,6 +46,7 @@ import { buildAssForProject, aspectOf, LEGACY_SUBTITLE_MAX_CHARS } from '../subt
 import { render } from '../render/index.js'
 import { buildBackgroundTrack } from './build.js'
 import { mixAudio } from './mix.js'
+import { buildPreview } from './preview.js'
 import {
   COVER_CLIP_FILE, COVER_IMAGE, coverTitleOf, prependCover, probeAudio, renderCoverClip,
 } from '../cover/cover.js'
@@ -549,6 +550,20 @@ async function buildFilm (
    * （采样率/声道，见 cover.ts 的 probeAudio），而合成阶段【根本还没有音频】。
    * 这条约束正好印证了新的分工——封面属于"成品"那一侧，不属于"画面"这一侧。
    */
+
+  /*
+   * 【预览分段在后台生成，不占用户的等待】。
+   *
+   * 母带 7.5 Mbps，跨洲带宽追不上；预览是 540×960 / 约 1 Mbps 的 HLS 分段，
+   * 小七八倍。但它自己也要编几分钟（13 分钟的片子实测 253 秒）——
+   * 让用户为这一步多等是本末倒置：他要的是"片子好了"，而预览晚几分钟到位
+   * 多半没人察觉。
+   *
+   * 不 await，失败也不影响出片：没有预览时播放器会回落到整条 mp4。
+   */
+  void buildPreview(f.dir, masterPath, { force: true })
+    .catch(() => { /* 点开预览时还会再试一次 */ })
+
   onProgress(100)
 
   /*
