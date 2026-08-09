@@ -264,3 +264,14 @@ button, input, textarea, a, [role="button"], .interactive {
 *::-webkit-scrollbar-corner {
   background: transparent;
 }
+
+/*
+ * ghost 提示：淡入 + 轻微上浮。
+ * 【不做淡出】——它两秒后直接消失。做淡出要么加状态机、要么用 CSS 动画
+ * 的反向播放，为一个看一眼就走的提示不值得；而且消失得干脆反而不拖泥带水。
+ */
+@keyframes sj-ghost-in {
+  from { opacity: 0; transform: translateY(6px) scale(0.98); }
+  to   { opacity: 1; transform: none; }
+}
+.sj-ghost { animation: sj-ghost-in 180ms ease-out; }

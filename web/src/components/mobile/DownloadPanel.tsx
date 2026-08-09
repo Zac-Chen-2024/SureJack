@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { IconDownload, IconCheck, IconClose, IconTrash } from '../ui/Icon'
+import { IconDownload, IconCheck, IconClose, IconTrash, IconLoader } from '../ui/Icon'
+import { useDownloads } from '../../store/downloads'
 
 /**
  * 下载队列悬浮框（项目列表页，账户头像旁边）。
@@ -36,6 +37,8 @@ function mb (bytes: number): string {
 }
 
 export function DownloadPanel () {
+  const prep = useDownloads((s) => s.preparing)
+  const dismiss = useDownloads((s) => s.dismiss)
   const [items, setItems] = useState<NativeDownload[]>([])
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -93,8 +96,15 @@ export function DownloadPanel () {
    * 因为一次都没下载过 → 入口整个不出现 → 用户以为功能没做。
    * 浏览器里没有桥才隐藏（浏览器自带下载管理器，我们再画一个只是重复）。
    */
-  if (!bridge) return null
+  /*
+   * ⚠️【备货中的那一段也算下载任务】。成片是下载那一刻现混的，混完才交给
+   * 原生下载器——在那之前这条任务只活在网页里。不把它算进来的话，用户点完
+   * 下载打开队列看到的是"还没有下载任务"，等于告诉他没点上。
+   */
+  const preparing = Object.values(prep)
+  if (!bridge && preparing.length === 0) return null
   const running = items.filter((d) => d.status === 'running' || d.status === 'paused')
+  const busy = running.length + preparing.filter((p) => p.phase === 'mixing').length
 
   return (
     <div ref={ref} className="relative">
@@ -123,7 +133,7 @@ export function DownloadPanel () {
           <div className="flex items-center gap-2 border-b border-line px-3.5 py-2.5">
             <span className="text-[13px] font-bold text-ink-50">下载</span>
             <span className="ml-auto text-[11px] tabular-nums text-ink-400">
-              {running.length > 0 ? `${running.length} 个进行中` : items.length > 0 ? `${items.length} 条记录` : ''}
+              {busy > 0 ? `${busy} 个进行中` : items.length > 0 ? `${items.length} 条记录` : ''}
             </span>
             <button
               type="button" aria-label="关闭"
@@ -134,7 +144,34 @@ export function DownloadPanel () {
             </button>
           </div>
 
-          {items.length === 0 ? (
+          {/* 备货中的排在最上面：它们是刚点的，用户最想看到的就是这几条 */}
+          {preparing.length > 0 && (
+            <div className="border-b border-line">
+              {preparing.map((p) => (
+                <div key={p.projectId} className="flex items-center gap-2.5 px-3.5 py-2.5">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-[13px] font-medium text-ink-100">{p.name}</p>
+                    <p className={`text-[11px] ${p.phase === 'error' ? 'text-danger' : 'text-ink-400'}`}>
+                      {p.phase === 'error' ? (p.error ?? '合成失败') : '合成中…'}
+                    </p>
+                  </div>
+                  {p.phase === 'error'
+                    ? (
+                      <button
+                        type="button" aria-label="移除"
+                        onClick={() => dismiss(p.projectId)}
+                        className="flex size-6 items-center justify-center rounded-lg text-ink-400 hover:bg-ink-800 hover:text-ink-100"
+                      >
+                        <IconClose className="size-3.5" />
+                      </button>
+                    )
+                    : <IconLoader className="size-4 animate-spin text-accent" />}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {items.length === 0 && preparing.length === 0 ? (
             <div className="flex flex-col items-center gap-2 px-4 py-7 text-center">
               <IconDownload className="size-5 text-ink-600" />
               <p className="text-xs text-ink-400">还没有下载任务</p>

@@ -1,3 +1,4 @@
+import { useDownloads } from '../../store/downloads'
 import { useProjects } from '../../store/projects'
 import { useSubtitles, findCurrentLineIndex } from '../../store/subtitles'
 import { useFilmPlayback } from '../../hooks/useFilmPlayback'
@@ -124,14 +125,21 @@ export function MobileFilmPlayer ({ onBack }: { onBack: () => void }) {
           <IconChevronDown className="size-3.5 opacity-70" strokeWidth={2} />
         </button>
 
-        <a
-          href={`/api/projects/${project.id}/film/download`}
+        {/*
+          * 【不再是 <a href>】。成片是下载那一刻现混的，要几十秒——
+          * 直接导航过去的话，那几十秒里界面毫无反馈，用户会以为没点上
+          * 而连点几下，每一下在服务端各起一个 ffmpeg（线上把磁盘撑爆过）。
+          * 现在点一下立刻进队列、立刻有 ghost 提示。
+          */}
+        <button
+          type="button"
+          onClick={() => useDownloads.getState().start(project.id, project.name)}
           aria-label="下载视频"
           title="下载视频"
           className="flex size-10 items-center justify-center rounded-full bg-accent text-ink-950 shadow-lg shadow-black/30"
         >
           <IconDownload className="size-5" strokeWidth={2.2} />
-        </a>
+        </button>
       </div>
 
       {/* ── 视频加载中：转圈 + 已缓冲百分比 ──────────────────────────

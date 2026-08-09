@@ -18,6 +18,7 @@ import { BottomSheet } from '../components/mobile/BottomSheet'
 import { MobileProjectList } from '../components/mobile/MobileProjectList'
 import { MobileNewProject } from '../components/mobile/MobileNewProject'
 import { MobileStartSelect } from '../components/mobile/MobileStartSelect'
+import { useDownloads } from '../store/downloads'
 import { MobileFilmPlayer } from '../components/mobile/MobileFilmPlayer'
 import { MobileGenerating } from '../components/mobile/MobileGenerating'
 import { AppUpdateBanner } from '../components/mobile/AppUpdateBanner'
@@ -178,6 +179,7 @@ export function MobileWorkspace () {
 
   return (
     <div className="relative h-full overflow-hidden bg-black">
+      <GhostToast />
       {/* 屏级容器：换屏时按方向滑入（进=从右、退=从左带视差）。抽屉开合不换屏，
           所以只有 list↔editor 切换才会重放这个动画。 */}
       <div
@@ -347,15 +349,21 @@ function PreviewLoading ({ onBack, projectId, projectName }: {
           <IconChevronDown className="size-3.5 opacity-70" strokeWidth={2} />
         </button>
 
-        {hasFrame && (
-          <a
-            href={`/api/projects/${projectId}/film/download`}
-            aria-label="下载视频"
-            className="flex size-10 items-center justify-center rounded-full bg-accent text-ink-950 shadow-lg shadow-black/30"
-          >
-            <IconDownload className="size-5" strokeWidth={2.2} />
-          </a>
-        )}
+        {/*
+          * ⚠️【下载和预览是两条独立的链路】。这里【不再看 hasFrame】——
+          * 那是"预览的第一帧加载出来了没有"，和"能不能下载"毫无关系。
+          * 用户明确要求：预览还没加载完也该能下载。
+          * 真正的前提（画面合好没有）由服务端在 prepare 那一步判，
+          * 不够就带原因回来。
+          */}
+        <button
+          type="button"
+          onClick={() => useDownloads.getState().start(projectId, projectName)}
+          aria-label="下载视频"
+          className="flex size-10 items-center justify-center rounded-full bg-accent text-ink-950 shadow-lg shadow-black/30"
+        >
+          <IconDownload className="size-5" strokeWidth={2.2} />
+        </button>
       </div>
     </div>
   )
@@ -418,6 +426,29 @@ function VersionBadge () {
   return (
     <div className="pointer-events-none fixed bottom-1 right-2 z-40 text-[9px] tabular-nums text-ink-700">
       {BUILD_SHA} · {buildTimeLocal()}
+    </div>
+  )
+}
+
+/**
+ * 一句话提示，两秒后自己消失。
+ *
+ * 【为什么不用弹窗】：点下载这种轻动作，弹一个要手动关的框是打断。
+ * 它只需要回答一件事——"我点上了吗"——看一眼就够。
+ *
+ * 压在最上层（z-50）：抽屉、播放器控件都不该盖住它，否则等于没提示。
+ */
+function GhostToast () {
+  const msg = useDownloads((s) => s.ghost)
+  if (msg === null) return null
+  return (
+    <div
+      className="pointer-events-none absolute inset-x-0 z-50 flex justify-center"
+      style={{ top: 'calc(env(safe-area-inset-top, 0px) + 64px)' }}
+    >
+      <div className="sj-ghost rounded-full bg-black/80 px-4 py-2 text-[13px] font-semibold text-white shadow-lg backdrop-blur">
+        {msg}
+      </div>
     </div>
   )
 }

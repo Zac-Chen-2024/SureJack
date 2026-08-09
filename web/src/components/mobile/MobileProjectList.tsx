@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useProjects, type Project } from '../../store/projects'
 import { usePipeline } from '../../store/pipeline'
+import { useDownloads } from '../../store/downloads'
 import { AccountMenu } from '../AccountMenu'
 import { PaletteToggle } from '../PaletteToggle'
 import { DownloadPanel } from './DownloadPanel'
 import {
-  IconPlus, IconLoader, IconTrash, IconMore, IconFilter, IconSearch, IconClose,
+  IconPlus, IconLoader, IconTrash, IconMore, IconDownload, IconFilter, IconSearch, IconClose,
   IconImage, IconImageOff, IconFolder,
 } from '../ui/Icon'
 
@@ -507,7 +508,7 @@ function Row ({ p, i, showCover, film, onOpen, onDelete, inGroup }: {
         {st.label}
       </span>
 
-      <RowMenu name={p.name} onDelete={onDelete} />
+      <RowMenu name={p.name} projectId={p.id} canDownload={st.label === '已完成'} onDelete={onDelete} />
     </div>
   )
 }
@@ -516,7 +517,9 @@ function Row ({ p, i, showCover, film, onOpen, onDelete, inGroup }: {
  * 每行右侧的「⋮」菜单。删除收进这里，不再是那个手机上根本点不着的隐形按钮。
  * 以后加「收藏 / 置顶」直接往菜单里塞一项即可。
  */
-function RowMenu ({ name, onDelete }: { name: string; onDelete: () => void }) {
+function RowMenu ({ name, projectId, canDownload, onDelete }: {
+  name: string; projectId: string; canDownload: boolean; onDelete: () => void
+}) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
@@ -534,7 +537,33 @@ function RowMenu ({ name, onDelete }: { name: string; onDelete: () => void }) {
         <IconMore className="size-4" />
       </button>
       {open && (
-        <div className="absolute right-0 top-full z-20 mt-1 min-w-32 overflow-hidden rounded-xl border border-line bg-ink-850 py-1 shadow-2xl shadow-black/60">
+        <div className="absolute right-0 top-full z-20 mt-1 min-w-40 overflow-hidden rounded-xl border border-line bg-ink-850 py-1 shadow-2xl shadow-black/60">
+          {/*
+            * 【列表里也能下载】。以前只有点进项目、等预览加载出来才有下载按钮——
+            * 而那两件事本来毫无关系。
+            *
+            * 给两个选项是因为"这条片子的音量"和"标准音量"是两种意图：
+            * 用户可能只是想要一份标准的发出去，不想为此改掉项目里调好的设置。
+            */}
+          {canDownload && (
+            <>
+              <button
+                type="button"
+                onClick={() => { setOpen(false); useDownloads.getState().start(projectId, name, 'mine') }}
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] text-ink-100 transition-colors hover:bg-ink-800"
+              >
+                <IconDownload className="size-3.5" />下载 · 我的音量
+              </button>
+              <button
+                type="button"
+                onClick={() => { setOpen(false); useDownloads.getState().start(projectId, name, 'default') }}
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] text-ink-100 transition-colors hover:bg-ink-800"
+              >
+                <IconDownload className="size-3.5" />下载 · 默认音量
+              </button>
+              <div className="my-1 h-px bg-line" />
+            </>
+          )}
           <button
             type="button"
             onClick={() => { setOpen(false); if (confirm(`删除「${name}」？`)) onDelete() }}
