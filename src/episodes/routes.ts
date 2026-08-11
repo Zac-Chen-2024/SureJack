@@ -77,7 +77,9 @@ export function registerEpisodeRoutes (app: FastifyInstance, deps: Deps): void {
    * 这是必然的：内容确实变了（结局被砍掉换成悬念）。所以拆分只该在
    * 配音之前做，界面上也把它放在"确认文案"那一步。
    */
-  app.post<{ Params: { id: string }; Body: { breakIndex?: unknown; introEndIndex?: unknown } }>(
+  app.post<{ Params: { id: string }; Body: {
+    breakIndex?: unknown; introEndIndex?: unknown; sequelOnly?: unknown
+  } }>(
     '/api/projects/:id/split', { preHandler: requireAuth }, async (req, reply) => {
       const name = getSession(req)!
       const breakIndex = Number(req.body?.breakIndex)
@@ -120,6 +122,38 @@ export function registerEpisodeRoutes (app: FastifyInstance, deps: Deps): void {
         })
 
         /*
+         * ── 【只做续集】───────────────────────────────────────────────
+         *
+         * 用户有时候只想发那一集。断点和引子照样要划一次（不划就不知道
+         * 续集从哪儿开始），但主片不配音、不烧录。
+         *
+         * 【做法是把这条项目【本身】变成续集】，而不是"建续集 + 删主片"：
+         *   · 不留空壳——建一条永远不会配音的主片，只会在列表里碍眼，
+         *     还得专门给它一个"半成品"状态；
+         *   · 也不用删——删是不可逆的，而且用户手里的原文只在剪贴板里。
+         *
+         * parentProjectId 保持 null：没有主片，它就是一条独立的片子。
+         * episodeIndex 记 2 —— 观众看到的确实是第二集，提醒语也这么说。
+         */
+        if (req.body?.sequelOnly === true) {
+          const t = sequelTitles(project)
+          db.updateProject(project.id, {
+            name: t.name,
+            scriptText: split.sequelText,
+            coverTitle: t.coverTitle,
+            inVideoTitle: t.inVideoTitle,
+            episodeIndex: 2,
+          })
+          return {
+            code: 200 as const,
+            main: null,
+            sequel: db.getProject(project.id)!,
+            mainEstimatedMs: 0,
+            sequelEstimatedMs: split.sequelEstimatedMs,
+          }
+        }
+
+        /*
          * 【先建续集再截主片】。反过来的话，建续集那步万一失败，主片的
          * 结局已经被砍掉了——用户手上剩下一条讲了一半、又没有下集的片子，
          * 而原文只存在于他自己的剪贴板里。
@@ -147,7 +181,7 @@ export function registerEpisodeRoutes (app: FastifyInstance, deps: Deps): void {
 
         return {
           code: 200 as const,
-          main: db.getProject(project.id)!,
+          main: db.getProject(project.id)! as typeof project | null,
           sequel: db.getProject(sequel.id)!,
           mainEstimatedMs: split.mainEstimatedMs,
           sequelEstimatedMs: split.sequelEstimatedMs,

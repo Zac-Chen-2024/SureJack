@@ -147,12 +147,15 @@ function Wheel ({ items, value, onChange, allowed }: {
   )
 }
 
-export function SplitPicker ({ projectId, onDone, onCancel, onBack }: {
+export function SplitPicker ({ projectId, onDone, onCancel, onBack, sequelOnly = false }: {
   projectId: string
+  /** 只做续集：主片不生成，这条项目本身变成续集 */
+  sequelOnly?: boolean
   /** 退回列表。选一半随时能走——选过的会存成草稿 */
   onBack?: () => void
   /** 拆完把两条片子的 id 交回去——下一步要给它们分别填标题 */
-  onDone: (ids: { mainId: string; sequelId: string }) => void
+  /** mainId 为 null = 只做续集，没有第二条项目 */
+  onDone: (ids: { mainId: string | null; sequelId: string }) => void
   onCancel: () => void
 }) {
   const [plan, setPlan] = useState<Plan | null>(null)
@@ -222,9 +225,14 @@ export function SplitPicker ({ projectId, onDone, onCancel, onBack }: {
   async function confirm () {
     setBusy(true)
     try {
-      const r = await api.post<{ main: { id: string }; sequel: { id: string } }>(
-        `/api/projects/${projectId}/split`, { breakIndex, introEndIndex: introEnd })
-      onDone({ mainId: r.main.id, sequelId: r.sequel.id })
+      const r = await api.post<{ main: { id: string } | null; sequel: { id: string } }>(
+        `/api/projects/${projectId}/split`,
+        { breakIndex, introEndIndex: introEnd, sequelOnly })
+      /*
+       * 只做续集时 main 是 null——这条项目【本身】变成了续集，
+       * 没有第二条项目。调用方据此只走一条片子的后续流程。
+       */
+      onDone({ mainId: r.main?.id ?? null, sequelId: r.sequel.id })
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {

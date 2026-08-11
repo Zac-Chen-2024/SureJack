@@ -45,6 +45,8 @@ export function MobileNewProject ({ onBack, onGo, resumeId }: {
    */
   const [autoSequel, setAutoSequel] = useState(false)
   const [splitting, setSplitting] = useState(false)
+  /** 只做续集：拆出来之后主片不生成，这条项目本身变成续集 */
+  const [sequelOnly, setSequelOnly] = useState(false)
   /** 拆出来的续集。有它就说明这一批要生成两条片子 */
   const [sequelId, setSequelId] = useState<string | null>(null)
   /** 进了挑开头那一屏：要挑的项目 id，主片在前 */
@@ -211,6 +213,33 @@ export function MobileNewProject ({ onBack, onGo, resumeId }: {
           </span>
         </label>
 
+        {/*
+          * 【只做续集】。开着的时候流程一步不变——照样划一次断点和引子
+          * （不划就不知道续集从哪儿开始），只是主片不配音、不烧录。
+          * 省一半 Azure 配额、一半烧录时间和磁盘。
+          *
+          * 缩进一格挂在「自动创建续集」下面：它是那个开关的子选项，
+          * 关着的时候根本不该出现。
+          */}
+        {autoSequel && (
+          <label className="ml-6 flex items-start gap-2.5 rounded-xl border border-line bg-ink-900 p-3">
+            <input
+              type="checkbox"
+              checked={sequelOnly}
+              onChange={(e) => setSequelOnly(e.target.checked)}
+              disabled={createdId !== null && splitting}
+              className="mt-0.5 size-4 shrink-0 accent-[var(--color-accent)]"
+            />
+            <span className="min-w-0">
+              <span className="block text-[13px] font-bold text-ink-50">只做续集</span>
+              <span className="mt-0.5 block text-[11px] leading-relaxed text-ink-400">
+                断点照样划，但只生成续集那一条。主片不配音也不烧录——
+                省一半配额和时间。名字默认带「2」，之后随时能改。
+              </span>
+            </span>
+          </label>
+        )}
+
         {/* 文案：粘贴 + 上传 txt */}
         <div>
           <div className="mb-1.5 flex items-center justify-between">
@@ -275,11 +304,17 @@ export function MobileNewProject ({ onBack, onGo, resumeId }: {
             {autoSequel && splitting && createdId && (
               <SplitPicker
                 projectId={createdId}
+                sequelOnly={sequelOnly}
                 onCancel={() => setSplitting(false)}
                 onBack={onBack}
-                onDone={({ sequelId: sid }) => {
+                onDone={({ mainId, sequelId: sid }) => {
                   setSplitting(false)
-                  setSequelId(sid)
+                  /*
+                   * 【只做续集时不记 sequelId】。这条项目本身就是续集，
+                   * 记下来的话下面那屏会以为有两条片子，给你摆出两组标题
+                   * ——而其中一组指向的项目根本不存在。
+                   */
+                  setSequelId(mainId === null ? null : sid)
                   // 拆完【不立刻生成】：先让用户把两条片子的标题分别定好。
                   // 这两个字段会被烧进产物，生成之后再改代价完全不同。
                   void useProjects.getState().load()
