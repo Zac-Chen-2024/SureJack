@@ -28,7 +28,7 @@ describe('只做续集：产出一条，不是两条', () => {
     const before = db.listProjects().length
 
     const split = splitStory({
-      text: TEXT, breakIndex: 20, introEndIndex: 3,
+      text: TEXT, breakIndex: 41, introEndIndex: 7,
       mainInVideoTitle: '周周撸铁',
     })
     const t = sequelTitles({ name: '周周撸铁', inVideoTitle: '周周撸铁' })
@@ -55,7 +55,7 @@ describe('只做续集：产出一条，不是两条', () => {
 
   it('【提醒语还在】：观众看到的仍然是"第二集"', () => {
     const split = splitStory({
-      text: TEXT, breakIndex: 20, introEndIndex: 3,
+      text: TEXT, breakIndex: 41, introEndIndex: 7,
       mainInVideoTitle: '周周撸铁',
     })
     expect(split.sequelText).toContain('周周撸铁')
@@ -64,7 +64,7 @@ describe('只做续集：产出一条，不是两条', () => {
 
   it('续集文案 = 引子 + 提醒语 + 断点之后的正文，不含主片正文', () => {
     const split = splitStory({
-      text: TEXT, breakIndex: 20, introEndIndex: 3,
+      text: TEXT, breakIndex: 41, introEndIndex: 7,
       mainInVideoTitle: '标题',
     })
     // 断点之后的第一句一定在

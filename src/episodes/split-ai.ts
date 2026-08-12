@@ -205,11 +205,23 @@ export function allowedRange (sentences: Sentence[]): { min: number; max: number
   return { min: Math.max(0, i - 1), max: Math.max(0, i) }
 }
 
+/**
+ * 【正文短到这个程度才真的拆不了】。
+ *
+ * ⚠️ 原来拦的是"不足 4 句"，那是【拿分句结果当正文长度的代理】——而分句
+ * 本身依赖标点。用户一篇 5574 字、一个句号都没有的文案被切成 1 句，
+ * 于是被这条拦下，报"正文太短"。正文一点都不短，短的是标点。
+ *
+ * 现在直接量【字数】：它不依赖标点，量的就是我们想量的东西。
+ * 100 字是用户定的——比这还短确实拆不出主片和续集。
+ */
+export const MIN_SPLIT_CHARS = 100
+
 export async function planSplit (text: string, deps: AnalyzeDeps = {}): Promise<SplitPlan> {
-  const sentences = splitSentences(text)
-  if (sentences.length < 4) {
-    throw new Error('正文太短，拆不出主片和续集（不足 4 句）')
+  if (text.replace(/\s/g, '').length < MIN_SPLIT_CHARS) {
+    throw new Error(`正文太短，拆不出主片和续集（不足 ${MIN_SPLIT_CHARS} 字）`)
   }
+  const sentences = splitSentences(text)
   const allowed = allowedRange(sentences)
 
   const apiKey = deps.apiKey ?? process.env.DEEPSEEK_API_KEY

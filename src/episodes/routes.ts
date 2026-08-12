@@ -44,8 +44,11 @@ export function registerEpisodeRoutes (app: FastifyInstance, deps: Deps): void {
       const name = getSession(req)!
       const project = withUserDb(name, (db) => db.getProject(req.params.id))
       if (!project) return reply.code(404).send({ error: '项目不存在' })
+      if ((project.scriptText ?? '').trim() === '') {
+        return reply.code(400).send({ error: '还没有文案，无法分析断点' })
+      }
+
       const text = (project.scriptText ?? '').trim()
-      if (text === '') return reply.code(400).send({ error: '还没有文案，无法分析断点' })
 
       let plan: SplitPlan
       try {

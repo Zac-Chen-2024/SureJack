@@ -101,6 +101,11 @@ export function registerTtsRoutes (app: FastifyInstance, deps: Deps): void {
       const project = withUserDb(name, (db) => db.getProject(req.params.id))
       if (!project) return reply.code(404).send({ error: '项目不存在' })
 
+      /*
+       * ⚠️【标点原样送进 Azure，一个都不换】。停顿完全由作者自己打的标点决定：
+       * 这条流水线上的文案是"一行一句、行尾一个逗号"，Azure 看到逗号就停一下，
+       * 短促而连贯——这正是要的效果。我们不做任何符号替换或补全。
+       */
       const text = normalizeScript(project.scriptText)
       if (!text) return reply.code(400).send({ error: '文案是空的，先写点内容再生成配音' })
 
