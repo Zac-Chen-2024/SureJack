@@ -4,8 +4,9 @@ import { inVideoTitleOf } from '../subtitles/project-ass.js'
 /**
  * 把一条长文拆成【主片正文】和【续集正文】。纯函数，不碰数据库。
  *
- * 续集 = 引子 + 提醒语 + 从断点接着讲的正文。三段一起走一次配音，
- * 所以提醒语有声音也有字幕——它是说给观众听的，不是一块贴图。
+ * 续集 = 引子 + 提醒语 + 从断点接着讲的正文 + 片尾引流语。四段一起走一次
+ * 配音，所以提醒语和引流语都有声音也有字幕——它们是说给观众听的，
+ * 不是贴上去的图。
  *
  * ⚠️【接缝处一个字都不能改】。主片的尾巴和续集正文的头必须严丝合缝地
  * 拼回原文：中间掉一句，观众听到的就是"说了半句跳到下一段"，而这种缺失
@@ -23,10 +24,26 @@ export function buildReminder (mainInVideoTitle: string): string {
   return REMINDER_TEMPLATE.replace('{title}', mainInVideoTitle)
 }
 
+/**
+ * 续集片尾的引流语。
+ *
+ * ⚠️【只有续集有，主片没有】。它指的是"点左下角看更多"，
+ * 主片的观众要看的是【下一集】，不是这个。
+ *
+ * ⚠️【它是拼进续集正文的，不是贴上去的一行字】。这条流水线上字幕是从
+ * Azure 回来的【词级时间戳】推的——所以只有把它送进配音，它才既有声音
+ * 又有字幕，而且时间轴天然对齐。想只在字幕上加、配音不念，那行字
+ * 根本推不出起止时间。
+ *
+ * 【前面留一个换行】：换行是句末（见 sentences.ts 的 SENTENCE_END），
+ * 配音会在这儿停一下，字幕也会另起一行，不会和正文最后一句黏成一句念出来。
+ */
+export const SEQUEL_OUTRO = '更多后续点击左下角就可以继续观看啦'
+
 export interface SplitResult {
   /** 主片正文：开头到断点句（含） */
   mainText: string
-  /** 续集正文：引子 + 提醒语 + 断点之后 */
+  /** 续集正文：引子 + 提醒语 + 断点之后 + 片尾引流语 */
   sequelText: string
   /** 拆完各自的估算时长，给界面显示 */
   mainEstimatedMs: number
@@ -62,7 +79,7 @@ export function splitStory (opts: {
    * 三段之间用换行分开。**不要用空格**——配音的断句和字幕的分行都看标点，
    * 空格既不产生停顿也不换行，提醒语会和引子的最后一句黏成一句读出来。
    */
-  const sequelText = `${intro.trim()}\n${reminder}\n${tail.trim()}`
+  const sequelText = `${intro.trim()}\n${reminder}\n${tail.trim()}\n${SEQUEL_OUTRO}`
 
   const est = (t: string): number => {
     const ss = splitSentences(t)

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { splitSentences, cutAfter, totalEstimatedMs } from '../../src/episodes/sentences.js'
-import { splitStory, sequelTitles, buildReminder } from '../../src/episodes/split.js'
+import { splitStory, sequelTitles, buildReminder, SEQUEL_OUTRO } from '../../src/episodes/split.js'
 import {
   allowedRange, coerceSplitPlan, maxIntroIndex, MAX_INTRO_RATIO,
   TARGET_MIN_MS, TARGET_MAX_MS,
@@ -84,22 +84,50 @@ describe('切句', () => {
 describe('拆故事', () => {
   const opts = { text: STORY, breakIndex: 2, introEndIndex: 0, mainInVideoTitle: '豪门' }
 
+  /*
+   * 引流语【只有续集有】：它说的是"点左下角看更多"，
+   * 而主片的观众要看的是下一集，不是这个。
+   */
+  it('续集结尾带引流语，主片不带', () => {
+    const r = splitStory(opts)
+    expect(r.sequelText.trimEnd().endsWith(SEQUEL_OUTRO)).toBe(true)
+    expect(r.mainText).not.toContain(SEQUEL_OUTRO)
+  })
+
+  /*
+   * 前面必须留一个换行。换行是句末（见 sentences.ts），配音会在这儿停一下、
+   * 字幕会另起一行；粘在正文最后一句后面的话，会被连着念成一句。
+   */
+  it('引流语前面断开，单独成句', () => {
+    const r = splitStory(opts)
+    expect(r.sequelText).toContain(`\n${SEQUEL_OUTRO}`)
+  })
+
+  /*
+   * 字幕一行最多 17 个字（竖屏安全区实测值，见 project-ass.ts）。
+   * 这句正好 17——再长一个字就会被切成两行，钉住它。
+   */
+  it('引流语不超过一行字幕', () => {
+    expect([...SEQUEL_OUTRO].length).toBeLessThanOrEqual(17)
+  })
+
   it('主片到断点句为止', () => {
     expect(splitStory(opts).mainText).toBe('第一句话。第二句话！第三句话？')
   })
 
-  it('续集 = 引子 + 提醒语 + 断点之后', () => {
+  it('续集 = 引子 + 提醒语 + 断点之后 + 引流语', () => {
     expect(splitStory(opts).sequelText).toBe(
-      '第一句话。\n周周提醒你，豪门第二集开始啦。\n第四句话；第五句话。第六句话。')
+      '第一句话。\n周周提醒你，豪门第二集开始啦。\n第四句话；第五句话。第六句话。'
+      + `\n${SEQUEL_OUTRO}`)
   })
 
   /*
-   * 【三段之间必须是换行，不能是空格】。配音断句和字幕分行都看标点，
+   * 【四段之间必须是换行，不能是空格】。配音断句和字幕分行都看标点，
    * 空格既不产生停顿也不换行——提醒语会和引子最后一句黏成一句读出来。
    */
-  it('三段之间是换行', () => {
+  it('四段之间是换行', () => {
     const t = splitStory(opts).sequelText
-    expect(t.split('\n')).toHaveLength(3)
+    expect(t.split('\n')).toHaveLength(4)
   })
 
   /*
