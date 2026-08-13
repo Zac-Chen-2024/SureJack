@@ -312,25 +312,6 @@ export function registerExportRoutes (app: FastifyInstance, deps: Deps): void {
        * 服务端这道【不依赖客户端版本】：先来的继续传，后来的直接回 409。
        * 用户重试时前一条早就断开了（断开会立刻放行），不会挡住他。
        */
-      /*
-       * 【临时】掐死一条打不死的幽灵下载。
-       *
-       * 她的 vivo 在 App 更新时杀掉了进程，START_REDELIVER_INTENT 把一个
-       * 旧下载任务的 Intent 原样重投了回来——它带着当年捕获的老 UA
-       * （…SureJackApp/9），和她手动新点的任务（…/14）在同一台手机上
-       * 轮流抢同一条几十 KB/s 的管子，各写各的 .part，谁也下不完。
-       * 客户端删不掉它（取消不落盘 + REDELIVER 反复复活，见 code review），
-       * 只能在服务端按这个老 UA 拒掉：v14 的 isFatal 命中「续传被拒」，
-       * 它会立刻永久停止。
-       *
-       * 日志里确认不再有 SureJackApp/9 之后，这一段就可以删了。
-       */
-      const ua = String(req.headers['user-agent'] ?? '')
-      if (ua.endsWith('SureJackApp/9')) {
-        req.log.warn({ project: req.params.id }, '拒掉幽灵下载任务（旧 UA SureJackApp/9）')
-        return reply.code(403).send({ error: '这个下载任务已过期，请在 App 里重新点一次下载' })
-      }
-
       const prev = streaming.get(req.params.id)
       if (prev !== undefined) {
         const idle = Date.now() - prev.lastByteAt
