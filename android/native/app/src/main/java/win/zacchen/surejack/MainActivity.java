@@ -1,12 +1,10 @@
 package win.zacchen.surejack;
 
 import android.app.AlertDialog;
-import android.app.DownloadManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageInfo;
-import android.database.Cursor;
 import android.hardware.Sensor;
 import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
@@ -66,73 +64,16 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
     private boolean pageReady = false;
     private ValueCallback<Uri[]> fileCallback;
 
-    /**
-     * 发起过的下载 id，供 Bridge.downloads() 查询进度。
+    /*
+     * ⚠️【系统 DownloadManager 那条路已经整个拆掉】。
      *
-     * ⚠️【必须落盘，不能只放内存】。系统 DownloadManager 本来就是后台下的：
-     * 退出 app 照样下、通知栏有进度、断网自动重试。但这个列表只活在内存里的话，
-     * app 一被回收、一重启，网页里的"下载队列"就变成空的——
-     * 【文件还在后台好好地下，用户却看不见】，于是他以为没下上、再点一次，
-     * 服务端又白混一份几百 MB 的成片。
-     *
-     * 存的是 id，不是进度。进度永远现查 DownloadManager——它才是唯一真相，
-     * 我们缓存一份只会和它对不上。
+     * 它【一次都没工作过】：服务器上从 7/30 至今的全部 nginx 日志里，
+     * AndroidDownloadManager 这个 UA 出现 0 次，横跨 App 版本 7 和 9、
+     * 横跨两台手机。dm.enqueue() 抛的异常被一个 catch-all 吞掉，
+     * 只弹一句"下载失败"，于是这件事安静地坏了至少半个月。
+     * 现在由 DownloadService 自己下，这里不再保留任何遗留 id。
      */
-    private static final String PREFS_DOWNLOADS = "sj_downloads";
-    private static final String KEY_IDS = "ids";
-    private final java.util.List<Long> downloadIds = new java.util.ArrayList<>();
 
-    /** 从盘上读回下载 id。开机（onCreate）调一次 */
-    private void loadDownloadIds() {
-        SharedPreferences sp = getSharedPreferences(PREFS_DOWNLOADS, Context.MODE_PRIVATE);
-        String raw = sp.getString(KEY_IDS, "");
-        synchronized (downloadIds) {
-            downloadIds.clear();
-            for (String part : raw.split(",")) {
-                if (part.isEmpty()) continue;
-                try { downloadIds.add(Long.parseLong(part)); } catch (Exception ignored) { }
-            }
-        }
-    }
-
-    /** 把当前列表写回盘上。加/删之后都要调 */
-    private void saveDownloadIds() {
-        StringBuilder b = new StringBuilder();
-        synchronized (downloadIds) {
-            for (Long id : downloadIds) {
-                if (b.length() > 0) b.append(',');
-                b.append(id);
-            }
-        }
-        getSharedPreferences(PREFS_DOWNLOADS, Context.MODE_PRIVATE)
-                .edit().putString(KEY_IDS, b.toString()).apply();
-    }
-
-    /**
-     * 摘掉 DownloadManager 里【已经不存在】的 id。
-     *
-     * 用户在系统下载管理里手动删过、或者系统自己清理过之后，这些 id 会永远
-     * 查不到东西。不摘的话列表只增不减，越攒越长。
-     */
-    private void pruneDownloadIds() {
-        DownloadManager dm = (DownloadManager) getSystemService(Context.DOWNLOAD_SERVICE);
-        if (dm == null) return;
-        long[] ids;
-        synchronized (downloadIds) {
-            ids = new long[downloadIds.size()];
-            for (int i = 0; i < ids.length; i++) ids[i] = downloadIds.get(i);
-        }
-        if (ids.length == 0) return;
-        java.util.Set<Long> alive = new java.util.HashSet<>();
-        try (Cursor c = dm.query(new DownloadManager.Query().setFilterById(ids))) {
-            while (c != null && c.moveToNext()) {
-                alive.add(c.getLong(c.getColumnIndexOrThrow(DownloadManager.COLUMN_ID)));
-            }
-        } catch (Exception ignored) { return; }
-        boolean changed;
-        synchronized (downloadIds) { changed = downloadIds.retainAll(alive); }
-        if (changed) saveDownloadIds();
-    }
     private SensorManager sensors;
     private long lastShakeAt = 0;
     private float lastX, lastY, lastZ;
@@ -165,21 +106,6 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
         CookieManager.getInstance().setAcceptThirdPartyCookies(web, true);
         // 下载队列桥：网页调 SJNative.downloads() 拿进度画悬浮框
         web.addJavascriptInterface(new Bridge(), "SJNative");
-
-        /*
-         * 【把上次的下载接回来】。DownloadManager 在 app 不在的时候照样下，
-         * 读回 id 才能让网页继续显示进度——否则用户回来看到空队列，
-         * 以为下载没了。顺手摘掉系统里已经没有的那些，免得列表只增不减。
-         */
-        loadDownloadIds();
-        pruneDownloadIds();
-        /*
-         * 【把上次没下完的读回来】。进程被回收之后 DownloadService.STATE 会清空，
-         * 而 .part 文件还在手机上、服务器上的成片也还在——不读回来的话，
-         * 用户打开 App 看到的是一个【空的下载栏】，以为下载没了就再点一次，
-         * 白白多起一条流。读回来标成"已暂停"，点「继续」从断点接上。
-         */
-        DownloadService.restore(MainActivity.this);
 
         web.setWebViewClient(new WebViewClient() {
             @Override
@@ -348,108 +274,53 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
          * 在 App 里就该在下载面板上也能点，两处是同一个开关。
          */
         @JavascriptInterface
-        public boolean pauseDownload(String id, boolean pause) {
-            if (id == null || !DownloadService.STATE.containsKey(id)) return false;
+        public boolean pauseDownload(String projectId, boolean pause) {
+            DownloadStore.Record r = DownloadStore.get(MainActivity.this, projectId);
+            if (r == null) return false;
             Intent i = new Intent(MainActivity.this, DownloadService.class);
             i.setAction(pause ? DownloadService.ACTION_PAUSE : DownloadService.ACTION_RESUME);
-            i.putExtra(DownloadService.EXTRA_ID, id);
+            i.putExtra(DownloadService.EXTRA_ID, projectId);
             /*
              * 【Cookie 要带上】。从磁盘读回来的那条重新发起时需要登录态，
              * 而 Service 自己拿不到 WebView 的 Cookie。
              */
-            DownloadService.Snapshot s = DownloadService.STATE.get(id);
-            if (s != null && s.url != null) {
-                i.putExtra(DownloadService.EXTRA_COOKIE,
-                        CookieManager.getInstance().getCookie(s.url));
-                i.putExtra(DownloadService.EXTRA_UA, web.getSettings().getUserAgentString());
-            }
+            String url = (r.url == null || r.url.isEmpty())
+                    ? BASE_URL + "/api/projects/" + projectId + "/film/download" : r.url;
+            i.putExtra(DownloadService.EXTRA_COOKIE, CookieManager.getInstance().getCookie(url));
+            i.putExtra(DownloadService.EXTRA_UA, web.getSettings().getUserAgentString());
             startService(i);
             return true;
         }
 
+        /**
+         * 下载队列。**进度和状态都现读，绝不缓存。**
+         *
+         * 磁盘上那份（DownloadStore）是唯一真相；内存里的 LIVE 只对
+         * 【正在跑的那条】更新，用来盖上实时进度和速度。
+         */
         @JavascriptInterface
         public String downloads() {
-            /*
-             * 【我们自己的下载在前，系统的在后】。系统那条路已经不再使用，
-             * 但老版本 App 排进系统队列的下载可能还在跑，一并显示完为止。
-             */
-            StringBuilder mine = new StringBuilder();
-            synchronized (DownloadService.STATE) {
-                for (DownloadService.Snapshot s : DownloadService.STATE.values()) {
-                    if (mine.length() > 0) mine.append(',');
-                    mine.append("{\"id\":\"").append(s.id).append("\"")
-                        .append(",\"title\":").append(jsonStr(s.title))
-                        .append(",\"total\":").append(s.total)
-                        .append(",\"done\":").append(s.done)
-                        .append(",\"bps\":").append(s.bps)
-                        .append(",\"status\":\"").append(s.status).append("\"}");
-                }
-            }
-
-            DownloadManager dm = (DownloadManager) getSystemService(Context.DOWNLOAD_SERVICE);
-            if (dm == null) return "[" + mine + "]";
-            long[] ids;
-            synchronized (downloadIds) {
-                ids = new long[downloadIds.size()];
-                for (int i = 0; i < ids.length; i++) ids[i] = downloadIds.get(i);
-            }
-            if (ids.length == 0) return "[" + mine + "]";
-            StringBuilder sb = new StringBuilder("[");
-            boolean first = mine.length() == 0;
-            if (!first) sb.append(mine);
-            try (Cursor c = dm.query(new DownloadManager.Query().setFilterById(ids))) {
-                while (c != null && c.moveToNext()) {
-                    String title = c.getString(c.getColumnIndexOrThrow(DownloadManager.COLUMN_TITLE));
-                    long total = c.getLong(c.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES));
-                    long done = c.getLong(c.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR));
-                    int st = c.getInt(c.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS));
-                    String status = st == DownloadManager.STATUS_SUCCESSFUL ? "done"
-                            : st == DownloadManager.STATUS_FAILED ? "error"
-                            : st == DownloadManager.STATUS_PAUSED ? "paused" : "running";
-                    long id = c.getLong(c.getColumnIndexOrThrow(DownloadManager.COLUMN_ID));
-                    if (!first) sb.append(',');
-                    first = false;
-                    sb.append("{\"id\":\"").append(id).append("\"")
-                      .append(",\"title\":").append(jsonStr(title))
-                      .append(",\"total\":").append(total)
-                      .append(",\"done\":").append(done)
-                      .append(",\"status\":\"").append(status).append("\"}");
-                }
-            } catch (Exception ignored) { }
-            return sb.append(']').toString();
+            return DownloadStore.toBridgeJson(MainActivity.this, DownloadService.LIVE);
         }
 
         /**
-         * 中断 / 删除一条下载。**连带文件一起删**。
+         * 中断 / 删除一条下载。**内存和磁盘一起删。**
          *
-         * DownloadManager.remove() 一个方法把两件事都办了：正在下的会被停掉、
-         * 已下完的连文件一起删——因为这个文件本来就是它替我们创建的，它是主人。
-         * 我们只多做一步：把 id 从会话列表里摘掉，否则悬浮框还会一直查它。
-         *
-         * 【为什么不自己去 File.delete()】：Android 10 起是分区存储，
-         * 下载目录里的文件轮不到我们直接删；绕过 DownloadManager 只会拿到
-         * 一个权限异常，而它自己删是名正言顺的。
+         * ⚠️ 上一版只清内存（STATE.remove），磁盘那行原封不动——于是
+         * 每次重启 App，被删掉的下载都以「已暂停」+「继续」按钮复活，
+         * 删几次回来几次；而对"从磁盘恢复出来、背后根本没有线程"的记录，
+         * 删除永远无效。
          */
         @JavascriptInterface
-        public boolean removeDownload(String idStr) {
-            // 我们自己的那条：id 是时间戳字符串，发个取消 Intent 让 Service 停下
-            if (DownloadService.STATE.containsKey(idStr)) {
-                Intent i = new Intent(MainActivity.this, DownloadService.class);
-                i.setAction(DownloadService.ACTION_CANCEL);
-                i.putExtra(DownloadService.EXTRA_ID, idStr);
-                startService(i);
-                DownloadService.STATE.remove(idStr);
-                return true;
-            }
-            long id;
-            try { id = Long.parseLong(idStr); } catch (Exception e) { return false; }
-            DownloadManager dm = (DownloadManager) getSystemService(Context.DOWNLOAD_SERVICE);
-            if (dm == null) return false;
-            boolean ok;
-            try { ok = dm.remove(id) > 0; } catch (Exception e) { ok = false; }
-            synchronized (downloadIds) { downloadIds.remove(Long.valueOf(id)); }
-            saveDownloadIds();
-            return ok;
+        public boolean removeDownload(String projectId) {
+            if (projectId == null) return false;
+            Intent i = new Intent(MainActivity.this, DownloadService.class);
+            i.setAction(DownloadService.ACTION_CANCEL);
+            i.putExtra(DownloadService.EXTRA_ID, projectId);
+            startService(i);
+            // Service 那边也会删，这里同步删一次：用户点完立刻就看不到它
+            DownloadStore.remove(MainActivity.this, projectId);
+            return true;
         }
     }
 

@@ -21,12 +21,12 @@ import { useDownloads } from '../../store/downloads'
  * 上一版看着乱的原因。
  */
 /**
- * id 是【字符串】：自己的下载用时间戳当 id，老版本 App 排进系统队列的
- * 那些是数字 id——两种都可能出现在同一个列表里（老下载会显示到跑完为止），
- * 所以这里两种都收。
+ * ⚠️【身份是 projectId，不是下载 id】。原来用时间戳当 id，于是每次点下载
+ * 都是一条新记录：进程被杀重投 + 从磁盘恢复 = 同一条片子出现两条，
+ * 而且每杀一次进程多攒一条幽灵。换成 projectId 之后天然唯一。
  */
 interface NativeDownload {
-  id: string | number; title: string; total: number; done: number
+  projectId: string; title: string; total: number; done: number
   /**
    * running（在传）| reconnecting（断了，自动重连中）| paused（用户按了暂停）
    * | done | error
@@ -38,14 +38,16 @@ interface NativeDownload {
   status: string
   /** 当前速度，字节/秒。老版本 App 没有这个字段 */
   bps?: number
+  /** status=failed 时的原因。**必须显示**——不然用户只能反复撞同一堵墙 */
+  error?: string
 }
 
 interface Bridge {
   downloads: () => string
   /** 中断/删除一条下载，连文件一起删。老版本 App 没有这个方法 → 不画按钮 */
-  removeDownload?: (id: string) => boolean
+  removeDownload?: (projectId: string) => boolean
   /** 暂停/继续。通知栏上有同样的按钮，两处是同一个开关 */
-  pauseDownload?: (id: string, pause: boolean) => boolean
+  pauseDownload?: (projectId: string, pause: boolean) => boolean
 }
 
 function readBridge (): Bridge | null {
@@ -104,9 +106,9 @@ export function DownloadPanel ({ floating = false }: { floating?: boolean } = {}
       ? `中断下载「${d.title}」？已经下的部分会被丢掉。`
       : `删除「${d.title}」？手机里的这个视频文件也会一起删掉。`
     if (!confirm(q)) return
-    try { bridge?.removeDownload?.(String(d.id)) } catch { /* 删不掉就让下面的刷新说话 */ }
+    try { bridge?.removeDownload?.(d.projectId) } catch { /* 删不掉就让下面的刷新说话 */ }
     // 先本地摘掉，别等下一轮轮询——点了没反应最让人怀疑是不是没点上
-    setItems((list) => list.filter((x) => x.id !== d.id))
+    setItems((list) => list.filter((x) => x.projectId !== d.projectId))
     refresh()
   }
 
@@ -233,9 +235,9 @@ export function DownloadPanel ({ floating = false }: { floating?: boolean } = {}
               {items.map((d) => {
                 const pct = d.total > 0 ? Math.min(100, Math.round((d.done / d.total) * 100)) : 0
                 const done = d.status === 'done'
-                const failed = d.status === 'error'
+                const failed = d.status === 'failed'
                 return (
-                  <div key={d.id} className="border-b border-line px-3.5 py-2.5 last:border-b-0">
+                  <div key={d.projectId} className="border-b border-line px-3.5 py-2.5 last:border-b-0">
                     <div className="flex items-center gap-2">
                       {done && <IconCheck className="size-3.5 shrink-0 text-accent" />}
                       <span className={`min-w-0 flex-1 truncate text-[13px] ${done ? 'text-ink-300' : 'text-ink-50'}`}>
@@ -260,7 +262,7 @@ export function DownloadPanel ({ floating = false }: { floating?: boolean } = {}
                           aria-label={d.status === 'paused' ? '继续下载' : '暂停下载'}
                           title={d.status === 'paused' ? '继续下载' : '暂停下载'}
                           onClick={() => {
-                            bridge?.pauseDownload?.(String(d.id), d.status !== 'paused')
+                            bridge?.pauseDownload?.(d.projectId, d.status !== 'paused')
                             setTimeout(refresh, 200)
                           }}
                           className="flex size-6 shrink-0 items-center justify-center rounded-lg text-ink-400 transition-colors hover:bg-ink-800 hover:text-ink-50"
@@ -285,6 +287,16 @@ export function DownloadPanel ({ floating = false }: { floating?: boolean } = {}
                         </button>
                       )}
                     </div>
+
+                    {/*
+                      * 【失败必须说清原因】。"成片已过期，请重新点一次下载"
+                      * 和"登录过期，请重新打开 App"是两种完全不同的处置，
+                      * 而上一版这两种都会在重启后伪装成一个带「继续」按钮的
+                      * 暂停项——用户点一次撞一次墙，原因早就不见了。
+                      */}
+                    {failed && d.error != null && d.error !== '' && (
+                      <p className="mt-1.5 text-[11px] leading-relaxed text-danger">{d.error}</p>
+                    )}
 
                     {!done && !failed && (
                       <>

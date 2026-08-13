@@ -103,110 +103,38 @@ public class DownloadService extends Service {
     private static final long RETRY_BASE_MS = 2000;
     private static final long RETRY_MAX_MS = 60_000;
 
-    /** 进度快照，给 Bridge.downloads() 读。key = 我们自己发的下载 id */
-    public static final Map<String, Snapshot> STATE =
-            Collections.synchronizedMap(new LinkedHashMap<String, Snapshot>());
+    /**
+     * 【正在跑的那些】。key = projectId，值是内存里那份带实时进度的记录。
+     *
+     * ⚠️ 这里【只放正在跑的】，不是全量缓存。全量的唯一真相在磁盘上
+     * （DownloadStore）——原来的设计是内存里放一份全量、再往磁盘覆写，
+     * 于是服务在没有 Activity 的进程被拉起时内存是空的，一次覆写就把
+     * 别的下载记录全清了。现在磁盘那边永远是「读盘→改一条→写回」，
+     * 内存这边只负责"这一条现在传到哪儿了、多快"。
+     */
+    static final Map<String, DownloadStore.Record> LIVE =
+            Collections.synchronizedMap(new LinkedHashMap<String, DownloadStore.Record>());
 
-    /** 正在跑的任务，用来响应取消 */
+    /** 取消请求：worker 每轮检查一次 */
     private static final Map<String, Boolean> CANCELLED = new ConcurrentHashMap<>();
 
     /**
      * 【用户主动暂停】的那些。和"断线重连"是两回事，必须分开：
-     * 重连是自动的、几秒后自己继续；暂停要人点了"继续"才会动。
+     * 重连是自动的、几秒后自己继续；暂停要人点了「继续」才会动。
      * 混成一个状态的话，界面只能写一句含糊的"已暂停"——用户以为要自己
      * 点一下才继续，实际上它自己会重连；反过来真暂停了他又干等。
      */
     private static final Map<String, Boolean> PAUSED = new ConcurrentHashMap<>();
 
-    /**
-     * 已经在下的文件名。**同一条片子只许有一条流。**
-     *
-     * ⚠️ 线上实测：同一条 458MB 的成片同时有【三条流】在抢带宽——两条各自
-     * 续传到 51MB 和 118MB，第三条每次从 0 开始。42 分钟里服务器发出 202MB，
-     * 而实际最远只推进到 126MB，一多半流量白扔。
-     *
-     * 而她那条管子只有几十 KB/s。劈成三份不是"快三倍"，是三份都慢到没法用，
-     * 还都在写同一个 .part 文件。重复的请求必须在这里挡掉。
-     */
-    private static final Map<String, Boolean> ACTIVE = new ConcurrentHashMap<>();
-
-    /**
-     * 把进度写进磁盘 / 从磁盘读回来。
-     *
-     * ⚠️【STATE 只放内存是不够的】。线上真事：用户的下载栏和通知栏【同时变空】，
-     * 而服务器日志显示文件还差 300MB 没下完、.part 还在手机上。原因是进程被
-     * 回收了——STATE 是静态字段，进程一没就全丢，于是 App 里看不到任何下载，
-     * 用户以为没下上，再点一次，又白白多起一条流。
-     *
-     * 存的是【身份和进度】，不是实时速度：id、标题、总长、已下、状态、URL。
-     * 有了 URL，进程回来之后那条"没下完的"才点得动「继续」——
-     * 而 .part 还在，一点就从断点接上，几十分钟的流量不白费。
-     */
-    private static final String PREFS = "sj_downloads";
-    private static final String KEY_STATE = "state_v1";
-
-    /** 存一行：id|状态|已下|总长|标题|url（标题和 url 做过转义，不会有竖线） */
-    private void persist() {
-        StringBuilder b = new StringBuilder();
-        synchronized (STATE) {
-            for (Snapshot s : STATE.values()) {
-                if ("done".equals(s.status)) continue;      // 下完的不用记
-                if (b.length() > 0) b.append('\n');
-                b.append(s.id).append('|').append(s.status).append('|')
-                 .append(s.done).append('|').append(s.total).append('|')
-                 .append(esc(s.title)).append('|').append(esc(s.url));
-            }
-        }
-        getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                .edit().putString(KEY_STATE, b.toString()).apply();
+    /** 这一条现在有没有 worker 在跑。**去重靠它，不再靠文件名** */
+    private static boolean isLive(String projectId) {
+        return projectId != null && LIVE.containsKey(projectId);
     }
 
-    private static String esc(String s) {
-        return s == null ? "" : s.replace("\\", "\\\\").replace("|", "\\p").replace("\n", " ");
-    }
-
-    private static String unesc(String s) {
-        return s.replace("\\p", "|").replace("\\\\", "\\");
-    }
-
-    /**
-     * 读回上次没下完的。**MainActivity 一启动就调**，这样即使服务没在跑，
-     * 下载栏里也看得到"还有一条没下完"，而不是一片空白。
-     *
-     * 读回来的一律标成 paused：进程都换了，肯定没有线程在传，
-     * 显示成"下载中"是骗人的。用户点「继续」才真正开始。
-     */
-    public static void restore(Context ctx) {
-        String raw = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                .getString(KEY_STATE, "");
-        if (raw.isEmpty()) return;
-        for (String line : raw.split("\n")) {
-            String[] f = line.split("\\|", 6);
-            if (f.length < 6) continue;
-            if (STATE.containsKey(f[0])) continue;   // 正在跑的以内存里那份为准
-            Snapshot s = new Snapshot();
-            s.id = f[0];
-            s.status = "paused";
-            try { s.done = Long.parseLong(f[2]); } catch (Exception e) { s.done = 0; }
-            try { s.total = Long.parseLong(f[3]); } catch (Exception e) { s.total = -1; }
-            s.title = unesc(f[4]);
-            s.url = unesc(f[5]);
-            STATE.put(s.id, s);
-        }
-    }
-
-    public static class Snapshot {
-        public String id;
-        public String title;
-        public long total;      // -1 = 还不知道
-        public long done;
-        /** running（在传）| reconnecting（断了，自动重连中）| paused（用户按了暂停）| done | error */
-        public String status;
-        public String error;
-        /** 最近一次测到的速度，字节/秒。给通知栏和网页显示用 */
-        public long bps;
-        /** 下载地址。进程重启之后「继续」要靠它重新发起 */
-        public String url;
+    /** 内存 + 磁盘一起更新。状态变化立即落盘，进度由调用方节流 */
+    private void save(DownloadStore.Record r) {
+        LIVE.put(r.projectId, r);
+        DownloadStore.upsert(this, r);
     }
 
     private ExecutorService pool;
@@ -225,37 +153,57 @@ public class DownloadService extends Service {
     public int onStartCommand(Intent intent, int flags, int startId) {
         if (intent == null) return START_NOT_STICKY;
         String act = intent.getAction();
+
         if (ACTION_CANCEL.equals(act)) {
-            String id = intent.getStringExtra(EXTRA_ID);
-            if (id != null) { CANCELLED.put(id, true); PAUSED.remove(id); }
+            String pid = intent.getStringExtra(EXTRA_ID);
+            if (pid != null) {
+                CANCELLED.put(pid, true);
+                PAUSED.remove(pid);
+                // 内存和磁盘一起删——只清内存的话它每次重启都复活
+                LIVE.remove(pid);
+                DownloadStore.remove(this, pid);
+            }
             return START_NOT_STICKY;
         }
+
         if (ACTION_PAUSE.equals(act) || ACTION_RESUME.equals(act)) {
-            String id = intent.getStringExtra(EXTRA_ID);
-            if (id == null) return START_NOT_STICKY;
+            String pid = intent.getStringExtra(EXTRA_ID);
+            if (pid == null) return START_NOT_STICKY;
             boolean pause = ACTION_PAUSE.equals(act);
-            if (pause) PAUSED.put(id, true); else PAUSED.remove(id);
-            Snapshot s = STATE.get(id);
-            if (s != null) {
-                s.status = pause ? "paused" : "running";
-                notifyState(s);
-                persist();
-                /*
-                 * 【进程重启之后的「继续」要重新起一条任务】。
-                 * 从磁盘读回来的那条只是一份记录，没有线程在跑——
-                 * 不重新发起的话，用户点了"继续"什么都不会发生。
-                 * .part 还在，所以起来之后是从断点接着传，不是从头。
-                 */
-                if (!pause && !ACTIVE.containsKey(safeName(s.title)) && s.url != null) {
-                    Intent again = new Intent(this, DownloadService.class)
-                            .setAction(ACTION_START)
-                            .putExtra(EXTRA_URL, s.url)
-                            .putExtra(EXTRA_NAME, s.title)
-                            .putExtra(EXTRA_COOKIE, intent.getStringExtra(EXTRA_COOKIE))
-                            .putExtra(EXTRA_UA, intent.getStringExtra(EXTRA_UA));
-                    STATE.remove(id);       // 旧记录让位给真正在跑的那条
-                    startService(again);
-                }
+            if (pause) PAUSED.put(pid, true); else PAUSED.remove(pid);
+
+            DownloadStore.Record r = LIVE.get(pid);
+            if (r == null) r = DownloadStore.get(this, pid);
+            if (r == null) return START_NOT_STICKY;
+
+            r.status = pause ? DownloadStore.PAUSED : DownloadStore.RUNNING;
+            save(r);
+            notifyState(r);
+
+            /*
+             * 【「继续」任何一条路径都不能是"什么都不发生"】。
+             *
+             * 上一版这里是 `if (!pause && !ACTIVE.containsKey(...) && s.url != null)`
+             * ——条件不成立就静默返回。线上真踩到：用户点了「继续」，
+             * 6 分钟里服务端没收到一个请求，而 App 一直在正常轮询
+             * （说明进程活着，就是这个按钮没反应）。
+             *
+             * 现在只有两种结局：要么有 worker 在跑（清掉暂停标记它自己会继续），
+             * 要么就地起一条新的。url 取不到就用 projectId 现推——推不出来
+             * 才算真的没救，那时也要留下 FAILED + 原因，而不是装死。
+             */
+            if (!pause && !isLive(pid)) {
+                String url = (r.url == null || r.url.isEmpty())
+                        ? MainActivity.BASE_URL + "/api/projects/" + pid + "/film/download"
+                        : r.url;
+                String ck = intent.getStringExtra(EXTRA_COOKIE);
+                if (ck == null || ck.isEmpty()) ck = r.cookie;
+                startService(new Intent(this, DownloadService.class)
+                        .setAction(ACTION_START)
+                        .putExtra(EXTRA_URL, url)
+                        .putExtra(EXTRA_NAME, r.title)
+                        .putExtra(EXTRA_COOKIE, ck)
+                        .putExtra(EXTRA_UA, intent.getStringExtra(EXTRA_UA)));
             }
             return START_NOT_STICKY;
         }
@@ -267,38 +215,55 @@ public class DownloadService extends Service {
         if (url == null || name == null) return START_NOT_STICKY;
 
         /*
-         * 【同一个文件已经在下就直接忽略】。用户看不到进度时会反复点，
-         * 每多一条流都是在抢本来就不够的带宽。
+         * 【身份是 projectId，不是时间戳】。它就在 url 里，抠出来即可。
+         * 时间戳当 id 的后果：每次点下载都是一条新记录，进程被杀重投之后
+         * 旧的又被 restore 复活，同一条片子在面板上出现两条，
+         * 而且每杀一次进程多攒一条。
          */
-        String key = safeName(name);
-        if (Boolean.TRUE.equals(ACTIVE.get(key))) {
-            return START_NOT_STICKY;
-        }
-        ACTIVE.put(key, true);
+        final String pid = DownloadStore.projectIdFromUrl(url);
+        if (pid == null) return START_NOT_STICKY;
 
-        final String id = String.valueOf(System.currentTimeMillis());
-        Snapshot s = new Snapshot();
-        s.id = id; s.title = name; s.total = -1; s.done = 0; s.status = "running";
-        s.url = url;
-        STATE.put(id, s);
-        persist();
+        /*
+         * 【同一条片子已经在下就直接忽略】。用户看不到进度时会反复点，
+         * 每多一条流都是在抢本来就不够的带宽——线上出现过三条流抢同一条
+         * 几十 KB/s 的管子，42 分钟发出 202MB 而只推进了 126MB。
+         * key 换成 projectId 之后，去重是天然的，不需要额外的 Set。
+         */
+        if (isLive(pid)) return START_NOT_STICKY;
+
+        DownloadStore.Record rec = DownloadStore.get(this, pid);
+        if (rec == null) {
+            rec = new DownloadStore.Record();
+            rec.projectId = pid;
+            rec.total = -1;
+            rec.done = 0;
+        }
+        rec.title = name;
+        rec.url = url;
+        rec.cookie = cookie;
+        rec.status = DownloadStore.RUNNING;
+        rec.error = null;
+        save(rec);
+        PAUSED.remove(pid);
+        CANCELLED.remove(pid);
 
         /*
          * 【必须是前台服务】。Android 8 起后台进程随时会被冻结，
          * 而"后台下载"的字面意思就是用户切走之后还得接着下。
          * 前台服务 + 一条常驻通知是官方唯一支持的做法。
          */
-        startForeground(FG_NOTIFY_ID, buildNotification(name, 0, -1, "正在下载"));
+        startForeground(FG_NOTIFY_ID, buildFor(rec));
 
+        final DownloadStore.Record started = rec;
         pool.execute(new Runnable() {
             @Override public void run() {
                 try {
-                    download(id, url, name, cookie, ua);
+                    download(pid, url, name, cookie, ua);
                 } catch (Throwable t) {
-                    fail(id, name, String.valueOf(t));
+                    fail(pid, name, String.valueOf(t));
                 } finally {
-                    CANCELLED.remove(id);
-                    ACTIVE.remove(safeName(name));
+                    CANCELLED.remove(pid);
+                    LIVE.remove(pid);
                     stopSelfIfIdle();
                 }
             }
@@ -315,31 +280,25 @@ public class DownloadService extends Service {
         return START_REDELIVER_INTENT;
     }
 
+    /**
+     * 没活干了就退出前台。
+     *
+     * ⚠️【判据是"有没有活着的 worker"，不是状态字符串】。
+     * 上一版看的是 STATE 里有没有 running/paused，而从磁盘恢复出来的记录
+     * 状态恒为 paused 且【背后根本没有线程】——于是只要存在一条这样的僵尸，
+     * 服务把真实下载全做完之后也永远不会 stopSelf，常驻通知 + 进程常驻内存耗电。
+     */
     private void stopSelfIfIdle() {
-        boolean busy = false;
-        synchronized (STATE) {
-            for (Snapshot s : STATE.values()) {
-                /*
-                 * ⚠️【等待重试的也算在忙】。断线之后要等几秒到几十秒才重试，
-                 * 这段时间状态是 paused——只认 running 的话会在这里撤掉前台身份，
-                 * 而失去前台身份的服务几秒内就会被系统回收，
-                 * 那条正在等重试的下载就此消失。
-                 */
-                /*
-                 * ⚠️【断线重连中和用户暂停的都算在忙】。线上踩过：一条小片子
-                 * 下完时，大文件正处在断线重连（那时状态还叫 paused），
-                 * 只认 running 的话这里判定"没事干了"→ 撤前台 → 通知消失、
-                 * 进程随时可被系统回收，而那条 458MB 还在传。
-                 */
-                if ("running".equals(s.status) || "paused".equals(s.status)
-                        || "reconnecting".equals(s.status)) { busy = true; break; }
-            }
-        }
-        if (!busy) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) stopForeground(STOP_FOREGROUND_DETACH);
-            else stopForeground(false);
-            stopSelf();
-        }
+        if (!LIVE.isEmpty()) return;
+        /*
+         * 【明确移除那条进度通知】。上一版把完成通知拆到另一个 id 之后，
+         * 就再没有任何地方取消 FG_NOTIFY_ID，而 STOP_FOREGROUND_DETACH
+         * 又要求保留它——于是每下完一条就在通知栏留一条停在最后进度、
+         * setOngoing(true) 划不掉的僵尸，直到强停 App。
+         */
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) stopForeground(STOP_FOREGROUND_REMOVE);
+        else stopForeground(true);
+        stopSelf();
     }
 
     /** 下一条。内部自带续传重试 */
@@ -384,8 +343,8 @@ public class DownloadService extends Service {
              */
             while (Boolean.TRUE.equals(PAUSED.get(id))
                     && !Boolean.TRUE.equals(CANCELLED.get(id))) {
-                Snapshot ps = STATE.get(id);
-                if (ps != null && !"paused".equals(ps.status)) { ps.status = "paused"; notifyState(ps); }
+                DownloadStore.Record ps = LIVE.get(id);
+                if (ps != null && !DownloadStore.PAUSED.equals(ps.status)) { ps.status = DownloadStore.PAUSED; notifyState(ps); }
                 try { Thread.sleep(500); } catch (InterruptedException e) { return; }
             }
             if (Boolean.TRUE.equals(CANCELLED.get(id))) {
@@ -453,10 +412,10 @@ public class DownloadService extends Service {
                         out.write(buf, 0, n);
                         done += n;
                         tickBytes += n;
-                        Snapshot s = STATE.get(id);
+                        DownloadStore.Record s = LIVE.get(id);
                         if (s != null) {
                             s.done = done; s.total = total;
-                            if (!"running".equals(s.status)) s.status = "running";
+                            if (!DownloadStore.RUNNING.equals(s.status)) s.status = DownloadStore.RUNNING;
                         }
                         // 通知刷太勤会拖慢下载，1 秒一次足够；顺便算这一秒的速度
                         long now = System.currentTimeMillis();
@@ -465,7 +424,7 @@ public class DownloadService extends Service {
                             if (s != null && dt > 0) s.bps = tickBytes * 1000 / dt;
                             tickAt = now; tickBytes = 0;
                             lastNotify = now;
-                            if (s != null) { notifyState(s); persist(); }
+                            if (s != null) { notifyState(s); save(s); }
                         }
                     }
                     // 因为暂停跳出来的：回外层等着，别当成传完
@@ -477,10 +436,9 @@ public class DownloadService extends Service {
                     throw new IOException("传输不完整：" + part.length() + "/" + total);
                 }
                 publish(part, name);
-                Snapshot s = STATE.get(id);
+                DownloadStore.Record s = LIVE.get(id);
                 if (s != null) { s.done = part.length(); s.total = part.length(); }
                 mark(id, "done", null);
-                persist();
                 notifyDone(name);
                 return;
 
@@ -497,9 +455,9 @@ public class DownloadService extends Service {
                     fail(id, name, String.valueOf(e.getMessage()));
                     return;
                 }
-                Snapshot s = STATE.get(id);
+                DownloadStore.Record s = LIVE.get(id);
                 if (s != null) {
-                    s.status = "reconnecting";
+                    s.status = DownloadStore.RECONNECTING;
                     s.bps = 0;
                     notifyState(s);
                 }
@@ -585,14 +543,29 @@ public class DownloadService extends Service {
         return s.toLowerCase().endsWith(".mp4") ? s : s + ".mp4";
     }
 
-    private void mark(String id, String status, String err) {
-        Snapshot s = STATE.get(id);
-        if (s != null) { s.status = status; s.error = err; }
+    /** 改状态 + 立刻落盘。**状态变化永远同步写磁盘** */
+    private void mark(String projectId, String status, String err) {
+        DownloadStore.Record r = LIVE.get(projectId);
+        if (r == null) r = DownloadStore.get(this, projectId);
+        if (r == null) return;
+        r.status = status;
+        r.error = err;
+        if (DownloadStore.DONE.equals(status)) {
+            LIVE.remove(projectId);
+            DownloadStore.markDone(this, projectId);   // 下完了，记录没有存在的意义
+        } else {
+            save(r);
+        }
     }
 
-    private void fail(String id, String name, String reason) {
-        mark(id, "error", reason);
-        persist();
+    private void fail(String projectId, String name, String reason) {
+        /*
+         * ⚠️【失败原因必须落盘】。上一版 error 只在内存里，restore 又把所有
+         * 状态一律标成 paused——于是"成片已被清理""登录过期"这种
+         * 【重试多少次都没用】的失败，重启后会伪装成一个带「继续」按钮的
+         * 暂停项，用户点一次撞一次墙，而原因早就不见了。
+         */
+        mark(projectId, DownloadStore.FAILED, reason);
         notifyFailed(name);
         reportError(reason);
     }
@@ -651,9 +624,9 @@ public class DownloadService extends Service {
      * 全在这儿。中途消失过一次，用户就会以为下载没了、回去再点一遍——
      * 那正是同一条片子被下了三遍的来源。
      */
-    private Notification buildFor(Snapshot s) {
-        boolean paused = "paused".equals(s.status);
-        boolean recon = "reconnecting".equals(s.status);
+    private Notification buildFor(DownloadStore.Record s) {
+        boolean paused = DownloadStore.PAUSED.equals(s.status);
+        boolean recon = DownloadStore.RECONNECTING.equals(s.status);
         String text;
         if (paused) text = "已暂停 · " + mb(s.done) + (s.total > 0 ? " / " + mb(s.total) : "");
         else if (recon) text = "断线了，正在自动重连 · 已下 " + mb(s.done);
@@ -689,9 +662,9 @@ public class DownloadService extends Service {
         // 【暂停 / 继续】：切出 App 之后这是唯一能操作的地方
         b.addAction(paused
                 ? new NotificationCompat.Action(android.R.drawable.ic_media_play, "继续",
-                    actionIntent(ACTION_RESUME, s.id))
+                    actionIntent(ACTION_RESUME, s.projectId))
                 : new NotificationCompat.Action(android.R.drawable.ic_media_pause, "暂停",
-                    actionIntent(ACTION_PAUSE, s.id)));
+                    actionIntent(ACTION_PAUSE, s.projectId)));
         return b.build();
     }
 
@@ -704,7 +677,7 @@ public class DownloadService extends Service {
         return PendingIntent.getService(this, (action + id).hashCode(), i, flags);
     }
 
-    private void notifyState(Snapshot s) {
+    private void notifyState(DownloadStore.Record s) {
         NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
         if (nm != null) nm.notify(FG_NOTIFY_ID, buildFor(s));
     }
