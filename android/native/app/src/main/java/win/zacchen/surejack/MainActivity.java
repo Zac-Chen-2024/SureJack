@@ -4,6 +4,7 @@ import android.app.AlertDialog;
 import android.app.DownloadManager;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.PackageInfo;
 import android.database.Cursor;
 import android.hardware.Sensor;
@@ -65,8 +66,73 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
     private boolean pageReady = false;
     private ValueCallback<Uri[]> fileCallback;
 
-    /** 本次会话发起过的下载 id，供 Bridge.downloads() 查询进度 */
+    /**
+     * 发起过的下载 id，供 Bridge.downloads() 查询进度。
+     *
+     * ⚠️【必须落盘，不能只放内存】。系统 DownloadManager 本来就是后台下的：
+     * 退出 app 照样下、通知栏有进度、断网自动重试。但这个列表只活在内存里的话，
+     * app 一被回收、一重启，网页里的"下载队列"就变成空的——
+     * 【文件还在后台好好地下，用户却看不见】，于是他以为没下上、再点一次，
+     * 服务端又白混一份几百 MB 的成片。
+     *
+     * 存的是 id，不是进度。进度永远现查 DownloadManager——它才是唯一真相，
+     * 我们缓存一份只会和它对不上。
+     */
+    private static final String PREFS_DOWNLOADS = "sj_downloads";
+    private static final String KEY_IDS = "ids";
     private final java.util.List<Long> downloadIds = new java.util.ArrayList<>();
+
+    /** 从盘上读回下载 id。开机（onCreate）调一次 */
+    private void loadDownloadIds() {
+        SharedPreferences sp = getSharedPreferences(PREFS_DOWNLOADS, Context.MODE_PRIVATE);
+        String raw = sp.getString(KEY_IDS, "");
+        synchronized (downloadIds) {
+            downloadIds.clear();
+            for (String part : raw.split(",")) {
+                if (part.isEmpty()) continue;
+                try { downloadIds.add(Long.parseLong(part)); } catch (Exception ignored) { }
+            }
+        }
+    }
+
+    /** 把当前列表写回盘上。加/删之后都要调 */
+    private void saveDownloadIds() {
+        StringBuilder b = new StringBuilder();
+        synchronized (downloadIds) {
+            for (Long id : downloadIds) {
+                if (b.length() > 0) b.append(',');
+                b.append(id);
+            }
+        }
+        getSharedPreferences(PREFS_DOWNLOADS, Context.MODE_PRIVATE)
+                .edit().putString(KEY_IDS, b.toString()).apply();
+    }
+
+    /**
+     * 摘掉 DownloadManager 里【已经不存在】的 id。
+     *
+     * 用户在系统下载管理里手动删过、或者系统自己清理过之后，这些 id 会永远
+     * 查不到东西。不摘的话列表只增不减，越攒越长。
+     */
+    private void pruneDownloadIds() {
+        DownloadManager dm = (DownloadManager) getSystemService(Context.DOWNLOAD_SERVICE);
+        if (dm == null) return;
+        long[] ids;
+        synchronized (downloadIds) {
+            ids = new long[downloadIds.size()];
+            for (int i = 0; i < ids.length; i++) ids[i] = downloadIds.get(i);
+        }
+        if (ids.length == 0) return;
+        java.util.Set<Long> alive = new java.util.HashSet<>();
+        try (Cursor c = dm.query(new DownloadManager.Query().setFilterById(ids))) {
+            while (c != null && c.moveToNext()) {
+                alive.add(c.getLong(c.getColumnIndexOrThrow(DownloadManager.COLUMN_ID)));
+            }
+        } catch (Exception ignored) { return; }
+        boolean changed;
+        synchronized (downloadIds) { changed = downloadIds.retainAll(alive); }
+        if (changed) saveDownloadIds();
+    }
     private SensorManager sensors;
     private long lastShakeAt = 0;
     private float lastX, lastY, lastZ;
@@ -99,6 +165,14 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
         CookieManager.getInstance().setAcceptThirdPartyCookies(web, true);
         // 下载队列桥：网页调 SJNative.downloads() 拿进度画悬浮框
         web.addJavascriptInterface(new Bridge(), "SJNative");
+
+        /*
+         * 【把上次的下载接回来】。DownloadManager 在 app 不在的时候照样下，
+         * 读回 id 才能让网页继续显示进度——否则用户回来看到空队列，
+         * 以为下载没了。顺手摘掉系统里已经没有的那些，免得列表只增不减。
+         */
+        loadDownloadIds();
+        pruneDownloadIds();
 
         web.setWebViewClient(new WebViewClient() {
             @Override
@@ -160,6 +234,7 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
                     if (dm != null) {
                         long id = dm.enqueue(r);
                         synchronized (downloadIds) { downloadIds.add(id); }
+                        saveDownloadIds();   // 落盘：app 被回收后回来还认得这条
                     }
                     Toast.makeText(MainActivity.this, "开始下载：" + name, Toast.LENGTH_SHORT).show();
                 } catch (Exception e) {
@@ -302,6 +377,7 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
             boolean ok;
             try { ok = dm.remove(id) > 0; } catch (Exception e) { ok = false; }
             synchronized (downloadIds) { downloadIds.remove(Long.valueOf(id)); }
+            saveDownloadIds();
             return ok;
         }
     }

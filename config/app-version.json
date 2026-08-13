@@ -1,6 +1,6 @@
 {
-  "versionCode": 9,
-  "versionName": "2.4.0",
-  "apkUrl": "https://github.com/Zac-Chen-2024/SureJack/releases/latest/download/SureJack.apk",
-  "notes": "片子合成完了会推通知（app 关着也会提醒，最迟十几分钟）。挑开头素材那一屏：装不下就不让选，挑一半也存住；分集断点同样。失败会给一个错误码，重试从最近做完的那一步接着走，不再整条重来。字幕过长时按语义切分显示。人名替换表里现在能看到并修改小名。"
+  "versionCode": 10,
+  "versionName": "2.5.0",
+  "apkUrl": "https://surejack.zacchen.win/SureJack.apk",
+  "notes": "下载修好了：断了能从断点续传，不再整条重来；下载没成功不会被误判成\"已下载\"而收起项目。后台下载的进度现在退出 App 再回来还看得到。续集片尾会自动加一句\"更多后续点击左下角就可以继续观看啦\"。文案分句改成按逗号断句，不用句号也能正常拆集。"
 }
