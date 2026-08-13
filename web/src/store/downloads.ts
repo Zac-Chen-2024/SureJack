@@ -19,7 +19,19 @@ import { api } from '../api/client'
  * 接管显示。两段拼起来才是用户眼里"一条下载"。
  */
 
-export type PrepPhase = 'mixing' | 'error'
+/**
+ * mixing = 服务端在混音；handoff = 混好了，正在交给原生下载器接手。
+ *
+ * ⚠️【handoff 这一档是补出来的，不是装饰】。原来混好就立刻把这条撤掉，
+ * 于是出现一个【空窗】：网页这条没了，而原生那条要等下一次轮询（1 秒）
+ * 才出现——用户看到"合成中"闪一下消失，以为没点上，就再点一次。
+ * 而那道"已经在队列里了"的守卫正好也随着撤销失效了，第二次点畅通无阻。
+ *
+ * 线上的后果是同一条 458MB 的成片有【三条流】在抢带宽：两条各自续传到
+ * 51MB 和 118MB，第三条每次从 0 开始。42 分钟发出 202MB，实际只推进到
+ * 126MB。她那条管子本来就只有几十 KB/s。
+ */
+export type PrepPhase = 'mixing' | 'handoff' | 'error'
 
 export interface Preparing {
   projectId: string
@@ -59,7 +71,9 @@ export const useDownloads = create<DownloadsState>((set, get) => ({
      * 【已经在备货就不重复发】。服务端也会去重，但客户端先挡一道：
      * 少一次往返，而且队列里不会闪出两条一样的。
      */
-    if (get().preparing[projectId]?.phase === 'mixing') {
+    // 混音中【和】交接中都要挡——交接那一小段正是用户会重复点的时候
+    const phase = get().preparing[projectId]?.phase
+    if (phase === 'mixing' || phase === 'handoff') {
       get().showGhost('这条已经在队列里了')
       return
     }
@@ -93,13 +107,44 @@ export const useDownloads = create<DownloadsState>((set, get) => ({
          * 混好了：交给浏览器/原生下载器去拉。用一个临时的 <a> 触发，
          * 而不是 location.href——后者在 WebView 里会把当前页面导航掉。
          */
+        /*
+         * 【先改状态，再触发下载】。顺序反过来的话，点击到状态更新之间
+         * 仍然有一小段窗口是"什么都没有"。
+         */
+        set((st) => ({
+          preparing: {
+            ...st.preparing,
+            [projectId]: { projectId, name, phase: 'handoff', error: null },
+          },
+        }))
         const a = document.createElement('a')
         a.href = `/api/projects/${projectId}/film/download`
         a.rel = 'noopener'
         document.body.appendChild(a)
         a.click()
         a.remove()
-        get().dismiss(projectId)
+        /*
+         * 【等原生那条真的出现了才撤】。撤早了就是上面说的空窗。
+         * 兜底 20 秒：原生桥不存在（普通浏览器）或者接管失败时，
+         * 这条也不能永远挂在那儿。
+         */
+        const bridge = (window as unknown as { SJNative?: { downloads?: () => string } }).SJNative
+        if (typeof bridge?.downloads !== 'function') {
+          setTimeout(() => get().dismiss(projectId), 3000)
+          return
+        }
+        const until = Date.now() + 20_000
+        const wait = setInterval(() => {
+          let taken = false
+          try {
+            const list = JSON.parse(bridge.downloads!()) as { title?: string }[]
+            taken = Array.isArray(list) && list.length > 0
+          } catch { /* 桥出问题就靠下面的超时兜底 */ }
+          if (taken || Date.now() > until) {
+            clearInterval(wait)
+            get().dismiss(projectId)
+          }
+        }, 500)
       } catch (e) {
         set((st) => ({
           preparing: {

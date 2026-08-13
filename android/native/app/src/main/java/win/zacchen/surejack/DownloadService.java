@@ -94,6 +94,18 @@ public class DownloadService extends Service {
     /** 正在跑的任务，用来响应取消 */
     private static final Map<String, Boolean> CANCELLED = new ConcurrentHashMap<>();
 
+    /**
+     * 已经在下的文件名。**同一条片子只许有一条流。**
+     *
+     * ⚠️ 线上实测：同一条 458MB 的成片同时有【三条流】在抢带宽——两条各自
+     * 续传到 51MB 和 118MB，第三条每次从 0 开始。42 分钟里服务器发出 202MB，
+     * 而实际最远只推进到 126MB，一多半流量白扔。
+     *
+     * 而她那条管子只有几十 KB/s。劈成三份不是"快三倍"，是三份都慢到没法用，
+     * 还都在写同一个 .part 文件。重复的请求必须在这里挡掉。
+     */
+    private static final Map<String, Boolean> ACTIVE = new ConcurrentHashMap<>();
+
     public static class Snapshot {
         public String id;
         public String title;
@@ -130,6 +142,16 @@ public class DownloadService extends Service {
         final String ua = intent.getStringExtra(EXTRA_UA);
         if (url == null || name == null) return START_NOT_STICKY;
 
+        /*
+         * 【同一个文件已经在下就直接忽略】。用户看不到进度时会反复点，
+         * 每多一条流都是在抢本来就不够的带宽。
+         */
+        String key = safeName(name);
+        if (Boolean.TRUE.equals(ACTIVE.get(key))) {
+            return START_NOT_STICKY;
+        }
+        ACTIVE.put(key, true);
+
         final String id = String.valueOf(System.currentTimeMillis());
         Snapshot s = new Snapshot();
         s.id = id; s.title = name; s.total = -1; s.done = 0; s.status = "running";
@@ -151,7 +173,7 @@ public class DownloadService extends Service {
                     fail(id, name, String.valueOf(t));
                 } finally {
                     CANCELLED.remove(id);
-                    if (pool != null && STATE.size() > 0) { /* 还有别的在排队就不停 */ }
+                    ACTIVE.remove(safeName(name));
                     stopSelfIfIdle();
                 }
             }
@@ -182,8 +204,14 @@ public class DownloadService extends Service {
         long total = -1;
         for (int attempt = 0; attempt <= MAX_RETRY; attempt++) {
             if (Boolean.TRUE.equals(CANCELLED.get(id))) {
-                part.delete();
-                mark(id, "error", "已取消");
+                /*
+                 * ⚠️【取消不删 .part】。删掉的话下次点下载就要从第 0 字节重来，
+                 * 而在一条几十 KB/s 的管子上，已经传下来的那几十 MB 是几十分钟
+                 * 换来的。线上日志里"整条 0-480275839"反复出现，就是这么来的。
+                 * 半成品留在应用私有目录里，用户看不见，也不占公共空间；
+                 * 真不要了由 clearPart() 显式清（重下按钮）。
+                 */
+                mark(id, "error", "已暂停");
                 return;
             }
             long have = part.exists() ? part.length() : 0;
@@ -229,8 +257,7 @@ public class DownloadService extends Service {
                     int n;
                     while ((n = in.read(buf)) > 0) {
                         if (Boolean.TRUE.equals(CANCELLED.get(id))) {
-                            part.delete();
-                            mark(id, "error", "已取消");
+                            mark(id, "error", "已暂停");   // .part 留着，下次接着传
                             return;
                         }
                         out.write(buf, 0, n);

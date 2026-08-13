@@ -115,7 +115,9 @@ export function DownloadPanel () {
   const preparing = Object.values(prep)
   if (!bridge && preparing.length === 0) return null
   const running = items.filter((d) => d.status === 'running' || d.status === 'paused')
-  const busy = running.length + preparing.filter((p) => p.phase === 'mixing').length
+  // 交接中也算"在忙"——否则角标会在交接那一秒归零，看着像下载没了
+  const busy = running.length
+    + preparing.filter((p) => p.phase === 'mixing' || p.phase === 'handoff').length
 
   return (
     <div ref={ref} className="relative">
@@ -163,7 +165,9 @@ export function DownloadPanel () {
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-[13px] font-medium text-ink-100">{p.name}</p>
                     <p className={`text-[11px] ${p.phase === 'error' ? 'text-danger' : 'text-ink-400'}`}>
-                      {p.phase === 'error' ? (p.error ?? '合成失败') : '合成中…'}
+                      {p.phase === 'error'
+                        ? (p.error ?? '合成失败')
+                        : p.phase === 'handoff' ? '准备下载…' : '合成中…'}
                     </p>
                   </div>
                   {p.phase === 'error'

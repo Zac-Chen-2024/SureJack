@@ -24,6 +24,19 @@ import { mkdir } from 'node:fs/promises'
 
 type Deps = FilmDeps
 
+/**
+ * 每条项目当前正在传输的那条流。**同一条片子只许有一条**。
+ *
+ * ⚠️【后来者顶掉先来者，而不是把后来者挡在门外】。两种都能保证"只有一条"，
+ * 但"挡后来者"会误伤：客户端断线重连时，服务端这边的旧连接可能还没
+ * 收到 close（TCP 半开能挂很久），于是用户明明在正常重试，却被回一个
+ * 409——而且他越点越挡。顶掉旧的则是自愈的：旧连接十有八九早就死了，
+ * 真活着也只是被提前结束，用户手里那条【新的】总能开始传。
+ *
+ * 放进程内存就够：重启后所有连接本来就断了，状态跟着清空正是我们要的。
+ */
+const streaming = new Map<string, { destroy: () => void }>()
+
 export function registerExportRoutes (app: FastifyInstance, deps: Deps): void {
   const { whitelist, queue } = deps
 
@@ -269,6 +282,24 @@ export function registerExportRoutes (app: FastifyInstance, deps: Deps): void {
       }
       const path = entry.path
 
+      /*
+       * ── 【同一条片子只许有一条流在传】────────────────────────────
+       *
+       * 客户端那边已经去重了（App 按文件名挡、网页按状态挡），但那两道都
+       * 依赖客户端是新版本。线上实测：同一条 458MB 的成片同时有【三条流】
+       * 在抢带宽——两条各自续传到 51MB 和 118MB，第三条每次从 0 开始。
+       * 42 分钟里服务器发出 202MB，实际只推进到 126MB，一多半白扔。
+       * 而用户那条管子只有几十 KB/s，劈成三份不是快三倍，是三份都没法用。
+       *
+       * 服务端这道【不依赖客户端版本】：先来的继续传，后来的直接回 409。
+       * 用户重试时前一条早就断开了（断开会立刻放行），不会挡住他。
+       */
+      const prev = streaming.get(req.params.id)
+      if (prev !== undefined) {
+        req.log.warn({ project: req.params.id }, '同一条片子又来了一条流，掐掉上一条')
+        prev.destroy()
+      }
+
       const size = statSync(path).size
 
       /*
@@ -341,8 +372,15 @@ export function registerExportRoutes (app: FastifyInstance, deps: Deps): void {
       }, '开始传成片')
       let sent = 0
       const stream = createReadStream(path, { start, end })
+      const slot = { destroy: (): void => { stream.destroy() } }
+      streaming.set(req.params.id, slot)
       stream.on('data', (c: Buffer | string) => { sent += c.length })
       stream.on('close', () => {
+        /*
+         * ⚠️【只在这一格还是自己时才清】。被后来者顶掉时，格子里装的已经是
+         * 【那条新流】了——照删的话新流就失去了保护，下一条又能挤进来。
+         */
+        if (streaming.get(req.params.id) === slot) streaming.delete(req.params.id)
         if (sent < expected) {
           // 断了：文件【留着】，等它续传或重试。什么都不标记。
           req.log.warn({
