@@ -221,24 +221,37 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
             @Override
             public void onDownloadStart(String url, String userAgent, String contentDisposition,
                                         String mimeType, long contentLength) {
+                /*
+                 * ⚠️【交给我们自己的 DownloadService，不再用系统 DownloadManager】。
+                 *
+                 * 系统那条路【一次都没成功过】：服务器上从 7 月 30 日至今的全部
+                 * nginx 日志里，`AndroidDownloadManager` 这个 UA 出现 0 次，
+                 * 横跨 App 版本 7 和 9、横跨两台手机。每一条下载请求都来自
+                 * WebView 自己（UA 里带 wv），而 WebView 不会断点续传——
+                 * 480MB 的成片在移动网络上传几 MB 就断，下次又从零开始。
+                 *
+                 * 日志还指出了交接断在哪：那些请求是 499（客户端自己断开）+
+                 * 传输【0 字节】，正是 WebView 把下载交出去的动作；但系统下载器
+                 * 那条请求从来没有到达服务器。dm.enqueue() 抛的异常被下面这个
+                 * catch 吞掉，只弹一句"下载失败"，于是这件事安静地坏了很久。
+                 *
+                 * 现在自己下：我们控制续传和重试，失败原因还会报回服务端。
+                 */
                 try {
                     String name = fileNameFrom(contentDisposition, url, mimeType);
-                    DownloadManager.Request r = new DownloadManager.Request(Uri.parse(url));
-                    r.addRequestHeader("Cookie", CookieManager.getInstance().getCookie(url));
-                    r.addRequestHeader("User-Agent", userAgent);
-                    r.setMimeType(mimeType);
-                    r.setTitle(name);
-                    r.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
-                    r.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, name);
-                    DownloadManager dm = (DownloadManager) getSystemService(Context.DOWNLOAD_SERVICE);
-                    if (dm != null) {
-                        long id = dm.enqueue(r);
-                        synchronized (downloadIds) { downloadIds.add(id); }
-                        saveDownloadIds();   // 落盘：app 被回收后回来还认得这条
-                    }
+                    Intent i = new Intent(MainActivity.this, DownloadService.class);
+                    i.setAction(DownloadService.ACTION_START);
+                    i.putExtra(DownloadService.EXTRA_URL, url);
+                    i.putExtra(DownloadService.EXTRA_NAME, name);
+                    i.putExtra(DownloadService.EXTRA_COOKIE,
+                            CookieManager.getInstance().getCookie(url));
+                    i.putExtra(DownloadService.EXTRA_UA, userAgent);
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(i);
+                    else startService(i);
                     Toast.makeText(MainActivity.this, "开始下载：" + name, Toast.LENGTH_SHORT).show();
                 } catch (Exception e) {
-                    Toast.makeText(MainActivity.this, "下载失败", Toast.LENGTH_SHORT).show();
+                    // 失败要说清是什么失败——上一版就是被一句"下载失败"瞒过去的
+                    Toast.makeText(MainActivity.this, "下载启动失败：" + e, Toast.LENGTH_LONG).show();
                 }
             }
         });
@@ -325,17 +338,34 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
 
         @JavascriptInterface
         public String downloads() {
+            /*
+             * 【我们自己的下载在前，系统的在后】。系统那条路已经不再使用，
+             * 但老版本 App 排进系统队列的下载可能还在跑，一并显示完为止。
+             */
+            StringBuilder mine = new StringBuilder();
+            synchronized (DownloadService.STATE) {
+                for (DownloadService.Snapshot s : DownloadService.STATE.values()) {
+                    if (mine.length() > 0) mine.append(',');
+                    mine.append("{\"id\":\"").append(s.id).append("\"")
+                        .append(",\"title\":").append(jsonStr(s.title))
+                        .append(",\"total\":").append(s.total)
+                        .append(",\"done\":").append(s.done)
+                        .append(",\"status\":\"").append(s.status).append("\"}");
+                }
+            }
+
             DownloadManager dm = (DownloadManager) getSystemService(Context.DOWNLOAD_SERVICE);
-            if (dm == null) return "[]";
+            if (dm == null) return "[" + mine + "]";
             long[] ids;
             synchronized (downloadIds) {
                 ids = new long[downloadIds.size()];
                 for (int i = 0; i < ids.length; i++) ids[i] = downloadIds.get(i);
             }
-            if (ids.length == 0) return "[]";
+            if (ids.length == 0) return "[" + mine + "]";
             StringBuilder sb = new StringBuilder("[");
+            boolean first = mine.length() == 0;
+            if (!first) sb.append(mine);
             try (Cursor c = dm.query(new DownloadManager.Query().setFilterById(ids))) {
-                boolean first = true;
                 while (c != null && c.moveToNext()) {
                     String title = c.getString(c.getColumnIndexOrThrow(DownloadManager.COLUMN_TITLE));
                     long total = c.getLong(c.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES));
@@ -347,7 +377,7 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
                     long id = c.getLong(c.getColumnIndexOrThrow(DownloadManager.COLUMN_ID));
                     if (!first) sb.append(',');
                     first = false;
-                    sb.append("{\"id\":").append(id)
+                    sb.append("{\"id\":\"").append(id).append("\"")
                       .append(",\"title\":").append(jsonStr(title))
                       .append(",\"total\":").append(total)
                       .append(",\"done\":").append(done)
@@ -370,6 +400,15 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
          */
         @JavascriptInterface
         public boolean removeDownload(String idStr) {
+            // 我们自己的那条：id 是时间戳字符串，发个取消 Intent 让 Service 停下
+            if (DownloadService.STATE.containsKey(idStr)) {
+                Intent i = new Intent(MainActivity.this, DownloadService.class);
+                i.setAction(DownloadService.ACTION_CANCEL);
+                i.putExtra(DownloadService.EXTRA_ID, idStr);
+                startService(i);
+                DownloadService.STATE.remove(idStr);
+                return true;
+            }
             long id;
             try { id = Long.parseLong(idStr); } catch (Exception e) { return false; }
             DownloadManager dm = (DownloadManager) getSystemService(Context.DOWNLOAD_SERVICE);

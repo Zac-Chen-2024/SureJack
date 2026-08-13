@@ -5,9 +5,13 @@ import { useDownloads } from '../../store/downloads'
 /**
  * 下载队列悬浮框（项目列表页，账户头像旁边）。
  *
- * 数据来自【原生桥】：安卓壳把下载交给系统 DownloadManager（断网续传、
- * 通知栏进度都免费得到），再通过 SJNative.downloads() 把进度吐回网页，
- * 这样在 App 里也看得见，不用去翻通知栏。
+ * 数据来自【原生桥】：安卓壳用自己的前台服务下载（断点续传、通知栏进度），
+ * 再通过 SJNative.downloads() 把进度吐回网页，这样在 App 里也看得见，
+ * 不用去翻通知栏。
+ *
+ * ⚠️ 曾经用的是系统 DownloadManager，但它【一次都没工作过】——服务器日志里
+ * AndroidDownloadManager 这个 UA 从来没出现过，下载实际是 WebView 在拉，
+ * 而 WebView 不会续传，480MB 传几 MB 就断。现在由 App 自己下。
  *
  * 普通浏览器里没有这个桥 → 整个入口不显示（浏览器自己有下载管理器，
  * 我们再画一个只是重复）。
@@ -16,7 +20,14 @@ import { useDownloads } from '../../store/downloads'
  * 文件名下面。嵌套卡片在 280px 宽的悬浮框里会把内容挤成一团——那正是
  * 上一版看着乱的原因。
  */
-interface NativeDownload { id: number; title: string; total: number; done: number; status: string }
+/**
+ * id 是【字符串】：自己的下载用时间戳当 id，老版本 App 排进系统队列的
+ * 那些是数字 id——两种都可能出现在同一个列表里（老下载会显示到跑完为止），
+ * 所以这里两种都收。
+ */
+interface NativeDownload {
+  id: string | number; title: string; total: number; done: number; status: string
+}
 
 interface Bridge {
   downloads: () => string

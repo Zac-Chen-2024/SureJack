@@ -368,6 +368,32 @@ export function buildServer (opts: BuildOpts = {}): FastifyInstance {
    * 内容 = 最新 versionCode / versionName / APK 下载链接（GitHub releases/latest
    * 稳定地址）。公开只读、不敏感。发版时更新那个 JSON + 壳的 appVersionCode 即可。
    */
+  /**
+   * 客户端把故障报回来。
+   *
+   * ⚠️【为什么必须有】。这条链路上的故障全发生在用户手机上，而我们手上只有
+   * 服务器日志——手机上什么都看不到。系统 DownloadManager 那次就是这么坏的：
+   * dm.enqueue() 抛的异常被一个 catch-all 吞掉，只弹一句"下载失败"，
+   * 服务端的日志里【什么都没有】，于是这件事安静地坏了至少半个月，
+   * 直到翻 nginx 日志发现 AndroidDownloadManager 这个 UA 一次都没出现过。
+   *
+   * 不需要登录：出错的时候会话可能本来就没了，而这条只是往日志里写一行。
+   * 字段全部截断，防止有人拿它往日志里灌东西。
+   */
+  app.post<{ Body: { where?: unknown; message?: unknown; device?: unknown; sdk?: unknown } }>(
+    '/api/client-error', async (req, reply) => {
+      const cut = (v: unknown, n: number): string =>
+        typeof v === 'string' ? v.slice(0, n) : ''
+      req.log.error({
+        来自: cut(req.body?.where, 40),
+        原因: cut(req.body?.message, 500),
+        机型: cut(req.body?.device, 60),
+        安卓: typeof req.body?.sdk === 'number' ? req.body.sdk : 0,
+        ip: req.ip,
+      }, '客户端报错')
+      return reply.send({ ok: true })
+    })
+
   app.get('/api/app-version', async (_req, reply) => {
     const p = join(__dirname, '..', 'config', 'app-version.json')
     if (!existsSync(p)) return reply.code(404).send({ error: 'not found' })

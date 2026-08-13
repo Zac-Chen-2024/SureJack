@@ -9,6 +9,9 @@
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- Android 13+ 发通知要用户点头；13 以下这条会被忽略 -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 自己下成片：切走之后还要接着下，只能靠前台服务（Android 8 起后台会被冻结） -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 
     <application
         android:allowBackup="true"
@@ -32,6 +35,12 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- 可断点续传的下载：系统 DownloadManager 在这台设备上一次都没工作过 -->
+        <service
+            android:name=".DownloadService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
 
         <!-- 把 cacheDir 里的更新包安全地交给系统安装器 -->
         <provider

@@ -326,15 +326,32 @@ export function registerExportRoutes (app: FastifyInstance, deps: Deps): void {
        * 读了多少字节是自明的：客户端一断开，流被销毁，读到的就少于该读的。
        */
       const expected = end - start + 1
+      /*
+       * 【把是谁在要、要哪一段记下来】。手机端下载失败时我们手上只有日志，
+       * 而"下载中断"这四个字分不清是安卓 DownloadManager 在续传、
+       * 还是 WebView 自己多发了一条——它俩会同时出现，看起来像重复下载。
+       * User-Agent 一记就分得开。
+       */
+      req.log.info({
+        project: req.params.id,
+        段: range === null ? `整条 0-${size - 1}` : `${start}-${end}`,
+        总MB: Math.round(size / 1048576),
+        本次MB: Math.round(expected / 1048576),
+        客户端: (req.headers['user-agent'] ?? '').slice(0, 60),
+      }, '开始传成片')
       let sent = 0
       const stream = createReadStream(path, { start, end })
       stream.on('data', (c: Buffer | string) => { sent += c.length })
       stream.on('close', () => {
         if (sent < expected) {
           // 断了：文件【留着】，等它续传或重试。什么都不标记。
-          req.log.warn(
-            { project: req.params.id, 已传MB: Math.round(sent / 1048576), 应传MB: Math.round(expected / 1048576) },
-            '下载中断，成片留着等续传')
+          req.log.warn({
+            project: req.params.id,
+            已传MB: Math.round(sent / 1048576),
+            应传MB: Math.round(expected / 1048576),
+            完成度: `${Math.round(sent / expected * 100)}%`,
+            客户端: (req.headers['user-agent'] ?? '').slice(0, 60),
+          }, '下载中断，成片留着等续传')
           return
         }
         if (!servesTail) return          // 只拿了中间一段，还没完
