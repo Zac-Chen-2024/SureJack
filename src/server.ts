@@ -21,7 +21,7 @@ import { registerAudioRoutes } from './audio/routes.js'
 import { ExportQueue } from './queue/queue.js'
 import { resetStuckVoices } from './tts/recover.js'
 import {
-  sweepDelivered, sweepStaleBgTracks, deliverTag, pendingDeliver, type DeliverInput,
+  sweepDelivered, deliverTag, pendingDeliver, type DeliverInput,
 } from './compose/deliver.js'
 import { downloadPrep } from './compose/download-queue.js'
 import { sweepArchive, sweepOrphanAssets } from './compose/archive.js'
@@ -343,17 +343,6 @@ export function buildServer (opts: BuildOpts = {}): FastifyInstance {
         }
         if (adopted > 0) app.log.info({ 接管: adopted }, '开机接管：还没取走的成片')
 
-        /*
-         * 【补回收规则上线之前留下的背景轨】。它是纯中间产物，母带烧完就
-         * 没人读了（385MB，比母带一半还多）。新片子在烧成那一刻就回收，
-         * 这里只是给老片子补一次课——同一条规则。
-         */
-        const bg = await sweepStaleBgTracks(targets.map((t) => t.dir))
-        if (bg.count > 0) {
-          app.log.info(
-            { 条数: bg.count, 释放MB: Math.round(bg.bytes / 1048576) },
-            '开机回收：母带已就绪的背景轨')
-        }
       })().catch(() => { /* 清扫失败不该拦住启动 */ })
 
       /*

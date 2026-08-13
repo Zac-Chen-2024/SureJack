@@ -1,13 +1,12 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { rm, readdir, rename, stat } from 'node:fs/promises'
+import { rm, readdir, rename } from 'node:fs/promises'
 import { join } from 'node:path'
 import { existsSync, readFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { mixAudio } from './mix.js'
 import { renderCoverClip, prependCover, probeAudio, COVER_IMAGE } from '../cover/cover.js'
 import { FILM_MASTER_FILE, MASTER_STAMP_FILE } from './film.js'
-import { BG_TRACK_FILE, BG_STAMP_FILE } from './prebuild.js'
 import type { AspectPreset } from '../types.js'
 
 const run = promisify(execFile)
@@ -143,40 +142,6 @@ export async function dropDelivered (path: string): Promise<void> {
 export async function deliveredSize (path: string): Promise<number> {
   const { stdout } = await run('stat', ['-c', '%s', path])
   return Number(stdout.trim())
-}
-
-/**
- * 回收【母带已经烧好了却还留着】的背景轨。
- *
- * 背景轨是纯中间产物：母带烧完再没人读它，而它有 385MB（实测，比母带本身
- * 的一半还多）。新烧的片子在 film.ts 里烧成那一刻就回收了；这个函数负责
- * 补齐【规则上线之前就烧好的那些】——同一条规则，只是补一次课。
- *
- * ⚠️【只在母带确实完整时才回收】。母带不在、或者指纹文件说它没做完，
- * 就说明这条片子还可能要接着烧，背景轨得留着给它复用。
- */
-export async function sweepStaleBgTracks (
-  dirs: string[],
-): Promise<{ count: number, bytes: number }> {
-  let count = 0
-  let bytes = 0
-  for (const dir of dirs) {
-    try {
-      const master = join(dir, FILM_MASTER_FILE)
-      if (!existsSync(master) || (await stat(master)).size <= 0) continue
-      const raw = readFileSync(join(dir, MASTER_STAMP_FILE), 'utf-8')
-      const st = JSON.parse(raw) as { status?: unknown }
-      if (st.status !== undefined && st.status !== 'done') continue
-
-      const bg = join(dir, BG_TRACK_FILE)
-      if (!existsSync(bg)) continue
-      bytes += (await stat(bg)).size
-      await rm(bg, { force: true })
-      await rm(join(dir, BG_STAMP_FILE), { force: true }).catch(() => {})
-      count++
-    } catch { /* 这一条回收不了就跳过，绝不影响别的 */ }
-  }
-  return { count, bytes }
 }
 
 /**
