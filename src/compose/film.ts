@@ -912,6 +912,15 @@ export interface SweepResult {
  * judgeFilm 里，和界面共用一份），blocked 本来就还没到时候。所以开机
  * 最多只会跑真正缺的那几条。
  *
+ * ⚠️【归档的一律跳过】。归档就是【故意】把母带删掉换空间的（一条 13 分钟
+ * 的片子 1.3GB → 9MB）。而在补合眼里"母带不在"正好就是 missing——
+ * 不跳过的话，每次重启都会把所有归档项目原样烧回来，归档等于白做，
+ * 还白占十几分钟队列和 CPU。线上真发生过：一条刚归档省下 897MB 的项目，
+ * 下一次重启就被排进队重烧。
+ *
+ * 用户点【恢复】走的是 /restore，它自己会清掉归档标记再入队——
+ * 复原是用户的决定，不是开机扫描的副作用。
+ *
  * 【绝不抛】。这是启动路径上的旁支，某个用户的库坏了不该让整个服务起不来。
  */
 export async function sweepFilms (
@@ -920,15 +929,19 @@ export async function sweepFilms (
   const out: SweepResult = { enqueued: [], skipped: 0 }
 
   for (const userName of userNames) {
-    let projects: { id: string; name: string }[]
+    let projects: { id: string; name: string; archivedAt: string }[]
     try {
       const db = openUserDb(userName, deps.whitelist)
       // 没建过项目的用户会在这里开出一个空库，正常
-      try { projects = db.listProjects().map((p) => ({ id: p.id, name: p.name })) } finally { db.close() }
+      try {
+        projects = db.listProjects()
+          .map((p) => ({ id: p.id, name: p.name, archivedAt: p.archivedAt }))
+      } finally { db.close() }
     } catch { continue }
 
     for (const p of projects) {
       try {
+        if (p.archivedAt !== '') { out.skipped += 1; continue }
         const v = await judgeFilm(deps, userName, p.id)
         if (v.kind !== 'missing') { out.skipped += 1; continue }
         const jobId = await enqueueFilm(deps, userName, p.id)
