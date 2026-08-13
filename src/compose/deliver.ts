@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { rm, readdir } from 'node:fs/promises'
+import { rm, readdir, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { existsSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
@@ -100,7 +100,18 @@ export async function deliveredSize (path: string): Promise<number> {
  *
  * 开机扫一遍最省事：那时一定没有正在进行的下载，删了不会误伤。
  */
-export async function sweepDelivered (dirs: string[]): Promise<number> {
+export async function sweepDelivered (
+  dirs: string[],
+  /**
+   * 只删这么久没动过的。**开机扫传 0**（那时一定没有正在进行的下载）。
+   *
+   * ⚠️【运行中扫必须带它】。下载中断之后成片是【故意留着】的——留着才能
+   * 续传，不用把几百 MB 整条重来（见 queue/routes.ts 的下载路由）。
+   * 运行中无差别地扫，等于把用户正在续传的那份从他手里抽走。
+   */
+  olderThanMs = 0,
+  now = Date.now(),
+): Promise<number> {
   let n = 0
   for (const dir of dirs) {
     let names: string[]
@@ -119,6 +130,11 @@ export async function sweepDelivered (dirs: string[]): Promise<number> {
         continue
       }
       if (!f.startsWith('deliver-')) continue
+      if (olderThanMs > 0) {
+        try {
+          if (now - (await stat(join(dir, f))).mtimeMs < olderThanMs) continue
+        } catch { continue }
+      }
       await rm(join(dir, f), { force: true }).catch(() => {})
       n++
     }

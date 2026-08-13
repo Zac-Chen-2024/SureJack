@@ -3,7 +3,7 @@ import { createReadStream, existsSync, readFileSync, statSync, writeFileSync } f
 import { rm } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { spawn } from 'node:child_process'
-import { sendFileRange } from '../assets/storage.js'
+import { sendFileRange, parseRange } from '../assets/storage.js'
 import { openUserDb, type Project } from '../db/user-db.js'
 import { getSession, requireAuth } from '../auth/session.js'
 import { downloadableFilm, playableMaster, enqueueFilm, filmInfo, resolveFilm, FILM_STAMP_FILE, type FilmDeps } from '../compose/film.js'
@@ -269,45 +269,93 @@ export function registerExportRoutes (app: FastifyInstance, deps: Deps): void {
       }
       const path = entry.path
 
-      /*
-       * 【传完就删】。用 'close' 而不是 'end'：客户端中途断开时 'end' 不会
-       * 触发，临时文件会一直留在盘上，下几次就把磁盘堆满了——那正是这套
-       * 改动本来要解决的问题。
-       */
-      /*
-       * 【下载过的才会被归档】。没下载过说明还在打磨，收走等于帮倒忙——
-       * 用户下次进来要等十几分钟才能接着看。
-       */
-      withUserDb(name, (db) => db.updateProject(req.params.id, {
-        downloadedAt: new Date().toISOString(),
-        touchedAt: new Date().toISOString(),
-      }))
+      const size = statSync(path).size
 
-      const stream = createReadStream(path)
+      /*
+       * ── 【断了要能续，别整条重来】────────────────────────────────
+       *
+       * 线上真事，一条 480MB 的片子连着三次下载失败，日志里全是
+       * `stream closed prematurely`：传了 7 秒断、4 分 17 秒断、12 秒断。
+       * 用户在手机上、跨运营商，IP 中途都换了——这种网络下一次拉完 480MB
+       * 本来就是小概率事件。
+       *
+       * 而原来的代码把这件小概率的事变成了【不可能】：
+       *   ① 明确不给 Accept-Ranges，所以每次重试都从第 0 字节重来；
+       *   ② 'close' 在客户端断开时【也会触发】，于是一断就把混好的文件删了，
+       *      重试还得先重混几十秒；
+       *   ③ downloadedAt 在开传【之前】就写死了，三次失败照样算"下载过"，
+       *      两小时后归档把母带删掉——从此这条片子彻底下不动。
+       *
+       * 三条一起修：声明支持 Range、断了把文件留着、传完才算数。
+       */
+      const range = parseRange(req.headers.range, size)
+      if (range === 'invalid') {
+        reply.header('Content-Range', `bytes */${size}`)
+        return reply.code(416).send({ error: '请求的字节区间超出文件范围' })
+      }
+      const start = range?.start ?? 0
+      const end = range?.end ?? size - 1
+      /*
+       * 这一次【是不是把最后一个字节也传了】。续传时客户端会分几次来拿，
+       * 只有拿到尾巴的那一次才是真的下载完了——中间那几段传完就删的话，
+       * 下一个 Range 请求会扑空，续传反而比不支持还糟。
+       */
+      const servesTail = end >= size - 1
+
+      reply.header('Content-Type', 'video/mp4')
+      reply.header('Content-Disposition',
+        `attachment; filename*=UTF-8''${encodeURIComponent(`${project.name}.mp4`)}`)
+      reply.header('Accept-Ranges', 'bytes')
+      /*
+       * 【必须带 Content-Length】。只丢一个流出去的话 Fastify 走 chunked，
+       * 响应里没有总长度 → 安卓 DownloadManager 把 total 记成 -1 →
+       * 下载队列里"已下 30MB / —"、进度条永远 0%（真机上就是这样）。
+       */
+      reply.header('Content-Length', end - start + 1)
+      if (range !== null) {
+        reply.code(206)
+        reply.header('Content-Range', `bytes ${start}-${end}/${size}`)
+      }
+
+      /*
+       * 【传完才算数】——靠【数字节】判断，不看 HTTP 层的状态。
+       *
+       * 本来用的是 reply.raw.writableFinished，看着更直接，但它在 fastify
+       * 的 inject 里根本不成立，测试当场就挂了；而"下载有没有传完"这件事
+       * 也确实不该依赖某个 HTTP 实现的内部字段。
+       * 读了多少字节是自明的：客户端一断开，流被销毁，读到的就少于该读的。
+       */
+      const expected = end - start + 1
+      let sent = 0
+      const stream = createReadStream(path, { start, end })
+      stream.on('data', (c: Buffer | string) => { sent += c.length })
       stream.on('close', () => {
+        if (sent < expected) {
+          // 断了：文件【留着】，等它续传或重试。什么都不标记。
+          req.log.warn(
+            { project: req.params.id, 已传MB: Math.round(sent / 1048576), 应传MB: Math.round(expected / 1048576) },
+            '下载中断，成片留着等续传')
+          return
+        }
+        if (!servesTail) return          // 只拿了中间一段，还没完
+
+        /*
+         * 【下载过的才会被归档，而且从这一刻开始算两小时】。
+         * 没下载过说明还在打磨，收走等于帮倒忙——用户下次进来要等十几分钟。
+         */
+        withUserDb(name, (db) => db.updateProject(req.params.id, {
+          downloadedAt: new Date().toISOString(),
+          touchedAt: new Date().toISOString(),
+        }))
         /*
          * 【取走即作废】：删文件、也把备货记录清掉。不清的话，用户改完音量
          * 再下一次，拿到的还是上一份——而他刚刚才亲手调过。
          */
         downloadPrep.drop(req.params.id)
         void dropDelivered(path)
+        req.log.info({ project: req.params.id, MB: Math.round(size / 1048576) }, '下载完成，成片已清理')
       })
 
-      reply.header('Content-Type', 'video/mp4')
-      reply.header('Content-Disposition',
-        `attachment; filename*=UTF-8''${encodeURIComponent(`${project.name}.mp4`)}`)
-      /*
-       * 【必须带 Content-Length】。只丢一个流出去的话 Fastify 走 chunked，
-       * 响应里没有总长度 → 安卓 DownloadManager 把 total 记成 -1 →
-       * 下载队列里"已下 30MB / —"、进度条永远 0%（真机上就是这样）。
-       * 文件就躺在盘上，长度是白拿的，没有不给的理由。
-       * Accept-Ranges 顺手给上：断了能续传，不用整条重来。
-       */
-      reply.header('Content-Length', statSync(path).size)
-      /*
-       * ⚠️【不再给 Accept-Ranges】。文件是现混的、传完就删，第二个 Range
-       * 请求进来时它已经不在了——续传只会拿到 404。宁可不声称支持。
-       */
       return reply.send(stream)
     })
 

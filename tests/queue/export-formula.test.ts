@@ -326,6 +326,75 @@ describe('下载时才把声音烧进去', () => {
     }
     expect(await left()).toEqual([])
   }, 180_000)
+
+  /*
+   * ── 【断了要能续，别整条重来】────────────────────────────────────
+   *
+   * 线上真事：一条 480MB 的片子连着三次下载失败，日志里全是
+   * `stream closed prematurely`（手机跨运营商，IP 中途都换了）。
+   * 而当时的代码把这件小概率的事变成了必然——不给 Accept-Ranges 所以
+   * 每次从 0 重来；'close' 在断开时也触发所以一断就把混好的文件删了；
+   * downloadedAt 在开传之前就写死所以失败也算"下载过"，两小时后归档
+   * 把母带删掉，从此彻底下不动。
+   *
+   * 这两条测试钉住的就是那个支点：【只有拿到最后一个字节才算下载完】。
+   */
+  it('【只取中间一段：不删文件、不算下载过】', async () => {
+    const a = await makeApp()
+    const cookie = await loginAs(a, '测试公式甲')
+    const id = await projectWithVoice(a, cookie)
+    await exportAndWait(a, cookie, id)
+
+    // 先摸一次总长度，再只要开头 1KB——模拟安卓 DownloadManager 分段拉
+    const head = await a.inject({
+      method: 'GET', url: `/api/projects/${id}/film/download`,
+      headers: { cookie: `sj_session=${cookie}`, range: 'bytes=0-1023' },
+    })
+    expect(head.statusCode).toBe(206)
+    expect(head.headers['accept-ranges']).toBe('bytes')
+
+    const dir = assetDir('测试公式甲', ['测试公式甲'], id)
+    await new Promise((r) => setTimeout(r, 500))
+    // 成片必须【还在】，否则续传的下一个请求会扑空
+    expect((await readdir(dir)).filter((f) => f.startsWith('deliver-')).length).toBe(1)
+
+    const db = openUserDb('测试公式甲', ['测试公式甲'])
+    try {
+      // 没下载完就不该算"下载过"——算了的话两小时后会被归档，母带就没了
+      expect(db.getProject(id)!.downloadedAt).toBe('')
+    } finally { db.close() }
+  }, 180_000)
+
+  it('【取到最后一个字节：才算下载完，才删】', async () => {
+    const a = await makeApp()
+    const cookie = await loginAs(a, '测试公式甲')
+    const id = await projectWithVoice(a, cookie)
+    await exportAndWait(a, cookie, id)
+
+    const size = Number((await a.inject({
+      method: 'GET', url: `/api/projects/${id}/film/download`,
+      headers: { cookie: `sj_session=${cookie}`, range: 'bytes=0-0' },
+    })).headers['content-range']!.toString().split('/')[1])
+
+    const tail = await a.inject({
+      method: 'GET', url: `/api/projects/${id}/film/download`,
+      headers: { cookie: `sj_session=${cookie}`, range: `bytes=1024-${size - 1}` },
+    })
+    expect(tail.statusCode).toBe(206)
+
+    const dir = assetDir('测试公式甲', ['测试公式甲'], id)
+    const left = async (): Promise<string[]> =>
+      (await readdir(dir)).filter((f) => f.startsWith('deliver-'))
+    for (let i = 0; i < 30 && (await left()).length > 0; i++) {
+      await new Promise((r) => setTimeout(r, 100))
+    }
+    expect(await left()).toEqual([])
+
+    const db = openUserDb('测试公式甲', ['测试公式甲'])
+    try {
+      expect(db.getProject(id)!.downloadedAt).not.toBe('')
+    } finally { db.close() }
+  }, 180_000)
 })
 
 describe('导出 —— 旧路径（已上传背景视频）不变', () => {

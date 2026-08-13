@@ -274,7 +274,7 @@ export function buildServer (opts: BuildOpts = {}): FastifyInstance {
        * 但进程被杀时那个 rm 不会跑——一份 100MB，攒几次就把盘吃满，
        * 而磁盘满的症状是 502，和"下载"看着毫无关系。
        */
-      void (async () => {
+      const assetRoots = (): string[] => {
         const dirs: string[] = []
         for (const u of whitelist) {
           const db = openUserDb(u, whitelist)
@@ -282,7 +282,12 @@ export function buildServer (opts: BuildOpts = {}): FastifyInstance {
             for (const p of db.listProjects()) dirs.push(assetDir(u, whitelist, p.id))
           } finally { db.close() }
         }
-        const n = await sweepDelivered(dirs)
+        return dirs
+      }
+
+      void (async () => {
+        // 开机扫【不设时限】：那时一定没有正在进行的下载，删了不会误伤
+        const n = await sweepDelivered(assetRoots())
         if (n > 0) app.log.info({ 清掉: n }, '开机清扫：上次遗留的下载临时文件')
       })().catch(() => { /* 清扫失败不该拦住启动 */ })
 
@@ -299,6 +304,14 @@ export function buildServer (opts: BuildOpts = {}): FastifyInstance {
        * （一条 13 分钟的片子 1.3GB → 9MB）。每 15 分钟扫一次——
        * 阈值是两小时，扫得再密也只是白跑。
        */
+      /**
+       * 没人来取的成片留多久。
+       *
+       * 6 小时必须【远大于一次下载的时长】：中断后的成片是故意留着给续传的，
+       * 扫早了等于把用户正在续传的那份从他手里抽走。
+       */
+      const DELIVERED_TTL_MS = 6 * 60 * 60 * 1000
+
       const archiveTimer = setInterval(() => {
         void sweepArchive(whitelist)
           .then((r) => {
@@ -307,6 +320,15 @@ export function buildServer (opts: BuildOpts = {}): FastifyInstance {
               app.log.info({ 归档: r.map((x) => x.name), 释放MB: mb }, '归档：久未使用的项目已收起')
             }
           })
+          .catch(() => { /* 下一轮再说 */ })
+        /*
+         * 【顺手清掉没人来取的成片】。下载中断之后成片是故意留着的（留着才能
+         * 续传），代价是用户放弃之后那几百 MB 没人删。6 小时还没人来取，
+         * 就是真的不要了——线上有过一个 480MB 的这种文件白占盘。
+         * 阈值必须远大于一次下载的时长，否则会把正在续传的那份抽走。
+         */
+        void sweepDelivered(assetRoots(), DELIVERED_TTL_MS)
+          .then((n) => { if (n > 0) app.log.info({ 删除: n }, '清掉没人来取的成片') })
           .catch(() => { /* 下一轮再说 */ })
       }, 15 * 60 * 1000)
       archiveTimer.unref?.()
