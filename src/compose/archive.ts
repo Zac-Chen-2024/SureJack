@@ -30,8 +30,18 @@ import { PREVIEW_DIR } from './preview.js'
  * 逐帧一致。要是排布还是"拿项目 id 当种子现算"，素材库一变就复原不出来了。
  */
 
-/** 归档时删掉的那些：全都能从库里的数据重新算出来 */
-const REGENERABLE = [FILM_MASTER_FILE, BG_TRACK_FILE, 'master.json', 'export.json']
+/**
+ * 归档时删掉的那些：全都能从库里的数据重新算出来。
+ *
+ * ⚠️【`master.json` 故意留着】。它才 145 字节，而里面的母带指纹是
+ * 【待取成片指纹】的一部分（见 deliver.ts 的 deliverTag）。删了的话，
+ * 已归档项目盘上那份还没被取走的成片就算不出指纹、认不出身份，
+ * 开机清扫又会退回到"分辨不出就一律删"的老路上——那正是 review #13。
+ *
+ * 留着它不会让母带被误判成"还在"：reusableOutput 同时要求指纹匹配
+ * 【和文件存在且非空】，而 master.mp4 已经删了。
+ */
+const REGENERABLE = [FILM_MASTER_FILE, BG_TRACK_FILE, 'export.json']
 /** 预览分段整目录删——它是从母带算出来的，母带都删了它更留不住 */
 const REGENERABLE_DIRS = [PREVIEW_DIR]
 

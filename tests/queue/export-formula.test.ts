@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach, beforeEach } from 'vitest'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { mkdtemp, mkdir, rm, writeFile, readdir } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { FastifyInstance } from 'fastify'
@@ -234,14 +235,16 @@ describe('导出 —— 公式模式端到端', () => {
     expect(dur).toBeLessThan(VOICE_MS / 1000 + 0.3)
 
     /*
-     * 【直接量背景轨本身】。只看成片时长是不够的：烧录那一步对背景视频加了
-     * -stream_loop -1，哪怕背景轨只有 1 秒，成片照样是 3 秒——循环播放的
-     * 单个片段，正是这个任务要消灭的东西。背景轨自己必须就有整条那么长。
+     * 【背景轨用完即回收】：母带烧成之后它就被删了（385MB 的纯中间产物，
+     * 而排布清单已物化进库、重拼是逐帧一样的）。所以这里不再去量它。
+     *
+     * ⚠️ 它原本要钉的性质是"背景轨自己就有整条那么长"——只看成片时长
+     * 分不出来，因为烧录那一步对背景视频加了 -stream_loop -1，哪怕轨只有
+     * 1 秒，成片照样是整条长（循环播放同一个片段，正是要消灭的东西）。
+     * 这条性质现在由 tests/queue/bg-prebuild.test.ts 覆盖——那里在【导出之前】
+     * 直接量预拼好的轨，那时它还在盘上。
      */
-    const track = join(assetDir('测试公式甲', LIST, id), 'bg-track.mp4')
-    const trackDur = await probeDuration(track)
-    expect(trackDur).toBeGreaterThan(VOICE_MS / 1000 - 0.3)
-    expect(trackDur).toBeLessThan(VOICE_MS / 1000 + 0.3)
+    expect(existsSync(join(assetDir('测试公式甲', LIST, id), 'bg-track.mp4'))).toBe(false)
 
     // 排布必须与前端预览接口给的那一份完全一致——所见即所得
     const plan = (await a.inject({

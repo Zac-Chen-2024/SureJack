@@ -20,12 +20,15 @@ import { registerLibraryRoutes } from './library/routes.js'
 import { registerAudioRoutes } from './audio/routes.js'
 import { ExportQueue } from './queue/queue.js'
 import { resetStuckVoices } from './tts/recover.js'
-import { sweepDelivered } from './compose/deliver.js'
+import {
+  sweepDelivered, sweepStaleBgTracks, deliverTag, pendingDeliver, type DeliverInput,
+} from './compose/deliver.js'
+import { downloadPrep } from './compose/download-queue.js'
 import { sweepArchive, sweepOrphanAssets } from './compose/archive.js'
 import { openUserDb } from './db/user-db.js'
 import { assetDir } from './assets/storage.js'
 import { registerExportRoutes } from './queue/routes.js'
-import { sweepFilms } from './compose/film.js'
+import { sweepFilms, resolveFilm } from './compose/film.js'
 import { openAuthDb } from './db/auth-db.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -274,21 +277,83 @@ export function buildServer (opts: BuildOpts = {}): FastifyInstance {
        * 但进程被杀时那个 rm 不会跑——一份 100MB，攒几次就把盘吃满，
        * 而磁盘满的症状是 502，和"下载"看着毫无关系。
        */
-      const assetRoots = (): string[] => {
-        const dirs: string[] = []
+      /**
+       * 每条项目的【成片目录 + 该保留哪一份成片】。
+       *
+       * keepTag 是"按当前参数算出来的成片指纹"——盘上叫这个名字的那一份就是
+       * 用户还没取走的成品，必须留；别的 deliver-* 都是垃圾。
+       * 算不出来（母带还没合成、项目状态不全）就给 null，此时该目录下的
+       * 完整成片【一律保留】——宁可多留一份，也不能再误删用户的东西。
+       */
+      const deliverTargets = (): Array<{
+        user: string, projectId: string, name: string
+        dir: string, keepTag: string | null, input: DeliverInput | null
+      }> => {
+        const out = []
         for (const u of whitelist) {
-          const db = openUserDb(u, whitelist)
+          let rows
           try {
-            for (const p of db.listProjects()) dirs.push(assetDir(u, whitelist, p.id))
-          } finally { db.close() }
+            const db = openUserDb(u, whitelist)
+            try { rows = db.listProjects() } finally { db.close() }
+          } catch { continue }
+          for (const p of rows) {
+            const dir = assetDir(u, whitelist, p.id)
+            let input: DeliverInput | null = null
+            try {
+              const r = resolveFilm({ whitelist, libraryDataDir, queue }, u, p.id)
+              if (r.ok) {
+                input = {
+                  dir: r.film.dir, voicePath: r.film.voicePath, voiceGain: p.voiceGain,
+                  bgmPath: r.film.bgmPath, bgmVolume: p.bgmVolume,
+                  coverTitle: r.film.coverTitle, aspect: r.film.aspect,
+                }
+              }
+            } catch { /* 状态不全就当算不出来 */ }
+            out.push({
+              user: u, projectId: p.id, name: p.name, dir,
+              keepTag: input === null ? null : deliverTag(input), input,
+            })
+          }
         }
-        return dirs
+        return out
       }
 
       void (async () => {
-        // 开机扫【不设时限】：那时一定没有正在进行的下载，删了不会误伤
-        const n = await sweepDelivered(assetRoots())
-        if (n > 0) app.log.info({ 清掉: n }, '开机清扫：上次遗留的下载临时文件')
+        const targets = deliverTargets()
+        /*
+         * 【开机清扫只删垃圾】。原来是无差别删光，理由写的是
+         * "开机时一定没有正在进行的下载"——那句话在【主动重启服务】时是错的，
+         * 线上因此丢过一份用户正在下载的 480MB（review #13）。
+         */
+        const n = await sweepDelivered(targets.map((t) => ({ dir: t.dir, keepTag: t.keepTag })))
+        if (n > 0) app.log.info({ 清掉: n }, '开机清扫：半成品和已过期的成片')
+
+        /*
+         * 【把还没被取走的成片接管回来】。它们在盘上是完整的，只是内存里的
+         * DownloadPrep 随进程一起没了。不接管的话，用户点下载会重新混一份
+         * ——十几秒 + 几百 MB 的写入，而那份现成的就在旁边。
+         */
+        let adopted = 0
+        for (const t of targets) {
+          if (t.input === null) continue
+          const ready = pendingDeliver(t.input)
+          if (ready === null) continue
+          downloadPrep.adopt(t.projectId, ready)
+          adopted++
+        }
+        if (adopted > 0) app.log.info({ 接管: adopted }, '开机接管：还没取走的成片')
+
+        /*
+         * 【补回收规则上线之前留下的背景轨】。它是纯中间产物，母带烧完就
+         * 没人读了（385MB，比母带一半还多）。新片子在烧成那一刻就回收，
+         * 这里只是给老片子补一次课——同一条规则。
+         */
+        const bg = await sweepStaleBgTracks(targets.map((t) => t.dir))
+        if (bg.count > 0) {
+          app.log.info(
+            { 条数: bg.count, 释放MB: Math.round(bg.bytes / 1048576) },
+            '开机回收：母带已就绪的背景轨')
+        }
       })().catch(() => { /* 清扫失败不该拦住启动 */ })
 
       /*
@@ -304,13 +369,13 @@ export function buildServer (opts: BuildOpts = {}): FastifyInstance {
        * （一条 13 分钟的片子 1.3GB → 9MB）。每 15 分钟扫一次——
        * 阈值是两小时，扫得再密也只是白跑。
        */
-      /**
-       * 没人来取的成片留多久。
-       *
-       * 6 小时必须【远大于一次下载的时长】：中断后的成片是故意留着给续传的，
-       * 扫早了等于把用户正在续传的那份从他手里抽走。
+      /*
+       * ⚠️【没有"多久没人取就删"这条规则了】。用户定的规则是
+       * "没有下载的成片就一直保持好储存，直到下载了再清除"——
+       * 原来那条 6 小时 TTL 和它直接冲突，已经删掉。
+       * 磁盘紧张时由【提前归档】来腾空间（见 docs/download-fix-plan-v2.md 第 3 节），
+       * 而不是把用户还没拿到手的东西删掉。
        */
-      const DELIVERED_TTL_MS = 6 * 60 * 60 * 1000
 
       const archiveTimer = setInterval(() => {
         void sweepArchive(whitelist)
@@ -320,15 +385,6 @@ export function buildServer (opts: BuildOpts = {}): FastifyInstance {
               app.log.info({ 归档: r.map((x) => x.name), 释放MB: mb }, '归档：久未使用的项目已收起')
             }
           })
-          .catch(() => { /* 下一轮再说 */ })
-        /*
-         * 【顺手清掉没人来取的成片】。下载中断之后成片是故意留着的（留着才能
-         * 续传），代价是用户放弃之后那几百 MB 没人删。6 小时还没人来取，
-         * 就是真的不要了——线上有过一个 480MB 的这种文件白占盘。
-         * 阈值必须远大于一次下载的时长，否则会把正在续传的那份抽走。
-         */
-        void sweepDelivered(assetRoots(), DELIVERED_TTL_MS)
-          .then((n) => { if (n > 0) app.log.info({ 删除: n }, '清掉没人来取的成片') })
           .catch(() => { /* 下一轮再说 */ })
       }, 15 * 60 * 1000)
       archiveTimer.unref?.()

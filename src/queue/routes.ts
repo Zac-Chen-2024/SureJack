@@ -9,7 +9,7 @@ import { getSession, requireAuth } from '../auth/session.js'
 import { downloadableFilm, playableMaster, enqueueFilm, filmInfo, resolveFilm, FILM_STAMP_FILE, type FilmDeps } from '../compose/film.js'
 import { checkpointOf, CHECKPOINT_LABEL, NEXT_STEP } from '../compose/checkpoint.js'
 import { finishedSince } from './notify.js'
-import { dropDelivered } from '../compose/deliver.js'
+import { dropDelivered, pendingDeliver } from '../compose/deliver.js'
 import { downloadPrep } from '../compose/download-queue.js'
 import { buildPreview, hasPreview, previewDir } from '../compose/preview.js'
 import { FILM_MASTER_FILE } from '../compose/film.js'
@@ -285,13 +285,26 @@ export function registerExportRoutes (app: FastifyInstance, deps: Deps): void {
       if (entry === null) {
         const r0 = resolveFilm(deps, name, req.params.id)
         if (!r0.ok) return reply.code(409).send({ error: r0.error })
-        const m = join(r0.film.dir, FILM_MASTER_FILE)
-        if (!existsSync(m)) return reply.code(409).send({ error: '画面还没合好' })
-        downloadPrep.request(req.params.id, {
+        const input = {
           dir: r0.film.dir, voicePath: r0.film.voicePath, voiceGain: project.voiceGain,
           bgmPath: r0.film.bgmPath, bgmVolume: project.bgmVolume,
           coverTitle: r0.film.coverTitle, aspect: r0.film.aspect,
-        }, statSync(m).size)
+        }
+        /*
+         * 【盘上已经有对得上的成片就直接给，不看母带】。
+         *
+         * 成片是完整独立的文件，母带在不在跟能不能把它传出去毫无关系。
+         * 原来这里无条件要求 master.mp4 存在，于是"已归档 + 有待取成片"
+         * 会回 409「画面还没合好」——而那份成片明明就躺在旁边。
+         */
+        const ready = pendingDeliver(input)
+        if (ready !== null) {
+          downloadPrep.adopt(req.params.id, ready)
+        } else {
+          const m = join(r0.film.dir, FILM_MASTER_FILE)
+          if (!existsSync(m)) return reply.code(409).send({ error: '画面还没合好' })
+          downloadPrep.request(req.params.id, input, statSync(m).size)
+        }
       }
       entry = await downloadPrep.wait(req.params.id)
       if (entry === null || entry.state === 'error' || entry.path === null) {

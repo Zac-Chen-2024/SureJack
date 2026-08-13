@@ -37,6 +37,15 @@ export interface Stamp {
    * 用户把它念给开发者，开发者拿它 grep 日志——比"我点了下然后转圈"有用。
    */
   code?: string
+  /**
+   * 母带烧成后被回收的背景轨:字节数 + 它当时的 mtime。
+   *
+   * 记 mtime 是为了【留下"这一次到底有没有重拼背景轨"的证据】。背景轨在
+   * 母带烧成后就被删了(它 385MB，纯中间产物)，删掉之后就再也无法通过
+   * 文件本身证明"导出复用了预拼的那条、没有白拼一遍"——而那恰恰是
+   * 预拼这个优化存在的唯一理由。把 mtime 留在指纹里，测试和排查都还能对得上。
+   */
+  bgFreed?: { bytes: number, mtimeMs: number }
 }
 
 export async function writeStamp (dir: string, file: string, stamp: Stamp): Promise<void> {

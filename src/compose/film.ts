@@ -34,7 +34,7 @@ import { existsSync } from 'node:fs'
  */
 
 import { createHash } from 'node:crypto'
-import { mkdir, writeFile, rename } from 'node:fs/promises'
+import { mkdir, writeFile, rename, rm, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { openUserDb, type Project } from '../db/user-db.js'
 import { assetDir } from '../assets/storage.js'
@@ -51,8 +51,7 @@ import {
   COVER_CLIP_FILE, COVER_IMAGE, coverTitleOf, prependCover, probeAudio, renderCoverClip,
 } from '../cover/cover.js'
 import {
-  BG_TRACK_FILE, enqueueBgTrack, planFingerprint, reusableBgTrack,
-  writeStamp as writeBgStamp, type PrebuildDeps,
+  BG_TRACK_FILE, enqueueBgTrack, planFingerprint, reusableBgTrack, writeStamp as writeBgStamp, type PrebuildDeps, BG_STAMP_FILE,
 } from './prebuild.js'
 import { readStamp, reusableOutput, writeStamp } from './stamp.js'
 import type { AspectPreset, Clip } from '../types.js'
@@ -526,6 +525,31 @@ async function buildFilm (
     signal)
     await rename(partial, masterPath)
     await writeStamp(f.dir, MASTER_STAMP_FILE, { fingerprint: f.masterFingerprint, status: 'done', jobId })
+
+    /*
+     * 【背景轨用完就删】。它是纯中间产物——母带烧完之后再也没有人读它，
+     * 而它有 385MB（实测），比母带本身还接近一半。
+     *
+     * 删了也不会丢东西：背景排布在敲定开头时就【物化成一份具体清单】存进库了，
+     * 照着重拼一遍是逐帧一样的（这也正是归档能"无损"的前提）。
+     *
+     * ⚠️【必须是烧录成功之后才删】。提前删的话，烧录中途失败重试就得从
+     * 重拼背景轨开始——而它本来是可以直接复用的。这里紧跟在 rename +
+     * 写指纹之后，此刻母带已经完整落地，背景轨才真的没用了。
+     */
+    try {
+      const bg = join(f.dir, BG_TRACK_FILE)
+      const st = existsSync(bg) ? await stat(bg) : null
+      if (st !== null && st.size > 0) {
+        await rm(bg, { force: true })
+        await rm(join(f.dir, BG_STAMP_FILE), { force: true }).catch(() => {})
+        // 把它的 mtime 记进母带指纹：删掉之后还能证明这次没白拼一遍
+        await writeStamp(f.dir, MASTER_STAMP_FILE, {
+          fingerprint: f.masterFingerprint, status: 'done', jobId,
+          bgFreed: { bytes: st.size, mtimeMs: st.mtimeMs },
+        })
+      }
+    } catch { /* 删不掉顶多占点地方，绝不能让它影响一条已经烧好的片子 */ }
   } else {
     // 母带现成的：进度直接推到混音那一段的起点，别让进度条从 0 重来
     onProgress(MASTER_SHARE * 100)

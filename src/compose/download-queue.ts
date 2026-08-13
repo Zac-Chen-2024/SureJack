@@ -110,6 +110,23 @@ export class DownloadPrep {
     return entry
   }
 
+  /**
+   * 【接管一份盘上现成的成片】。开机时用。
+   *
+   * 成片文件名带参数指纹（见 deliver.ts 的 deliverTag），所以重启之后光看
+   * 盘上那个文件就能确认"它就是这套参数该有的那一份"。不接管的话，
+   * 用户点下载会重新混一份——十几秒 + 几百 MB 的写入，而现成的就在旁边。
+   *
+   * 已经有记录就不动（内存里那份更新，可能正在混）。
+   */
+  adopt (projectId: string, path: string): void {
+    if (this.entries.has(projectId)) return
+    this.entries.set(projectId, {
+      projectId, state: 'ready', path, error: null,
+      waiters: 0, startedAt: Date.now(),
+    })
+  }
+
   /** 等这一份混完（已经混完就立刻返回） */
   async wait (projectId: string): Promise<PrepEntry | null> {
     await this.work.get(projectId)

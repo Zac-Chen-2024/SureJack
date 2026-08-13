@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { mkdtemp, mkdir, rm, stat, writeFile, readFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { FastifyInstance } from 'fastify'
@@ -316,10 +317,22 @@ describe('背景轨预拼 —— 导出直接用，不再现拼', () => {
     expect(job.error).toBe(null)
     expect(job.status).toBe('done')
 
-    const after = await stat(trackPathOf(id))
-    // 【mtime 没动 = 真的复用了】。只看成片对不对是分不出来的：
-    // 重拼一遍也能出正确的成片，只是白花了那几十秒。
-    expect(after.mtimeMs).toBe(before.mtimeMs)
+    /*
+     * 【背景轨已经被回收了】——它是纯中间产物，母带烧成之后再没人读它，
+     * 而它有 385MB（实测）。所以现在导出完成时它就该不在了。
+     */
+    expect(existsSync(trackPathOf(id))).toBe(false)
+
+    /*
+     * 【mtime 没动 = 真的复用了预拼那条，没白拼一遍】。
+     * 只看成片对不对是分不出来的：重拼一遍也能出正确的成片，只是白花几十秒。
+     * 文件删了之后没法再 stat，所以删的那一刻把它的 mtime 记进了母带指纹
+     * （见 stamp.ts 的 bgFreed）——证据留下来了，断言照样成立。
+     */
+    const ms = JSON.parse(await readFile(
+      join(assetDir('测试预拼甲', LIST, id), 'master.json'), 'utf-8'))
+    expect(ms.bgFreed.mtimeMs).toBe(before.mtimeMs)
+    expect(ms.bgFreed.bytes).toBe(before.size)
 
     const dur = await probeDuration(job.outputPath ?? '')
     expect(dur).toBeGreaterThan(VOICE_MS / 1000 - 0.3)
@@ -349,24 +362,33 @@ describe('背景轨预拼 —— 导出直接用，不再现拼', () => {
     expect(dur).toBeLessThan(VOICE_MS / 1000 + 0.3)
   }, 300_000)
 
-  it('导出时现拼的轨也会记上指纹，下一次就能复用', async () => {
+  /*
+   * 【背景轨在母带烧成后就被回收，第二次导出会重拼】。
+   *
+   * 这一条原来断言的是"下一次就能复用"——那是背景轨常驻时代的契约。
+   * 现在它用完即删（385MB 的纯中间产物，而排布清单已物化进库、
+   * 重拼是逐帧一样的），所以第二次导出必然重拼。
+   * 值得钉住的变成了两件事：**回收真的发生了**，以及**重拼之后成片照样正确**。
+   */
+  it('背景轨用完即回收，第二次导出重拼且成片照样正确', async () => {
     const a = await makeApp()
     const cookie = await loginAs(a, '测试预拼甲')
     const id = await makeProject(a, cookie)
     await markVoiceReady(id)
 
-    // 不等预拼，直接导出——第一次必然是现拼
     const first = await exportAndWait(a, cookie, id)
     expect(first.status).toBe('done')
 
-    const stamp = JSON.parse(await readFile(
-      join(assetDir('测试预拼甲', LIST, id), 'bg-track.json'), 'utf-8'))
-    expect(typeof stamp.fingerprint).toBe('string')
+    // 回收了：轨和它的指纹旁挂文件都该不在
+    expect(existsSync(trackPathOf(id))).toBe(false)
+    expect(existsSync(join(assetDir('测试预拼甲', LIST, id), 'bg-track.json'))).toBe(false)
 
-    const before = await stat(trackPathOf(id))
     const second = await exportAndWait(a, cookie, id)
     expect(second.status).toBe('done')
-    expect((await stat(trackPathOf(id))).mtimeMs).toBe(before.mtimeMs)
+    // 重拼一遍之后，成片时长依然等于配音——回收没有把片子弄坏
+    const dur = await probeDuration(second.outputPath ?? '')
+    expect(dur).toBeGreaterThan(VOICE_MS / 1000 - 0.3)
+    expect(dur).toBeLessThan(VOICE_MS / 1000 + 0.3)
   }, 300_000)
 })
 
