@@ -27,15 +27,33 @@ type Deps = FilmDeps
 /**
  * 每条项目当前正在传输的那条流。**同一条片子只许有一条**。
  *
- * ⚠️【后来者顶掉先来者，而不是把后来者挡在门外】。两种都能保证"只有一条"，
- * 但"挡后来者"会误伤：客户端断线重连时，服务端这边的旧连接可能还没
- * 收到 close（TCP 半开能挂很久），于是用户明明在正常重试，却被回一个
- * 409——而且他越点越挡。顶掉旧的则是自愈的：旧连接十有八九早就死了，
- * 真活着也只是被提前结束，用户手里那条【新的】总能开始传。
+ * ── 谁让位，看的是【它还在不在动】，不是谁先来 ──────────────────────
+ * 先想的是"后来者一律顶掉先来者"。它能收敛成一条，但会造成【互顶死循环】：
+ * 万一真有两个客户端同时要同一条片子，A 被顶掉后重试顶掉 B，B 再重试顶掉 A，
+ * 两边都永远下不完。
+ *
+ * 反过来"一律挡住后来者"也不行：客户端断线重连时，服务端这边的旧连接
+ * 可能还没收到 close（TCP 半开能挂很久），于是用户明明在正常重试却被回
+ * 409，而且越点越挡。
+ *
+ * 所以判据既不是先来也不是后到，而是【那条流最近还在传字节吗】：
+ *   · 还在动 → 它是活的，后来者回 409，让它安心传完；
+ *   · 卡住超过 STALE_MS → 十有八九是个死连接，顶掉，让新的接手。
+ * 今天线上那三条流里，被用户放弃的那两条正是"卡住不动"的那种。
  *
  * 放进程内存就够：重启后所有连接本来就断了，状态跟着清空正是我们要的。
  */
-const streaming = new Map<string, { destroy: () => void }>()
+interface StreamSlot { destroy: () => void; lastByteAt: number }
+const streaming = new Map<string, StreamSlot>()
+
+/**
+ * 多久没传出一个字节就算卡死了。
+ *
+ * 10 秒：正常传输哪怕只有 26 KB/s（实测最差值）也是每秒都有数据，
+ * 连着 10 秒一个字节都没有，那就不是慢，是断了。
+ * 太短会误伤真卡顿的连接，太长会让用户的重试白等。
+ */
+const STALE_MS = 10_000
 
 export function registerExportRoutes (app: FastifyInstance, deps: Deps): void {
   const { whitelist, queue } = deps
@@ -296,7 +314,15 @@ export function registerExportRoutes (app: FastifyInstance, deps: Deps): void {
        */
       const prev = streaming.get(req.params.id)
       if (prev !== undefined) {
-        req.log.warn({ project: req.params.id }, '同一条片子又来了一条流，掐掉上一条')
+        const idle = Date.now() - prev.lastByteAt
+        if (idle < STALE_MS) {
+          // 上一条还在好好地传 → 让它传完，别把带宽劈成两半
+          req.log.warn({ project: req.params.id, 上一条空闲毫秒: idle },
+            '已有一条流在正常传输，挡掉这条重复请求')
+          return reply.code(409).send({ error: '这条正在下载中，请等它下完' })
+        }
+        req.log.warn({ project: req.params.id, 上一条空闲毫秒: idle },
+          '上一条流卡住了，掐掉让新的接手')
         prev.destroy()
       }
 
@@ -372,9 +398,24 @@ export function registerExportRoutes (app: FastifyInstance, deps: Deps): void {
       }, '开始传成片')
       let sent = 0
       const stream = createReadStream(path, { start, end })
-      const slot = { destroy: (): void => { stream.destroy() } }
+      const slot: StreamSlot = {
+        destroy: (): void => { stream.destroy() },
+        lastByteAt: Date.now(),
+      }
       streaming.set(req.params.id, slot)
-      stream.on('data', (c: Buffer | string) => { sent += c.length })
+      stream.on('data', (c: Buffer | string) => {
+        sent += c.length
+        slot.lastByteAt = Date.now()   // 「还在动」的唯一依据
+        /*
+         * 【该给的都给完了就立刻让位，不等 close】。close 要等socket 真正
+         * 关掉才来，而客户端常常是"先用一个小 Range 探一下总长度，紧接着
+         * 发真正的下载请求"——两条挨在同一毫秒里。不提前让位的话，
+         * 那条【已经传完的】探测流会把真正的下载挡在门外（测试就是这么挂的）。
+         */
+        if (sent >= expected && streaming.get(req.params.id) === slot) {
+          streaming.delete(req.params.id)
+        }
+      })
       stream.on('close', () => {
         /*
          * ⚠️【只在这一格还是自己时才清】。被后来者顶掉时，格子里装的已经是
