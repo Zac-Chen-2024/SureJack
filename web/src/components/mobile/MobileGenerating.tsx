@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useProjects } from '../../store/projects'
 import { usePipeline } from '../../store/pipeline'
-import { IconChevronLeft, IconLoader, IconCheck } from '../ui/Icon'
+import { IconChevronLeft, IconLoader, IconCheck, IconDownload } from '../ui/Icon'
 
 /**
  * 生成中蒙层（成片还没出来、但流程在跑时的编辑器主视图）。
@@ -32,6 +32,13 @@ export function MobileGenerating ({ onBack, projectName }: { onBack: () => void;
   const composing = filmState === 'building'
   const errored = ttsState === 'error' || filmState === 'error'
   /*
+   * 【等空间不是失败】。磁盘腾不出来时合成会停在这儿，而用户一下载走
+   * 一条片子，空间回来了它就【自动继续】——所以既不能画成红色报错，
+   * 也不该给"重试"按钮（重试一万次也还是不够）。要给的是【能照着做的一句话】。
+   */
+  const waitingDisk = filmState === 'waiting_disk'
+  const diskHint = usePipeline((s) => s.film?.reason ?? null)
+  /*
    * 【为什么"很久不动然后突然跳一下"】：成片任务在队列里【排在"拼背景"
    * 任务后面】，排队期间进度恒为 0，轮到它才开始爬。之前统一显示 0% →
    * 看着像卡死。现在 0% 明说"排队中"，真正开始烧才显示百分比，
@@ -53,7 +60,24 @@ export function MobileGenerating ({ onBack, projectName }: { onBack: () => void;
       </div>
 
       <div className="flex h-full flex-col items-center justify-center px-8">
-        {errored ? (
+        {waitingDisk ? (
+          <div className="flex flex-col items-center gap-4 text-center">
+            <div className="flex size-14 items-center justify-center rounded-2xl bg-white/[0.06]">
+              <IconDownload className="size-6 text-accent" />
+            </div>
+            <p className="text-lg font-bold text-ink-50">等待空间</p>
+            <p className="max-w-[78vw] text-sm leading-relaxed text-ink-300">
+              {diskHint ?? '磁盘空间不够，先下载一条片子腾出空间'}
+            </p>
+            <button
+              type="button" onClick={onBack}
+              className="rounded-full bg-accent px-5 py-2.5 text-sm font-bold text-ink-950"
+            >
+              去下载
+            </button>
+            <p className="text-[11px] text-ink-500">下载完成后会自动继续合成，不用再回来点</p>
+          </div>
+        ) : errored ? (
           /*
            * 【重试不是"回去点生成配音"】。那是把整条链从头再走一遍
            * （10 分钟配音 + 十几分钟烧录），而失败的可能只是最后混一次音。

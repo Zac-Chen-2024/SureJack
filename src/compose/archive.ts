@@ -41,7 +41,18 @@ import { PREVIEW_DIR } from './preview.js'
  * 留着它不会让母带被误判成"还在"：reusableOutput 同时要求指纹匹配
  * 【和文件存在且非空】，而 master.mp4 已经删了。
  */
-const REGENERABLE = [FILM_MASTER_FILE, BG_TRACK_FILE, 'export.json']
+/*
+ * ⚠️【必须是函数，不能是模块顶层的常量数组】。
+ *
+ * 这里有一条循环引用：film.ts → disk-guard.ts → archive.ts → film.ts。
+ * 写成顶层 `const REGENERABLE = [FILM_MASTER_FILE, ...]` 的话，archive.ts
+ * 初始化时 film.ts 还没初始化完，取 FILM_MASTER_FILE 会撞上 TDZ：
+ *   ReferenceError: Cannot access 'FILM_MASTER_FILE' before initialization
+ * 而且它是【模块加载期】就炸，整个服务起不来——表现是所有导出请求 500。
+ *
+ * 改成函数之后，取值发生在【调用时】，那时两个模块都早就初始化好了。
+ */
+const regenerable = (): string[] => [FILM_MASTER_FILE, BG_TRACK_FILE, 'export.json']
 /** 预览分段整目录删——它是从母带算出来的，母带都删了它更留不住 */
 const REGENERABLE_DIRS = [PREVIEW_DIR]
 
@@ -68,7 +79,7 @@ export async function archiveProject (
 ): Promise<number> {
   const dir = assetDir(userName, whitelist, projectId)
   let freed = 0
-  for (const f of REGENERABLE) {
+  for (const f of regenerable()) {
     const p = join(dir, f)
     try {
       freed += (await stat(p)).size

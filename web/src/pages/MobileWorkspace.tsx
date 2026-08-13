@@ -134,6 +134,8 @@ export function MobileWorkspace () {
   const inProgress = !!project && (
     project.ttsState === 'generating' || project.ttsState === 'error'
     || filmState === 'building' || filmState === 'error'
+    // 等空间也要停在"合成中"这一屏——那儿才有「去下载」的引导
+    || filmState === 'waiting_disk'
   )
   // 哪些项目这次会话过了"起始选择"。空项目第一次进要先选文本/自备
   const [startedIds, setStartedIds] = useState<Set<string>>(new Set())

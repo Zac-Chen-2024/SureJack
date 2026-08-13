@@ -1,6 +1,6 @@
 import { statfs } from 'node:fs/promises'
-import { existsSync, statSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync, statSync, readdirSync } from 'node:fs'
+import { join, dirname, resolve } from 'node:path'
 import { openUserDb } from '../db/user-db.js'
 import { assetDir } from '../assets/storage.js'
 import { archiveProject } from './archive.js'
@@ -32,10 +32,29 @@ import { PREVIEW_DIR } from './preview.js'
  * 归档掉——那份母带一没，他就得等十几分钟重烧。
  */
 
-/** 盘上还剩多少字节 */
-export async function freeBytes (path: string): Promise<number> {
-  const s = await statfs(path)
-  return s.bavail * s.bsize
+/**
+ * 盘上还剩多少字节。**读不出来返回 null，绝不抛。**
+ *
+ * ⚠️ statfs 对【还不存在的目录】会抛 ENOENT——而项目的素材目录是在真正
+ * 写第一个文件时才建的，入队预检跑在那之前。测试里当场 500 了一片。
+ * 目录不在就往上找一层，一直找到数据根目录；还是不行就返回 null。
+ *
+ * 【一个读不出磁盘的检查，绝不能因此挡住用户。】不确定就放行——
+ * 真的不够，后面 ffmpeg 会失败，那是可恢复的；而误挡是直接不能用。
+ */
+export async function freeBytes (path: string): Promise<number | null> {
+  let p = resolve(path)
+  for (let i = 0; i < 6; i++) {
+    try {
+      const s = await statfs(p)
+      return s.bavail * s.bsize
+    } catch {
+      const up = dirname(p)
+      if (up === p) break
+      p = up
+    }
+  }
+  return null
 }
 
 /**
@@ -67,7 +86,6 @@ function reclaimableBytes (dir: string): number {
   try {
     const p = join(dir, PREVIEW_DIR)
     if (existsSync(p)) {
-      const { readdirSync } = require('node:fs') as typeof import('node:fs')
       for (const f of readdirSync(p)) {
         try { n += statSync(join(p, f)).size } catch { /* 忽略 */ }
       }
@@ -146,7 +164,12 @@ export interface ReclaimResult {
 export async function reclaim (
   whitelist: string[], rootPath: string, need = COMPOSE_NEED_BYTES,
 ): Promise<ReclaimResult> {
-  let free = await freeBytes(rootPath)
+  const initial = await freeBytes(rootPath)
+  // 读不出磁盘 → 放行。不确定的时候挡住用户是最糟的选择
+  if (initial === null) {
+    return { ok: true, freed: 0, free: Number.MAX_SAFE_INTEGER, archived: [], suggest: [] }
+  }
+  let free = initial
   if (free >= need) {
     return { ok: true, freed: 0, free, archived: [], suggest: [] }
   }

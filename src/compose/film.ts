@@ -46,6 +46,7 @@ import { buildAssForProject, aspectOf, LEGACY_SUBTITLE_MAX_CHARS } from '../subt
 import { render } from '../render/index.js'
 import { buildBackgroundTrack } from './build.js'
 import { mixAudio } from './mix.js'
+import { reclaim, blockedMessage, gb } from './disk-guard.js'
 import { buildPreview } from './preview.js'
 import {
   COVER_CLIP_FILE, COVER_IMAGE, coverTitleOf, prependCover, probeAudio, renderCoverClip,
@@ -692,9 +693,39 @@ export async function enqueueFilm (
     enqueueBgTrack(deps, userName, projectId)
   } catch { /* 预拼是优化，排不上不该挡住成片 */ }
 
+  /*
+   * ── 【入队前先看磁盘够不够】──────────────────────────────────────
+   *
+   * 不看的话，ffmpeg 会一路写到 No space left 才失败——那时它已经占了
+   * 几百 MB，而报出来的错和"磁盘"两个字离得很远（踩过：症状是 502，
+   * 和合成看着毫无关系）。
+   *
+   * 不够就先【提前归档】那些"用户已经下载走、只是还没到两小时阈值"的
+   * 项目：他的成品早拿到手了，盘上剩的全是可重算的。
+   * 还不够就说明空间被【合成好了但没下载】的片子占着——那种不能删，
+   * 只能告诉用户去下载，下完自动继续。
+   */
+  const guard = await reclaim(deps.whitelist, dir)
+  if (guard.archived.length > 0) {
+    for (const a of guard.archived) {
+      // 提前归档是替用户做的决定，必须留痕
+      console.info(`磁盘紧张，提前归档《${a.name}》腾出 ${gb(a.bytes)}G`)
+    }
+  }
+
   const db = openUserDb(userName, deps.whitelist)
   let jobId: string
   try { jobId = db.createJob(projectId).id } finally { db.close() }
+
+  if (!guard.ok) {
+    /*
+     * 【停在 blocked_disk，不是 error】。用户一下载走那条片子，
+     * 空间就回来了，这条作业该自己接上——见 queue/routes.ts 的唤醒。
+     */
+    const d2 = openUserDb(userName, deps.whitelist)
+    try { d2.updateJob(jobId, { status: 'blocked_disk', error: blockedMessage(guard) }) } finally { d2.close() }
+    return jobId
+  }
 
   // 队列事件同步落库，让刷新页面后还能看到结果
   deps.queue.on(jobId, (e) => {
@@ -726,7 +757,7 @@ export async function enqueueFilm (
 }
 
 /** 成片状态。前端只认这四个词。 */
-export type FilmState = 'none' | 'building' | 'ready' | 'error'
+export type FilmState = 'none' | 'building' | 'ready' | 'error' | 'waiting_disk'
 
 export interface FilmInfo {
   state: FilmState
@@ -795,6 +826,14 @@ type FilmVerdict =
   | { kind: 'running'; jobId: string; progress: number }
   | { kind: 'ready'; jobId: string | null }
   | { kind: 'failed'; jobId: string | null; error: string; code?: string | null }
+  /**
+   * 磁盘腾不出来，等用户下载走一条片子。
+   *
+   * ⚠️【和 failed 分开】。它是【可自愈的等待】：用户一下载完，空间回来了，
+   * 这条作业会自动重新入队（见 queue/routes.ts 的唤醒）。
+   * 混进 failed 的话界面会给他一个"重试"按钮——而重试一万次也还是不够。
+   */
+  | { kind: 'waiting_disk'; jobId: string; hint: string }
   /** 该有却没有 —— 唯一需要排活的一档 */
   | { kind: 'missing' }
 
@@ -827,6 +866,27 @@ async function judgeFilm (
    */
   if (snap?.status === 'queued' || snap?.status === 'running') {
     return { kind: 'running', jobId: jobId!, progress: snap.progress }
+  }
+
+  /*
+   * 【等空间要问库，不能问队列】。blocked_disk 的作业【从来没进过队列】——
+   * 它在入队前就被磁盘预检拦下了，所以队列里查不到，成片指纹文件也没写。
+   * 唯一知道这件事的是库里那条作业记录。
+   */
+  const blocked = (() => {
+    try {
+      const db = openUserDb(userName, deps.whitelist)
+      try {
+        const j = db.latestJob(projectId)
+        return j?.status === 'blocked_disk' ? j : null
+      } finally { db.close() }
+    } catch { return null }
+  })()
+  if (blocked !== null) {
+    return {
+      kind: 'waiting_disk', jobId: blocked.id,
+      hint: blocked.error ?? '磁盘空间不够，先下载一条片子腾出空间',
+    }
   }
 
   /*
@@ -906,6 +966,11 @@ export async function filmInfo (
       return { state: 'building', jobId: v.jobId, progress: v.progress, error: null, reason: null, ...extra }
     case 'ready':
       return { state: 'ready', jobId: v.jobId, progress: 100, error: null, reason: null, ...extra }
+    case 'waiting_disk':
+      return {
+        state: 'waiting_disk', jobId: v.jobId, progress: 0, error: null,
+        reason: v.hint, ...extra,
+      }
     case 'failed':
       return {
         state: 'error', jobId: v.jobId, progress: 0, error: v.error, reason: null,

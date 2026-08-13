@@ -29,7 +29,15 @@ import { LEGACY_VOICE, DEFAULT_VOICE, DEFAULT_VOICE_RATE, DEFAULT_VOICE_PITCH, R
 export const DEFAULT_BGM_VOLUME = 0.15
 
 export type AssetKind = 'video' | 'bgm' | 'voice' | 'srt' | 'bgtrack' | 'export'
-export type JobStatus = 'queued' | 'running' | 'done' | 'error' | 'cancelled'
+/**
+ * 作业状态。
+ *
+ * ⚠️【blocked_disk 不是失败】。磁盘腾不出来时合成会停在这一档，等用户
+ * 下载走一条片子腾出空间之后【自动继续】——不该让他手动重试。
+ * 复用 error 的话，界面会给他一个"重试"按钮，而重试一万次也还是不够。
+ */
+export type JobStatus =
+  'queued' | 'running' | 'done' | 'error' | 'cancelled' | 'blocked_disk'
 export type TtsState = 'none' | 'generating' | 'ready' | 'stale' | 'error'
 
 export interface Asset {

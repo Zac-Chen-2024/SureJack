@@ -10,6 +10,7 @@ import { downloadableFilm, playableMaster, enqueueFilm, filmInfo, resolveFilm, F
 import { checkpointOf, CHECKPOINT_LABEL, NEXT_STEP } from '../compose/checkpoint.js'
 import { finishedSince } from './notify.js'
 import { dropDelivered, pendingDeliver } from '../compose/deliver.js'
+import { archiveProject } from '../compose/archive.js'
 import { downloadPrep } from '../compose/download-queue.js'
 import { buildPreview, hasPreview, previewDir } from '../compose/preview.js'
 import { FILM_MASTER_FILE } from '../compose/film.js'
@@ -463,6 +464,36 @@ export function registerExportRoutes (app: FastifyInstance, deps: Deps): void {
         downloadPrep.drop(req.params.id)
         void dropDelivered(path)
         req.log.info({ project: req.params.id, MB: Math.round(size / 1048576) }, '下载完成，成片已清理')
+
+        /*
+         * ── 【下载完成 = 空间回来了，把等空间的合成放行】────────────────
+         *
+         * 用户拿走成品之后，这条项目盘上剩的（母带 + 预览，约 520MB）
+         * 全是可重算的。如果此刻有合成正卡在 blocked_disk 上等空间，
+         * 就【立刻归档这一条】把地方腾出来，然后重新入队——
+         * 不该让用户下完之后还要自己回来点一次。
+         *
+         * 磁盘不紧张就什么都不做：正常情况下归档由那条两小时的定时扫描
+         * 负责，留一段时间给用户反复看自己刚做好的片子。
+         */
+        void (async () => {
+          try {
+            const waiting = withUserDb(name, (db) => db.listProjects()
+              .map((p) => ({ p, job: db.latestJob(p.id) }))
+              .filter((x) => x.job?.status === 'blocked_disk'))
+            if (waiting.length === 0) return
+
+            await archiveProject(name, deps.whitelist, req.params.id)
+            req.log.info({ project: req.params.id }, '下载完成，立刻归档腾空间')
+
+            for (const w of waiting) {
+              const id = await enqueueFilm(deps, name, w.p.id, { force: true })
+              req.log.info({ project: w.p.id, job: id }, '空间够了，等空间的合成已重新入队')
+            }
+          } catch (e) {
+            req.log.warn({ err: e }, '下载后腾空间失败，等定时归档兜底')
+          }
+        })()
       })
 
       return reply.send(stream)

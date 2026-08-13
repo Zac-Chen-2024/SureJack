@@ -105,7 +105,7 @@ export interface AdoptResult {
  * 项目踩过的坑。
  */
 export interface BgTrack {
-  state: 'none' | 'building' | 'ready' | 'error'
+  state: 'none' | 'building' | 'ready' | 'error' | 'waiting_disk'
   /** ready 时才有。预览用 `/api/assets/<id>` 播它 */
   assetId: string | null
 }
@@ -152,7 +152,7 @@ export function shouldPollBgTrack (bg: BgTrack | null): boolean {
  * <video> 指过来——那会出现"烧死的字幕 + JASSUB 渲染的字幕"两层重影。
  */
 export interface Film {
-  state: 'none' | 'building' | 'ready' | 'error'
+  state: 'none' | 'building' | 'ready' | 'error' | 'waiting_disk'
   jobId: string | null
   progress: number
   /** state=error 时的原因 */
