@@ -16,6 +16,7 @@ import { SubtitleList } from '../components/SubtitleList'
 import { BackgroundPanel, MusicPanel } from '../components/AssetPanel'
 import { BottomSheet } from '../components/mobile/BottomSheet'
 import { MobileProjectList } from '../components/mobile/MobileProjectList'
+import { DownloadPanel } from '../components/mobile/DownloadPanel'
 import { MobileNewProject } from '../components/mobile/MobileNewProject'
 import { MobileStartSelect } from '../components/mobile/MobileStartSelect'
 import { useDownloads } from '../store/downloads'
@@ -208,6 +209,12 @@ export function MobileWorkspace () {
   return (
     <div className="relative h-full overflow-hidden bg-black">
       <GhostToast />
+      {/*
+        * 【下载进度要在每一屏都看得见】。列表页的标题栏里已经有一个，
+        * 其他屏（成片页、合成中、挑开头…）靠这个悬浮版——用户在哪儿点的
+        * 下载，就该在哪儿看到进度，而不是退回列表才看得见。
+        */}
+      {screen !== 'list' && <DownloadPanel floating />}
       {/* 屏级容器：换屏时按方向滑入（进=从右、退=从左带视差）。抽屉开合不换屏，
           所以只有 list↔editor 切换才会重放这个动画。 */}
       <div

@@ -173,6 +173,13 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
          */
         loadDownloadIds();
         pruneDownloadIds();
+        /*
+         * 【把上次没下完的读回来】。进程被回收之后 DownloadService.STATE 会清空，
+         * 而 .part 文件还在手机上、服务器上的成片也还在——不读回来的话，
+         * 用户打开 App 看到的是一个【空的下载栏】，以为下载没了就再点一次，
+         * 白白多起一条流。读回来标成"已暂停"，点「继续」从断点接上。
+         */
+        DownloadService.restore(MainActivity.this);
 
         web.setWebViewClient(new WebViewClient() {
             @Override
@@ -336,6 +343,30 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
                     projectId == null ? "" : projectId);
         }
 
+        /**
+         * 暂停 / 继续一条下载。通知栏上有同样的按钮——切出 App 之后只有那儿能点，
+         * 在 App 里就该在下载面板上也能点，两处是同一个开关。
+         */
+        @JavascriptInterface
+        public boolean pauseDownload(String id, boolean pause) {
+            if (id == null || !DownloadService.STATE.containsKey(id)) return false;
+            Intent i = new Intent(MainActivity.this, DownloadService.class);
+            i.setAction(pause ? DownloadService.ACTION_PAUSE : DownloadService.ACTION_RESUME);
+            i.putExtra(DownloadService.EXTRA_ID, id);
+            /*
+             * 【Cookie 要带上】。从磁盘读回来的那条重新发起时需要登录态，
+             * 而 Service 自己拿不到 WebView 的 Cookie。
+             */
+            DownloadService.Snapshot s = DownloadService.STATE.get(id);
+            if (s != null && s.url != null) {
+                i.putExtra(DownloadService.EXTRA_COOKIE,
+                        CookieManager.getInstance().getCookie(s.url));
+                i.putExtra(DownloadService.EXTRA_UA, web.getSettings().getUserAgentString());
+            }
+            startService(i);
+            return true;
+        }
+
         @JavascriptInterface
         public String downloads() {
             /*
@@ -350,6 +381,7 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
                         .append(",\"title\":").append(jsonStr(s.title))
                         .append(",\"total\":").append(s.total)
                         .append(",\"done\":").append(s.done)
+                        .append(",\"bps\":").append(s.bps)
                         .append(",\"status\":\"").append(s.status).append("\"}");
                 }
             }

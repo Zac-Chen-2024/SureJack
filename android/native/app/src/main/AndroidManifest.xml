@@ -12,6 +12,10 @@
     <!-- 自己下成片：切走之后还要接着下，只能靠前台服务（Android 8 起后台会被冻结） -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- 下载期间保持 CPU/WiFi 不休眠，否则屏幕一灭连接就卡死（带超时释放） -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
 
     <application
         android:allowBackup="true"

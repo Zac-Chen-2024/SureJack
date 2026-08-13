@@ -14,6 +14,8 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Environment;
 import android.os.IBinder;
+import android.os.PowerManager;
+import android.net.wifi.WifiManager;
 import android.provider.MediaStore;
 
 import androidx.core.app.NotificationCompat;
@@ -64,6 +66,8 @@ public class DownloadService extends Service {
 
     public static final String ACTION_START = "win.zacchen.surejack.DOWNLOAD_START";
     public static final String ACTION_CANCEL = "win.zacchen.surejack.DOWNLOAD_CANCEL";
+    public static final String ACTION_PAUSE = "win.zacchen.surejack.DOWNLOAD_PAUSE";
+    public static final String ACTION_RESUME = "win.zacchen.surejack.DOWNLOAD_RESUME";
     public static final String EXTRA_URL = "url";
     public static final String EXTRA_NAME = "name";
     public static final String EXTRA_COOKIE = "cookie";
@@ -71,21 +75,33 @@ public class DownloadService extends Service {
     public static final String EXTRA_ID = "id";
 
     private static final String CHANNEL = "download";
+    /** 进行中的那条常驻通知。整个服务共用一条——单线程，同时只有一条在传 */
     private static final int FG_NOTIFY_ID = 4200;
+    /**
+     * 「已保存 / 失败」用【另一个 id】。
+     *
+     * ⚠️ 线上真事：一条 5MB 的小片子下完，弹的"已保存"通知用的是同一个
+     * FG_NOTIFY_ID，把正在下的那条 458MB 的【进度条直接覆盖掉了】——
+     * 而且它带 autoCancel，用户一点就没了。大文件还在后台好好地下，
+     * 通知栏却什么都不剩，用户以为下载没了。
+     */
+    private static final int DONE_NOTIFY_ID = 4201;
 
     /** 一次读多少。64KB 是吞吐和唤醒次数之间的常用折中 */
     private static final int BUF = 64 * 1024;
     /**
-     * 断了之后重试几次。
+     * 重连【不设次数上限】。
      *
-     * 【每次重试都是从断点接着传】，不是从头——所以次数可以给得大方些：
-     * 一条 480MB 的片子在信号飘的地铁上被切十几次是常事，每次能推进一点，
-     * 加起来就下完了。次数太小的话，前面传的那些全白费。
+     * 原来是 30 次封顶。但断线重连的语义应该是"只要用户还想要，就一直等"——
+     * 网络断二十分钟（进电梯、坐地铁、换基站）之后放弃，等于把已经下了
+     * 一半的几百 MB 扔掉，而那是几十分钟换来的。
+     *
+     * 无限重连是安全的，因为：① 每次都从断点接着传，不做无用功；
+     * ② 退避到 60 秒一次，几乎不耗电；③ 用户随时能在通知栏点暂停停下来；
+     * ④ 真正没救的错误（文件没了、登录过期）会直接失败，不进重连（见 isFatal）。
      */
-    private static final int MAX_RETRY = 30;
-    /** 重试前等多久（毫秒）。指数退避，但封顶——网络回来时要能及时接上 */
     private static final long RETRY_BASE_MS = 2000;
-    private static final long RETRY_MAX_MS = 30_000;
+    private static final long RETRY_MAX_MS = 60_000;
 
     /** 进度快照，给 Bridge.downloads() 读。key = 我们自己发的下载 id */
     public static final Map<String, Snapshot> STATE =
@@ -93,6 +109,14 @@ public class DownloadService extends Service {
 
     /** 正在跑的任务，用来响应取消 */
     private static final Map<String, Boolean> CANCELLED = new ConcurrentHashMap<>();
+
+    /**
+     * 【用户主动暂停】的那些。和"断线重连"是两回事，必须分开：
+     * 重连是自动的、几秒后自己继续；暂停要人点了"继续"才会动。
+     * 混成一个状态的话，界面只能写一句含糊的"已暂停"——用户以为要自己
+     * 点一下才继续，实际上它自己会重连；反过来真暂停了他又干等。
+     */
+    private static final Map<String, Boolean> PAUSED = new ConcurrentHashMap<>();
 
     /**
      * 已经在下的文件名。**同一条片子只许有一条流。**
@@ -106,13 +130,83 @@ public class DownloadService extends Service {
      */
     private static final Map<String, Boolean> ACTIVE = new ConcurrentHashMap<>();
 
+    /**
+     * 把进度写进磁盘 / 从磁盘读回来。
+     *
+     * ⚠️【STATE 只放内存是不够的】。线上真事：用户的下载栏和通知栏【同时变空】，
+     * 而服务器日志显示文件还差 300MB 没下完、.part 还在手机上。原因是进程被
+     * 回收了——STATE 是静态字段，进程一没就全丢，于是 App 里看不到任何下载，
+     * 用户以为没下上，再点一次，又白白多起一条流。
+     *
+     * 存的是【身份和进度】，不是实时速度：id、标题、总长、已下、状态、URL。
+     * 有了 URL，进程回来之后那条"没下完的"才点得动「继续」——
+     * 而 .part 还在，一点就从断点接上，几十分钟的流量不白费。
+     */
+    private static final String PREFS = "sj_downloads";
+    private static final String KEY_STATE = "state_v1";
+
+    /** 存一行：id|状态|已下|总长|标题|url（标题和 url 做过转义，不会有竖线） */
+    private void persist() {
+        StringBuilder b = new StringBuilder();
+        synchronized (STATE) {
+            for (Snapshot s : STATE.values()) {
+                if ("done".equals(s.status)) continue;      // 下完的不用记
+                if (b.length() > 0) b.append('\n');
+                b.append(s.id).append('|').append(s.status).append('|')
+                 .append(s.done).append('|').append(s.total).append('|')
+                 .append(esc(s.title)).append('|').append(esc(s.url));
+            }
+        }
+        getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .edit().putString(KEY_STATE, b.toString()).apply();
+    }
+
+    private static String esc(String s) {
+        return s == null ? "" : s.replace("\\", "\\\\").replace("|", "\\p").replace("\n", " ");
+    }
+
+    private static String unesc(String s) {
+        return s.replace("\\p", "|").replace("\\\\", "\\");
+    }
+
+    /**
+     * 读回上次没下完的。**MainActivity 一启动就调**，这样即使服务没在跑，
+     * 下载栏里也看得到"还有一条没下完"，而不是一片空白。
+     *
+     * 读回来的一律标成 paused：进程都换了，肯定没有线程在传，
+     * 显示成"下载中"是骗人的。用户点「继续」才真正开始。
+     */
+    public static void restore(Context ctx) {
+        String raw = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getString(KEY_STATE, "");
+        if (raw.isEmpty()) return;
+        for (String line : raw.split("\n")) {
+            String[] f = line.split("\\|", 6);
+            if (f.length < 6) continue;
+            if (STATE.containsKey(f[0])) continue;   // 正在跑的以内存里那份为准
+            Snapshot s = new Snapshot();
+            s.id = f[0];
+            s.status = "paused";
+            try { s.done = Long.parseLong(f[2]); } catch (Exception e) { s.done = 0; }
+            try { s.total = Long.parseLong(f[3]); } catch (Exception e) { s.total = -1; }
+            s.title = unesc(f[4]);
+            s.url = unesc(f[5]);
+            STATE.put(s.id, s);
+        }
+    }
+
     public static class Snapshot {
         public String id;
         public String title;
         public long total;      // -1 = 还不知道
         public long done;
-        public String status;   // running | paused | done | error
+        /** running（在传）| reconnecting（断了，自动重连中）| paused（用户按了暂停）| done | error */
+        public String status;
         public String error;
+        /** 最近一次测到的速度，字节/秒。给通知栏和网页显示用 */
+        public long bps;
+        /** 下载地址。进程重启之后「继续」要靠它重新发起 */
+        public String url;
     }
 
     private ExecutorService pool;
@@ -130,9 +224,39 @@ public class DownloadService extends Service {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         if (intent == null) return START_NOT_STICKY;
-        if (ACTION_CANCEL.equals(intent.getAction())) {
+        String act = intent.getAction();
+        if (ACTION_CANCEL.equals(act)) {
             String id = intent.getStringExtra(EXTRA_ID);
-            if (id != null) CANCELLED.put(id, true);
+            if (id != null) { CANCELLED.put(id, true); PAUSED.remove(id); }
+            return START_NOT_STICKY;
+        }
+        if (ACTION_PAUSE.equals(act) || ACTION_RESUME.equals(act)) {
+            String id = intent.getStringExtra(EXTRA_ID);
+            if (id == null) return START_NOT_STICKY;
+            boolean pause = ACTION_PAUSE.equals(act);
+            if (pause) PAUSED.put(id, true); else PAUSED.remove(id);
+            Snapshot s = STATE.get(id);
+            if (s != null) {
+                s.status = pause ? "paused" : "running";
+                notifyState(s);
+                persist();
+                /*
+                 * 【进程重启之后的「继续」要重新起一条任务】。
+                 * 从磁盘读回来的那条只是一份记录，没有线程在跑——
+                 * 不重新发起的话，用户点了"继续"什么都不会发生。
+                 * .part 还在，所以起来之后是从断点接着传，不是从头。
+                 */
+                if (!pause && !ACTIVE.containsKey(safeName(s.title)) && s.url != null) {
+                    Intent again = new Intent(this, DownloadService.class)
+                            .setAction(ACTION_START)
+                            .putExtra(EXTRA_URL, s.url)
+                            .putExtra(EXTRA_NAME, s.title)
+                            .putExtra(EXTRA_COOKIE, intent.getStringExtra(EXTRA_COOKIE))
+                            .putExtra(EXTRA_UA, intent.getStringExtra(EXTRA_UA));
+                    STATE.remove(id);       // 旧记录让位给真正在跑的那条
+                    startService(again);
+                }
+            }
             return START_NOT_STICKY;
         }
 
@@ -155,8 +279,9 @@ public class DownloadService extends Service {
         final String id = String.valueOf(System.currentTimeMillis());
         Snapshot s = new Snapshot();
         s.id = id; s.title = name; s.total = -1; s.done = 0; s.status = "running";
+        s.url = url;
         STATE.put(id, s);
-        remember(id);
+        persist();
 
         /*
          * 【必须是前台服务】。Android 8 起后台进程随时会被冻结，
@@ -178,13 +303,37 @@ public class DownloadService extends Service {
                 }
             }
         });
-        return START_NOT_STICKY;
+        /*
+         * ⚠️【START_REDELIVER_INTENT，不是 START_NOT_STICKY】。
+         *
+         * 国产 ROM（她这台是 vivo）会在用户切出去之后把整个进程杀掉，
+         * 前台服务也照杀不误。用 NOT_STICKY 的话服务【永远不会回来】，
+         * 下载就此停住——用户看到的就是"切出去就暂停了"。
+         * REDELIVER 会让系统把原来那个 Intent 重新投递一次，
+         * 而 .part 文件还在，于是自动从断点接着传。
+         */
+        return START_REDELIVER_INTENT;
     }
 
     private void stopSelfIfIdle() {
         boolean busy = false;
         synchronized (STATE) {
-            for (Snapshot s : STATE.values()) if ("running".equals(s.status)) { busy = true; break; }
+            for (Snapshot s : STATE.values()) {
+                /*
+                 * ⚠️【等待重试的也算在忙】。断线之后要等几秒到几十秒才重试，
+                 * 这段时间状态是 paused——只认 running 的话会在这里撤掉前台身份，
+                 * 而失去前台身份的服务几秒内就会被系统回收，
+                 * 那条正在等重试的下载就此消失。
+                 */
+                /*
+                 * ⚠️【断线重连中和用户暂停的都算在忙】。线上踩过：一条小片子
+                 * 下完时，大文件正处在断线重连（那时状态还叫 paused），
+                 * 只认 running 的话这里判定"没事干了"→ 撤前台 → 通知消失、
+                 * 进程随时可被系统回收，而那条 458MB 还在传。
+                 */
+                if ("running".equals(s.status) || "paused".equals(s.status)
+                        || "reconnecting".equals(s.status)) { busy = true; break; }
+            }
         }
         if (!busy) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) stopForeground(STOP_FOREGROUND_DETACH);
@@ -196,13 +345,49 @@ public class DownloadService extends Service {
     /** 下一条。内部自带续传重试 */
     private void download(String id, String url, String name, String cookie, String ua)
             throws IOException {
+        /*
+         * 【唤醒锁 + WiFi 锁】。屏幕一灭，系统会让 CPU 睡下去、WiFi 进省电模式，
+         * 正在传的连接会卡住直到超时——表现同样是"放着不动就停了"。
+         * 下载是用户明确要的、有限时长的任务，持锁是正当用途；
+         * 两把锁都在 finally 里释放，绝不泄漏（泄漏就是持续耗电）。
+         */
+        PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
+        PowerManager.WakeLock wake = pm == null ? null
+                : pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "surejack:download");
+        WifiManager wm = (WifiManager) getApplicationContext()
+                .getSystemService(Context.WIFI_SERVICE);
+        WifiManager.WifiLock wifi = wm == null ? null
+                : wm.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "surejack:download");
+        if (wake != null) wake.acquire(6 * 60 * 60 * 1000L);   // 带超时，绝不无限期持有
+        if (wifi != null) wifi.acquire();
+        try {
+            downloadLocked(id, url, name, cookie, ua);
+        } finally {
+            if (wifi != null && wifi.isHeld()) wifi.release();
+            if (wake != null && wake.isHeld()) wake.release();
+        }
+    }
+
+    private void downloadLocked(String id, String url, String name, String cookie, String ua)
+            throws IOException {
         File dir = new File(getExternalFilesDir(null), "dl");
         if (!dir.exists() && !dir.mkdirs()) throw new IOException("建不了下载目录");
         // .part 就是断点本身：它有多长，就说明已经下到哪儿了
         File part = new File(dir, safeName(name) + ".part");
 
         long total = -1;
-        for (int attempt = 0; attempt <= MAX_RETRY; attempt++) {
+        for (int attempt = 0; ; attempt++) {
+            /*
+             * 【用户按了暂停就停在这儿等】，而不是结束任务。
+             * 结束的话服务会失去前台身份被回收，"继续"就没东西可继续了。
+             * 在这儿转圈，.part 原样留着，点继续立刻接上。
+             */
+            while (Boolean.TRUE.equals(PAUSED.get(id))
+                    && !Boolean.TRUE.equals(CANCELLED.get(id))) {
+                Snapshot ps = STATE.get(id);
+                if (ps != null && !"paused".equals(ps.status)) { ps.status = "paused"; notifyState(ps); }
+                try { Thread.sleep(500); } catch (InterruptedException e) { return; }
+            }
             if (Boolean.TRUE.equals(CANCELLED.get(id))) {
                 /*
                  * ⚠️【取消不删 .part】。删掉的话下次点下载就要从第 0 字节重来，
@@ -255,22 +440,36 @@ public class DownloadService extends Service {
                     long done = have;
                     long lastNotify = 0;
                     int n;
+                    long tickAt = System.currentTimeMillis();
+                    long tickBytes = 0;
                     while ((n = in.read(buf)) > 0) {
                         if (Boolean.TRUE.equals(CANCELLED.get(id))) {
-                            mark(id, "error", "已暂停");   // .part 留着，下次接着传
+                            mark(id, "error", "已取消");   // .part 留着，下次接着传
                             return;
                         }
+                        // 【暂停要立刻停手】：跳出去让外层那个等待循环接管
+                        if (Boolean.TRUE.equals(PAUSED.get(id))) break;
+
                         out.write(buf, 0, n);
                         done += n;
+                        tickBytes += n;
                         Snapshot s = STATE.get(id);
-                        if (s != null) { s.done = done; s.total = total; }
-                        // 通知刷太勤会拖慢下载，1 秒一次足够
+                        if (s != null) {
+                            s.done = done; s.total = total;
+                            if (!"running".equals(s.status)) s.status = "running";
+                        }
+                        // 通知刷太勤会拖慢下载，1 秒一次足够；顺便算这一秒的速度
                         long now = System.currentTimeMillis();
                         if (now - lastNotify > 1000) {
+                            long dt = now - tickAt;
+                            if (s != null && dt > 0) s.bps = tickBytes * 1000 / dt;
+                            tickAt = now; tickBytes = 0;
                             lastNotify = now;
-                            notifyProgress(name, done, total);
+                            if (s != null) { notifyState(s); persist(); }
                         }
                     }
+                    // 因为暂停跳出来的：回外层等着，别当成传完
+                    if (Boolean.TRUE.equals(PAUSED.get(id))) continue;
                 }
 
                 // 读完了：长度对得上就算成功（服务端给了长度时才校验）
@@ -281,23 +480,37 @@ public class DownloadService extends Service {
                 Snapshot s = STATE.get(id);
                 if (s != null) { s.done = part.length(); s.total = part.length(); }
                 mark(id, "done", null);
+                persist();
                 notifyDone(name);
                 return;
 
             } catch (IOException e) {
                 /*
-                 * 断了不是失败，是常态。.part 原样留着，等下一轮从断点接着要。
-                 * 只有重试次数用完了才算真失败。
+                 * 断了不是失败，是常态——【自动重连，不设次数上限】。
+                 * .part 原样留着，下一轮从断点接着要。
+                 *
+                 * 但【有些错误重试一万次也没用】：文件被清掉了(404)、
+                 * 登录过期(401/403)。那种要立刻失败并说清原因，
+                 * 而不是让用户对着一个永远在"重连中"的进度条干等。
                  */
-                if (attempt >= MAX_RETRY) {
-                    fail(id, name, "重试 " + MAX_RETRY + " 次仍失败：" + e);
+                if (isFatal(e.getMessage())) {
+                    fail(id, name, String.valueOf(e.getMessage()));
                     return;
                 }
                 Snapshot s = STATE.get(id);
-                if (s != null) s.status = "paused";
-                long wait = Math.min(RETRY_MAX_MS, RETRY_BASE_MS * (1L << Math.min(attempt, 4)));
-                try { Thread.sleep(wait); } catch (InterruptedException ignored) { return; }
-                if (s != null) s.status = "running";
+                if (s != null) {
+                    s.status = "reconnecting";
+                    s.bps = 0;
+                    notifyState(s);
+                }
+                long wait = Math.min(RETRY_MAX_MS, RETRY_BASE_MS * (1L << Math.min(attempt, 5)));
+                long until = System.currentTimeMillis() + wait;
+                // 等待期间也要能响应暂停/取消，不能死睡
+                while (System.currentTimeMillis() < until) {
+                    if (Boolean.TRUE.equals(CANCELLED.get(id))
+                            || Boolean.TRUE.equals(PAUSED.get(id))) break;
+                    try { Thread.sleep(300); } catch (InterruptedException ignored) { return; }
+                }
             } finally {
                 if (conn != null) conn.disconnect();
             }
@@ -346,6 +559,20 @@ public class DownloadService extends Service {
         part.delete();
     }
 
+    /**
+     * 这个错误重试还有意义吗。
+     *
+     * 网络类的（超时、连接重置、DNS）重试就能好；而 404（成片已被清理）、
+     * 401/403（登录过期）重试一万次也是同一个结果——那种要立刻告诉用户，
+     * 让他去重新点一次下载或者重新登录，而不是盯着"重连中"干等。
+     */
+    private static boolean isFatal(String msg) {
+        if (msg == null) return false;
+        return msg.contains("HTTP 401") || msg.contains("HTTP 403")
+                || msg.contains("HTTP 404") || msg.contains("HTTP 410")
+                || msg.contains("续传被拒");
+    }
+
     private static long parseLong(String s, long dflt) {
         if (s == null) return dflt;
         try { return Long.parseLong(s.trim()); } catch (Exception e) { return dflt; }
@@ -365,6 +592,7 @@ public class DownloadService extends Service {
 
     private void fail(String id, String name, String reason) {
         mark(id, "error", reason);
+        persist();
         notifyFailed(name);
         reportError(reason);
     }
@@ -414,14 +642,83 @@ public class DownloadService extends Service {
         return b.append('"').toString();
     }
 
-    /** 记住这条下载的 id，App 重启后还认得（进度现算，不缓存） */
-    private void remember(String id) {
-        SharedPreferences sp = getSharedPreferences("sj_downloads", Context.MODE_PRIVATE);
-        String raw = sp.getString("ours", "");
-        sp.edit().putString("ours", raw.isEmpty() ? id : raw + "," + id).apply();
+    // ── 通知 ───────────────────────────────────────────────────────────
+
+    /**
+     * 【下载期间通知栏全程挂着这一条】，包括断线重连和用户暂停的时候。
+     *
+     * 它是这条链路上用户唯一的抓手：切出 App 之后，进度、状态、暂停/继续
+     * 全在这儿。中途消失过一次，用户就会以为下载没了、回去再点一遍——
+     * 那正是同一条片子被下了三遍的来源。
+     */
+    private Notification buildFor(Snapshot s) {
+        boolean paused = "paused".equals(s.status);
+        boolean recon = "reconnecting".equals(s.status);
+        String text;
+        if (paused) text = "已暂停 · " + mb(s.done) + (s.total > 0 ? " / " + mb(s.total) : "");
+        else if (recon) text = "断线了，正在自动重连 · 已下 " + mb(s.done);
+        else {
+            text = mb(s.done) + (s.total > 0 ? " / " + mb(s.total) : "")
+                    + (s.bps > 0 ? " · " + speed(s.bps) : "");
+        }
+
+        NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && nm != null) {
+            NotificationChannel ch = new NotificationChannel(
+                    CHANNEL, "视频下载", NotificationManager.IMPORTANCE_LOW);
+            ch.setDescription("下载进度");
+            nm.createNotificationChannel(ch);
+        }
+        Intent open = new Intent(this, MainActivity.class);
+        open.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        int flags = PendingIntent.FLAG_UPDATE_CURRENT
+                | (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0);
+
+        NotificationCompat.Builder b = new NotificationCompat.Builder(this, CHANNEL)
+                .setSmallIcon(paused ? android.R.drawable.ic_media_pause
+                        : android.R.drawable.stat_sys_download)
+                .setContentTitle(s.title)
+                .setContentText(text)
+                .setOngoing(true)
+                .setOnlyAlertOnce(true)
+                .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
+                .setContentIntent(PendingIntent.getActivity(this, 0, open, flags));
+        if (s.total > 0) b.setProgress(100, (int) (s.done * 100 / s.total), recon && s.done == 0);
+        else b.setProgress(0, 0, true);
+
+        // 【暂停 / 继续】：切出 App 之后这是唯一能操作的地方
+        b.addAction(paused
+                ? new NotificationCompat.Action(android.R.drawable.ic_media_play, "继续",
+                    actionIntent(ACTION_RESUME, s.id))
+                : new NotificationCompat.Action(android.R.drawable.ic_media_pause, "暂停",
+                    actionIntent(ACTION_PAUSE, s.id)));
+        return b.build();
     }
 
-    // ── 通知 ───────────────────────────────────────────────────────────
+    private PendingIntent actionIntent(String action, String id) {
+        Intent i = new Intent(this, DownloadService.class).setAction(action)
+                .putExtra(EXTRA_ID, id);
+        int flags = PendingIntent.FLAG_UPDATE_CURRENT
+                | (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0);
+        // requestCode 要按 action+id 区分，否则暂停和继续会共用同一个 PendingIntent
+        return PendingIntent.getService(this, (action + id).hashCode(), i, flags);
+    }
+
+    private void notifyState(Snapshot s) {
+        NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+        if (nm != null) nm.notify(FG_NOTIFY_ID, buildFor(s));
+    }
+
+    private static String mb(long b) {
+        if (b <= 0) return "0MB";
+        return (b / 1048576) + "MB";
+    }
+
+    private static String speed(long bps) {
+        return bps >= 1048576 ? String.format("%.1f MB/s", bps / 1048576.0)
+                : (bps / 1024) + " KB/s";
+    }
+
     private Notification buildNotification(String name, long done, long total, String text) {
         NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && nm != null) {
@@ -440,25 +737,18 @@ public class DownloadService extends Service {
                 .setContentText(text)
                 .setOngoing(true)
                 .setOnlyAlertOnce(true)
+                // 【立刻显示】。默认系统会压着不显示十秒，用户点完下载什么都看不到
+                .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
                 .setContentIntent(PendingIntent.getActivity(this, 0, open, flags));
         if (total > 0) b.setProgress(100, (int) (done * 100 / total), false);
         else b.setProgress(0, 0, true);
         return b.build();
     }
 
-    private void notifyProgress(String name, long done, long total) {
-        NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
-        if (nm == null) return;
-        String text = total > 0
-                ? (done / 1048576) + "MB / " + (total / 1048576) + "MB"
-                : (done / 1048576) + "MB";
-        nm.notify(FG_NOTIFY_ID, buildNotification(name, done, total, text));
-    }
-
     private void notifyDone(String name) {
         NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
         if (nm == null) return;
-        nm.notify(FG_NOTIFY_ID, new NotificationCompat.Builder(this, CHANNEL)
+        nm.notify(DONE_NOTIFY_ID, new NotificationCompat.Builder(this, CHANNEL)
                 .setSmallIcon(android.R.drawable.stat_sys_download_done)
                 .setContentTitle(name)
                 .setContentText("已保存到「下载」")
@@ -469,7 +759,7 @@ public class DownloadService extends Service {
     private void notifyFailed(String name) {
         NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
         if (nm == null) return;
-        nm.notify(FG_NOTIFY_ID, new NotificationCompat.Builder(this, CHANNEL)
+        nm.notify(DONE_NOTIFY_ID, new NotificationCompat.Builder(this, CHANNEL)
                 .setSmallIcon(android.R.drawable.stat_notify_error)
                 .setContentTitle(name)
                 .setContentText("下载失败，请重试")

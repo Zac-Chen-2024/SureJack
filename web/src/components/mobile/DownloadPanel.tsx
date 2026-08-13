@@ -26,13 +26,26 @@ import { useDownloads } from '../../store/downloads'
  * 所以这里两种都收。
  */
 interface NativeDownload {
-  id: string | number; title: string; total: number; done: number; status: string
+  id: string | number; title: string; total: number; done: number
+  /**
+   * running（在传）| reconnecting（断了，自动重连中）| paused（用户按了暂停）
+   * | done | error
+   *
+   * ⚠️【reconnecting 和 paused 必须分开显示】。它们原来共用一个 paused，
+   * 界面只能写一句含糊的"已暂停"——用户以为要自己点一下才继续，
+   * 实际上几秒后它自己就重连了；真暂停时他又干等。用户就是这么被误导的。
+   */
+  status: string
+  /** 当前速度，字节/秒。老版本 App 没有这个字段 */
+  bps?: number
 }
 
 interface Bridge {
   downloads: () => string
   /** 中断/删除一条下载，连文件一起删。老版本 App 没有这个方法 → 不画按钮 */
   removeDownload?: (id: string) => boolean
+  /** 暂停/继续。通知栏上有同样的按钮，两处是同一个开关 */
+  pauseDownload?: (id: string, pause: boolean) => boolean
 }
 
 function readBridge (): Bridge | null {
@@ -47,7 +60,15 @@ function mb (bytes: number): string {
   return m >= 1024 ? `${(m / 1024).toFixed(1)} GB` : `${m.toFixed(1)} MB`
 }
 
-export function DownloadPanel () {
+/**
+ * @param floating 悬浮版：固定在右上角，给【列表页以外】的所有屏幕用。
+ *
+ * ⚠️【不管在哪儿点下载，都得在 App 里看得见进度】。原来这个组件只挂在
+ * "我的项目"列表页的标题栏里，而用户是在【成片页】点的下载——那一屏
+ * 根本没画这个东西，于是通知栏有进度、App 里一片空白，
+ * 用户以为没下上又去点一次。
+ */
+export function DownloadPanel ({ floating = false }: { floating?: boolean } = {}) {
   const prep = useDownloads((s) => s.preparing)
   const dismiss = useDownloads((s) => s.dismiss)
   const [items, setItems] = useState<NativeDownload[]>([])
@@ -55,6 +76,7 @@ export function DownloadPanel () {
   const ref = useRef<HTMLDivElement>(null)
   const bridge = typeof window !== 'undefined' ? readBridge() : null
   const canRemove = typeof bridge?.removeDownload === 'function'
+  const canPause = typeof bridge?.pauseDownload === 'function'
 
   const refresh = useCallback(() => {
     if (!bridge) return
@@ -114,13 +136,25 @@ export function DownloadPanel () {
    */
   const preparing = Object.values(prep)
   if (!bridge && preparing.length === 0) return null
-  const running = items.filter((d) => d.status === 'running' || d.status === 'paused')
+  const running = items.filter((d) =>
+    d.status === 'running' || d.status === 'paused' || d.status === 'reconnecting')
   // 交接中也算"在忙"——否则角标会在交接那一秒归零，看着像下载没了
   const busy = running.length
     + preparing.filter((p) => p.phase === 'mixing' || p.phase === 'handoff').length
 
+  // 悬浮版在闲着的时候完全不出现，免得挡住每一屏的右上角
+  if (floating && busy === 0) return null
+
   return (
-    <div ref={ref} className="relative">
+    <div
+      ref={ref}
+      className={floating
+        ? 'fixed right-3 z-40'
+        : 'relative'}
+      style={floating
+        ? { top: 'calc(env(safe-area-inset-top, 0px) + 10px)' }
+        : undefined}
+    >
       <button
         type="button"
         aria-label="下载队列"
@@ -214,6 +248,29 @@ export function DownloadPanel () {
                         {done ? '已保存' : failed ? '失败' : `${pct}%`}
                       </span>
 
+                      {/*
+                        * 【暂停 / 继续】。通知栏上有同样的一对按钮，两处是同一个开关。
+                        * 尤其重要的是「继续」：App 被系统回收之后，下载记录是从
+                        * 磁盘读回来的，状态一律是"已暂停"——没有这个按钮，
+                        * 那条已经下了一半的片子就再也接不上了。
+                        */}
+                      {canPause && !done && !failed && (
+                        <button
+                          type="button"
+                          aria-label={d.status === 'paused' ? '继续下载' : '暂停下载'}
+                          title={d.status === 'paused' ? '继续下载' : '暂停下载'}
+                          onClick={() => {
+                            bridge?.pauseDownload?.(String(d.id), d.status !== 'paused')
+                            setTimeout(refresh, 200)
+                          }}
+                          className="flex size-6 shrink-0 items-center justify-center rounded-lg text-ink-400 transition-colors hover:bg-ink-800 hover:text-ink-50"
+                        >
+                          <span className="text-[13px] leading-none">
+                            {d.status === 'paused' ? '▶' : '⏸'}
+                          </span>
+                        </button>
+                      )}
+
                       {/* 老版本 App 的桥没有 removeDownload → 不画按钮，
                           不给一个点下去什么都不会发生的东西 */}
                       {canRemove && (
@@ -239,7 +296,18 @@ export function DownloadPanel () {
                         </div>
                         <div className="mt-1.5 text-[10px] tabular-nums text-ink-600">
                           {mb(d.done)} / {mb(d.total)}
+                          {/*
+                            * 【不能写"已暂停"】。paused 是我们自己在【断线之后、
+                            * 下一次重试之前】打的标记，不是用户按了暂停。
+                            * 写"已暂停"会让用户以为要自己点一下才会继续，
+                            * 实际上它几秒后就自己接着传了——她就是这么被误导的。
+                            */}
+                          {d.status === 'reconnecting' && ' · 断线了，正在自动重连'}
                           {d.status === 'paused' && ' · 已暂停'}
+                          {d.status === 'running' && (d.bps ?? 0) > 0
+                            && ` · ${d.bps! >= 1048576
+                              ? `${(d.bps! / 1048576).toFixed(1)} MB/s`
+                              : `${Math.round(d.bps! / 1024)} KB/s`}`}
                         </div>
                       </>
                     )}
