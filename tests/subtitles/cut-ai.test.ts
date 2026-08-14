@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { cutPointsOf, planCuts, SUBTITLE_CUT_MAX } from '../../src/subtitles/cut-ai.js'
+import { SUBTITLE_MAX_CHARS } from '../../src/subtitles/project-ass.js'
 
 /*
  * ⚠️ 这一整个文件守的是同一件事：【模型不许改一个字】。
@@ -132,10 +133,15 @@ describe('两层切分', () => {
   })
 
   /*
-   * 17 是量出来的：81 号字、左右各 60px 安全边距 → 可用 960px，
-   * 17 字正好 959px。改这个数之前先重量一遍，别拍脑袋。
+   * 物理极限是 17（81 号字、左右各 60px 安全边距 → 可用 960px，
+   * 17 字正好 959px 铺满）。但 17 是"塞得下"不是"看着舒服"，
+   * 2026-08-14 用户看过 10~17 的逐档烧录对比图后定在 14。
+   *
+   * ⚠️ 它必须和 project-ass.ts 的 SUBTITLE_MAX_CHARS 相等——
+   * 下面那条断言就是防止有人只改一边。
    */
-  it('上限是 17 字（安全区宽度量出来的）', () => {
-    expect(SUBTITLE_CUT_MAX).toBe(17)
+  it('上限是 14 字，且和渲染上限一致', () => {
+    expect(SUBTITLE_CUT_MAX).toBe(14)
+    expect(SUBTITLE_CUT_MAX).toBe(SUBTITLE_MAX_CHARS)
   })
 })
