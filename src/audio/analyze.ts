@@ -121,6 +121,37 @@ export function recommendBgmVolume (voiceLufs: number, bgmLufs: number): number 
  * 所以这个建议值就是"照抄它就能达到平台惯例"的那个数，不再是
  * "让归一化少干点活"。用不用由他决定。
  */
+/**
+ * 【Azure 配音的实测响度】。
+ *
+ * ── 为什么可以写死一个常数 ──────────────────────────────────────────
+ * Azure TTS 自带响度归一化：实测两条毫不相干的配音——一条 6 秒、一条
+ * 9 分 24 秒，长度差 90 倍，音色和内容也完全不同——响度是
+ *     -20.4 LUFS  和  -21.3 LUFS
+ * 只差 0.9 LU。而且两条的 LRA 都只有 1.5~1.9 LU（真人朗读通常 5~10），
+ * 说明整条从头到尾一个音量。
+ *
+ * 作为对照，BGM 曲库那 9 首的极差是 7.1 LU（-11.4 ~ -18.5）——
+ * 差了八倍。所以【配音可以有固定默认值，音乐不行】：音乐必须按所选曲子
+ * 的实测响度现算，一个固定的 bgmVolume 必然对一半错一半。
+ *
+ * 取 -20.8 是那两条的中点。样本只有 2 条，但支撑结论的不是样本量，
+ * 而是"长度差 90 倍却只差 0.9 LU"这个事实。
+ */
+export const AZURE_VOICE_LUFS = -20.8
+
+/**
+ * 【新项目的默认配音增益】= 直接就是推荐值。
+ *
+ * 以前默认是 1（原样），于是每个用户都得自己摸索着把滑块往上拖——
+ * 实测两条真实项目分别拖到了 2.09 和 3.17，而它们的原始配音只差 0.9 LU，
+ * 说明那不是在补偿素材差异，纯粹是各自凭感觉找了半天。
+ *
+ * 既然 Azure 的输出这么稳，这个数就该由我们算好给他，而不是让他猜。
+ * 算出来约 2.19：-20.8 → -14 LUFS 需要 +6.8 dB。
+ */
+export const DEFAULT_VOICE_GAIN = recommendVoiceGain(AZURE_VOICE_LUFS)
+
 export function recommendVoiceGain (voiceLufs: number): number {
   if (!Number.isFinite(voiceLufs)) return 1
   const gain = 10 ** ((TARGET_LUFS - voiceLufs) / 20)

@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto'
 import { userDbDir } from '../auth/whitelist.js'
 import { DEFAULT_SUBTITLE_MARGIN_V, DEFAULT_SUBTITLE_FONT_SIZE } from '../subtitles/ass.js'
 import { LEGACY_VOICE, DEFAULT_VOICE, DEFAULT_VOICE_RATE, DEFAULT_VOICE_PITCH, RATE_RANGE, VOLUME_RANGE, PITCH_RANGE } from '../tts/voices.js'
+import { DEFAULT_VOICE_GAIN } from '../audio/analyze.js'
 
 /**
  * 素材种类。
@@ -389,7 +390,7 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
       opening_pick_json TEXT NOT NULL DEFAULT '',
       subtitle_cuts_json TEXT NOT NULL DEFAULT '',
       split_draft_json TEXT NOT NULL DEFAULT '',
-      voice_gain REAL NOT NULL DEFAULT 1,
+      voice_gain REAL NOT NULL DEFAULT 2.19,
       audio_stats_json TEXT NOT NULL DEFAULT '',
       voice_draft_json TEXT NOT NULL DEFAULT '',
       touched_at TEXT NOT NULL DEFAULT '',
@@ -537,7 +538,21 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
         openingPickJson: '', // 空 = 用默认随机排布
         subtitleCutsJson: '', // 空 = 还没算语义断点
         splitDraftJson: '',   // 空 = 分集那一屏还没动过
-        voiceGain: 1,         // 1 = 原样，用户可拖
+        /*
+         * 【默认就给推荐值，不再让用户自己摸索】。
+         *
+         * Azure 的配音响度稳定在 -20.8 LUFS 附近（实测两条长度差 90 倍的
+         * 配音只差 0.9 LU），所以"推到平台惯用的 -14"是个算得出来的定值。
+         * 以前默认 1（原样）时，两个真实用户分别拖到了 2.09 和 3.17——
+         * 而他们的原始配音只差 0.9 LU，那不是在补偿素材差异，是各自凭感觉
+         * 找了半天。其中一条拖到的 2.09，和按他那条配音算出来的推荐值
+         * 【一模一样】——说明这个公式给的就是人耳想要的那个数。
+         *
+         * ⚠️【只影响新项目】。老项目的 voice_gain 早就落库了，这里碰不到，
+         * 而且配音增益不进母带指纹（母带无声，增益只在下载现混时起作用），
+         * 所以改它不会让任何一条老片子重烧。
+         */
+        voiceGain: DEFAULT_VOICE_GAIN,
         audioStatsJson: '',   // 空 = 还没量过
         voiceDraftJson: '',   // 空 = 配音参数没在改
         touchedAt: now,       // 刚建出来就算动过
