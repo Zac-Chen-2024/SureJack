@@ -722,17 +722,13 @@ public class DownloadService extends Service {
                     + (s.bps > 0 ? " · " + speed(s.bps) : "");
         }
 
-        NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && nm != null) {
-            NotificationChannel ch = new NotificationChannel(
-                    CHANNEL, "视频下载", NotificationManager.IMPORTANCE_LOW);
-            ch.setDescription("下载进度");
-            nm.createNotificationChannel(ch);
-        }
-        Intent open = new Intent(this, MainActivity.class);
-        open.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
-        int flags = PendingIntent.FLAG_UPDATE_CURRENT
-                | (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0);
+        /*
+         * 【渠道和 PendingIntent 只建一次】。进度通知是每秒刷一次的，
+         * 一条几十分钟的下载就是几千次——上一版每次都重建通知渠道、
+         * 重新构造 PendingIntent，纯属白烧 CPU 和电。
+         * 渠道本身是幂等的，建一次就够；PendingIntent 目标固定，缓存即可。
+         */
+        ensureChannel();
 
         NotificationCompat.Builder b = new NotificationCompat.Builder(this, CHANNEL)
                 .setSmallIcon(paused ? android.R.drawable.ic_media_pause
@@ -742,7 +738,7 @@ public class DownloadService extends Service {
                 .setOngoing(true)
                 .setOnlyAlertOnce(true)
                 .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
-                .setContentIntent(PendingIntent.getActivity(this, 0, open, flags));
+                .setContentIntent(openAppIntent());
         if (s.total > 0) b.setProgress(100, (int) (s.done * 100 / s.total), recon && s.done == 0);
         else b.setProgress(0, 0, true);
 
@@ -753,6 +749,33 @@ public class DownloadService extends Service {
                 : new NotificationCompat.Action(android.R.drawable.ic_media_pause, "暂停",
                     actionIntent(ACTION_PAUSE, s.projectId)));
         return b.build();
+    }
+
+    /** 通知渠道。**幂等，只在第一次真的建** */
+    private boolean channelReady = false;
+    private void ensureChannel() {
+        if (channelReady) return;
+        NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && nm != null) {
+            NotificationChannel ch = new NotificationChannel(
+                    CHANNEL, "视频下载", NotificationManager.IMPORTANCE_LOW);
+            ch.setDescription("下载进度");
+            nm.createNotificationChannel(ch);
+        }
+        channelReady = true;
+    }
+
+    /** 点通知回到 App。目标固定，缓存一份就够 */
+    private PendingIntent openApp = null;
+    private PendingIntent openAppIntent() {
+        if (openApp == null) {
+            Intent open = new Intent(this, MainActivity.class);
+            open.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+            int flags = PendingIntent.FLAG_UPDATE_CURRENT
+                    | (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0);
+            openApp = PendingIntent.getActivity(this, 0, open, flags);
+        }
+        return openApp;
     }
 
     private PendingIntent actionIntent(String action, String id) {
@@ -777,32 +800,6 @@ public class DownloadService extends Service {
     private static String speed(long bps) {
         return bps >= 1048576 ? String.format("%.1f MB/s", bps / 1048576.0)
                 : (bps / 1024) + " KB/s";
-    }
-
-    private Notification buildNotification(String name, long done, long total, String text) {
-        NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && nm != null) {
-            NotificationChannel ch = new NotificationChannel(
-                    CHANNEL, "视频下载", NotificationManager.IMPORTANCE_LOW);
-            ch.setDescription("下载进度");
-            nm.createNotificationChannel(ch);
-        }
-        Intent open = new Intent(this, MainActivity.class);
-        open.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
-        int flags = PendingIntent.FLAG_UPDATE_CURRENT
-                | (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0);
-        NotificationCompat.Builder b = new NotificationCompat.Builder(this, CHANNEL)
-                .setSmallIcon(android.R.drawable.stat_sys_download)
-                .setContentTitle(name)
-                .setContentText(text)
-                .setOngoing(true)
-                .setOnlyAlertOnce(true)
-                // 【立刻显示】。默认系统会压着不显示十秒，用户点完下载什么都看不到
-                .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
-                .setContentIntent(PendingIntent.getActivity(this, 0, open, flags));
-        if (total > 0) b.setProgress(100, (int) (done * 100 / total), false);
-        else b.setProgress(0, 0, true);
-        return b.build();
     }
 
     private void notifyDone(String name) {

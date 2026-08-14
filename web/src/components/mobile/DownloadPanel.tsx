@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { IconDownload, IconCheck, IconClose, IconTrash, IconLoader } from '../ui/Icon'
+import {
+  IconDownload, IconCheck, IconClose, IconTrash, IconLoader, IconPlay, IconPause,
+} from '../ui/Icon'
 import { useDownloads } from '../../store/downloads'
 
 /**
@@ -153,8 +155,18 @@ export function DownloadPanel ({ floating = false }: { floating?: boolean } = {}
       className={floating
         ? 'fixed right-3 z-40'
         : 'relative'}
+      /*
+       * ⚠️【必须避开顶栏那一行】。原来放在 safe-area + 10px，正好和成片页
+       * 右上角的「下载视频」按钮（right-4、同一 top、z-20、size-10）几乎完全
+       * 重叠——而悬浮版是【忙的时候才出现】的：第 1 集在下时进第 2 集想点
+       * 下载，36×36 的角标以 z-40 把它盖住，点击变成开关下载队列；
+       * 第 1 集一下完角标卸载，同一个位置又变回下载按钮。
+       * 同一坐标的点击目标在一次会话里来回换身份，误触就是又起一条流。
+       *
+       * 往下挪 62px，落在顶栏那一行【下面】，两者不再有交集。
+       */
       style={floating
-        ? { top: 'calc(env(safe-area-inset-top, 0px) + 10px)' }
+        ? { top: 'calc(env(safe-area-inset-top, 0px) + 62px)' }
         : undefined}
     >
       <button
@@ -267,9 +279,9 @@ export function DownloadPanel ({ floating = false }: { floating?: boolean } = {}
                           }}
                           className="flex size-6 shrink-0 items-center justify-center rounded-lg text-ink-400 transition-colors hover:bg-ink-800 hover:text-ink-50"
                         >
-                          <span className="text-[13px] leading-none">
-                            {d.status === 'paused' ? '▶' : '⏸'}
-                          </span>
+                          {d.status === 'paused'
+                            ? <IconPlay className="size-3.5" />
+                            : <IconPause className="size-3.5" />}
                         </button>
                       )}
 
