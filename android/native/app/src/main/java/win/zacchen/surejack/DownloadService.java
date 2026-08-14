@@ -98,7 +98,8 @@ public class DownloadService extends Service {
      *
      * 无限重连是安全的，因为：① 每次都从断点接着传，不做无用功；
      * ② 退避到 60 秒一次，几乎不耗电；③ 用户随时能在通知栏点暂停停下来；
-     * ④ 真正没救的错误（文件没了、登录过期）会直接失败，不进重连（见 isFatal）。
+     * ④ 真正没救的错误（文件没了、登录过期、手机存储满）会直接失败，
+     *    不进重连——分类在 transferOnce 里显式做，不靠猜异常消息。
      */
     private static final long RETRY_BASE_MS = 2000;
     private static final long RETRY_MAX_MS = 60_000;
@@ -327,152 +328,252 @@ public class DownloadService extends Service {
         }
     }
 
-    private void downloadLocked(String id, String url, String name, String cookie, String ua)
+    /**
+     * 传输一轮的结果。**状态码显式带出来，不再塞进异常消息再用 contains 猜。**
+     *
+     * ⚠️ 上一版把 HTTP 码拼进 `"续传被拒：HTTP " + code`，再用
+     * `isFatal(msg.contains("续传被拒"))` 判永久失败。方向是反的：
+     * 带 Range 的请求收到【任何】非 206 都会命中，包括瞬时的 502/503——
+     * 于是 458MB 下到 300MB 时 nginx 恰好 reload，300MB 当场作废；
+     * 而同样一个 503 发生在从零开始时，反倒被当成网络抖动无限重试。
+     * 最需要保护的场景，重试次数变成了 0。
+     */
+    private static final class Attempt {
+        static final int DONE = 0;        // 传完了
+        static final int RETRY = 1;       // 断了，等会儿接着来
+        static final int FATAL = 2;       // 重试一万次也没用
+        static final int PAUSED_OUT = 3;  // 用户按了暂停，线程该退出
+        static final int CANCELLED_OUT = 4;
+        static final int RESET = 5;       // .part 作废，从 0 重来
+
+        final int kind;
+        final String reason;
+        final long moved;                 // 这一轮传了多少字节
+        Attempt(int kind, String reason, long moved) {
+            this.kind = kind; this.reason = reason; this.moved = moved;
+        }
+    }
+
+    private void downloadLocked(String projectId, String url, String name, String cookie, String ua)
             throws IOException {
         File dir = new File(getExternalFilesDir(null), "dl");
         if (!dir.exists() && !dir.mkdirs()) throw new IOException("建不了下载目录");
-        // .part 就是断点本身：它有多长，就说明已经下到哪儿了
-        File part = new File(dir, safeName(name) + ".part");
+        /*
+         * .part 就是断点本身：它有多长，就说明已经下到哪儿了。
+         * 【按 projectId 命名】——按标题命名的话，用户改个项目名就认不出
+         * 自己那份半成品了，几十分钟的流量白费。
+         */
+        File part = new File(dir, projectId + ".part");
+        migrateLegacyPart(dir, name, part);
 
-        long total = -1;
-        for (int attempt = 0; ; attempt++) {
+        /*
+         * 【连续多少次一个字节都没传下来才认输】。
+         *
+         * "无限重连"不能是字面意义上的无限：手机存储写满时 out.write 每次
+         * 都抛 IOException，而它不是网络错误——上一版就这么无限循环下去，
+         * 用户对着一个永远的「断线了，正在自动重连」，锁还一直持有。
+         *
+         * 判据是【有没有进展】而不是【试了几次】：只要还在往前爬就一直重连
+         * （信号飘的地铁上被切十几次是常态），连着 20 次连一个字节都拿不到，
+         * 那就不是网络抖动了。
+         */
+        final int MAX_ZERO_PROGRESS = 20;
+        int zeroProgress = 0;
+        int attempt = 0;
+
+        while (true) {
+            if (Boolean.TRUE.equals(CANCELLED.get(projectId))) return;
             /*
-             * 【用户按了暂停就停在这儿等】，而不是结束任务。
-             * 结束的话服务会失去前台身份被回收，"继续"就没东西可继续了。
-             * 在这儿转圈，.part 原样留着，点继续立刻接上。
+             * ⚠️【暂停 = 线程退出，不是线程空转】。
+             *
+             * 上一版在这儿 `while (PAUSED) sleep(500)` 死等。而线程池是单线程的，
+             * 于是暂停 A 之后再下 B，【B 永远排在 A 后面一个字节都传不了】；
+             * 更糟的是两把锁（PARTIAL_WAKE_LOCK 6 小时 + WIFI_FULL_HIGH_PERF）
+             * 在整个暂停期间一直被持有——暂停过夜就是整夜空耗电，
+             * 和注释里写的"绝不泄漏"正好相反。
+             *
+             * 现在直接退出：锁在 download() 的 finally 里必然释放，
+             * 线程还给池子。用户点「继续」时 onStartCommand 会重新起一条，
+             * 而 .part 还在，从断点接上。
              */
-            while (Boolean.TRUE.equals(PAUSED.get(id))
-                    && !Boolean.TRUE.equals(CANCELLED.get(id))) {
-                DownloadStore.Record ps = LIVE.get(id);
-                if (ps != null && !DownloadStore.PAUSED.equals(ps.status)) { ps.status = DownloadStore.PAUSED; notifyState(ps); }
-                try { Thread.sleep(500); } catch (InterruptedException e) { return; }
-            }
-            if (Boolean.TRUE.equals(CANCELLED.get(id))) {
-                /*
-                 * ⚠️【取消不删 .part】。删掉的话下次点下载就要从第 0 字节重来，
-                 * 而在一条几十 KB/s 的管子上，已经传下来的那几十 MB 是几十分钟
-                 * 换来的。线上日志里"整条 0-480275839"反复出现，就是这么来的。
-                 * 半成品留在应用私有目录里，用户看不见，也不占公共空间；
-                 * 真不要了由 clearPart() 显式清（重下按钮）。
-                 */
-                mark(id, "error", "已暂停");
+            if (Boolean.TRUE.equals(PAUSED.get(projectId))) {
+                mark(projectId, DownloadStore.PAUSED, null);
+                DownloadStore.Record r = DownloadStore.get(this, projectId);
+                if (r != null) notifyState(r);
                 return;
             }
-            long have = part.exists() ? part.length() : 0;
-            HttpURLConnection conn = null;
-            try {
-                conn = (HttpURLConnection) new URL(url).openConnection();
-                conn.setConnectTimeout(20_000);
-                /*
-                 * 【读超时不能太短】。移动网络卡顿几十秒是常态，超时太短会把
-                 * 一条本来还活着的连接掐掉，白白浪费一次重试。
-                 */
-                conn.setReadTimeout(60_000);
-                conn.setInstanceFollowRedirects(true);
-                if (cookie != null) conn.setRequestProperty("Cookie", cookie);
-                if (ua != null) conn.setRequestProperty("User-Agent", ua);
-                if (have > 0) conn.setRequestProperty("Range", "bytes=" + have + "-");
 
-                int code = conn.getResponseCode();
-                /*
-                 * 要了 Range 却回 200 = 服务端不支持续传，只能从头来。
-                 * 那就把 .part 清掉重下，不能把新数据接在旧数据后面——
-                 * 那样拼出来的文件是坏的，而且坏得很隐蔽（能下完、播不了）。
-                 */
-                if (have > 0 && code == HttpURLConnection.HTTP_OK) {
-                    part.delete();
-                    have = 0;
-                } else if (have > 0 && code != HttpURLConnection.HTTP_PARTIAL) {
-                    throw new IOException("续传被拒：HTTP " + code);
-                } else if (have == 0 && code != HttpURLConnection.HTTP_OK
-                        && code != HttpURLConnection.HTTP_PARTIAL) {
-                    throw new IOException("HTTP " + code);
-                }
+            Attempt a = transferOnce(projectId, url, name, cookie, ua, part);
 
-                // ⚠️ 不能用 getHeaderFieldLong：它是 API 24 的，而 minSdk 是 23
-                long len = parseLong(conn.getHeaderField("Content-Length"), -1);
-                if (total < 0) total = (len < 0) ? -1 : have + len;
-
-                try (InputStream in = conn.getInputStream();
-                     FileOutputStream out = new FileOutputStream(part, have > 0)) {
-                    byte[] buf = new byte[BUF];
-                    long done = have;
-                    long lastNotify = 0;
-                    int n;
-                    long tickAt = System.currentTimeMillis();
-                    long tickBytes = 0;
-                    while ((n = in.read(buf)) > 0) {
-                        if (Boolean.TRUE.equals(CANCELLED.get(id))) {
-                            mark(id, "error", "已取消");   // .part 留着，下次接着传
-                            return;
-                        }
-                        // 【暂停要立刻停手】：跳出去让外层那个等待循环接管
-                        if (Boolean.TRUE.equals(PAUSED.get(id))) break;
-
-                        out.write(buf, 0, n);
-                        done += n;
-                        tickBytes += n;
-                        DownloadStore.Record s = LIVE.get(id);
-                        if (s != null) {
-                            s.done = done; s.total = total;
-                            if (!DownloadStore.RUNNING.equals(s.status)) s.status = DownloadStore.RUNNING;
-                        }
-                        // 通知刷太勤会拖慢下载，1 秒一次足够；顺便算这一秒的速度
-                        long now = System.currentTimeMillis();
-                        if (now - lastNotify > 1000) {
-                            long dt = now - tickAt;
-                            if (s != null && dt > 0) s.bps = tickBytes * 1000 / dt;
-                            tickAt = now; tickBytes = 0;
-                            lastNotify = now;
-                            if (s != null) { notifyState(s); save(s); }
-                        }
-                    }
-                    // 因为暂停跳出来的：回外层等着，别当成传完
-                    if (Boolean.TRUE.equals(PAUSED.get(id))) continue;
-                }
-
-                // 读完了：长度对得上就算成功（服务端给了长度时才校验）
-                if (total > 0 && part.length() < total) {
-                    throw new IOException("传输不完整：" + part.length() + "/" + total);
-                }
-                publish(part, name);
-                DownloadStore.Record s = LIVE.get(id);
-                if (s != null) { s.done = part.length(); s.total = part.length(); }
-                mark(id, "done", null);
-                notifyDone(name);
+            if (a.kind == Attempt.DONE) return;
+            if (a.kind == Attempt.CANCELLED_OUT) return;
+            if (a.kind == Attempt.PAUSED_OUT) continue;   // 回到上面那一支，退出线程
+            if (a.kind == Attempt.FATAL) {
+                fail(projectId, name, a.reason);
                 return;
+            }
+            if (a.kind == Attempt.RESET) {
+                // 服务端不认这个断点了：清掉从 0 重来，不能把新数据接在旧的后面
+                part.delete();
+                zeroProgress = 0;
+                attempt = 0;
+                continue;
+            }
 
-            } catch (IOException e) {
-                /*
-                 * 断了不是失败，是常态——【自动重连，不设次数上限】。
-                 * .part 原样留着，下一轮从断点接着要。
-                 *
-                 * 但【有些错误重试一万次也没用】：文件被清掉了(404)、
-                 * 登录过期(401/403)。那种要立刻失败并说清原因，
-                 * 而不是让用户对着一个永远在"重连中"的进度条干等。
-                 */
-                if (isFatal(e.getMessage())) {
-                    fail(id, name, String.valueOf(e.getMessage()));
-                    return;
-                }
-                DownloadStore.Record s = LIVE.get(id);
-                if (s != null) {
-                    s.status = DownloadStore.RECONNECTING;
-                    s.bps = 0;
-                    notifyState(s);
-                }
-                long wait = Math.min(RETRY_MAX_MS, RETRY_BASE_MS * (1L << Math.min(attempt, 5)));
-                long until = System.currentTimeMillis() + wait;
-                // 等待期间也要能响应暂停/取消，不能死睡
-                while (System.currentTimeMillis() < until) {
-                    if (Boolean.TRUE.equals(CANCELLED.get(id))
-                            || Boolean.TRUE.equals(PAUSED.get(id))) break;
-                    try { Thread.sleep(300); } catch (InterruptedException ignored) { return; }
-                }
-            } finally {
-                if (conn != null) conn.disconnect();
+            // RETRY：断了不是失败，是常态
+            if (a.moved > 0) { zeroProgress = 0; attempt = 0; } else { zeroProgress++; }
+            if (zeroProgress >= MAX_ZERO_PROGRESS) {
+                fail(projectId, name, "连着 " + MAX_ZERO_PROGRESS + " 次一个字节都没传下来："
+                        + (a.reason == null ? "网络异常" : a.reason));
+                return;
+            }
+
+            DownloadStore.Record s = LIVE.get(projectId);
+            if (s != null) {
+                s.status = DownloadStore.RECONNECTING;
+                s.bps = 0;
+                save(s);
+                notifyState(s);
+            }
+            long wait = Math.min(RETRY_MAX_MS, RETRY_BASE_MS * (1L << Math.min(attempt, 5)));
+            attempt++;
+            long until = System.currentTimeMillis() + wait;
+            // 等待期间也要能响应暂停/取消，不能死睡
+            while (System.currentTimeMillis() < until) {
+                if (Boolean.TRUE.equals(CANCELLED.get(projectId))
+                        || Boolean.TRUE.equals(PAUSED.get(projectId))) break;
+                try { Thread.sleep(300); } catch (InterruptedException ignored) { return; }
             }
         }
+    }
+
+    /** 传一轮。**所有的判断都在这里显式做完，外层只按 kind 分支** */
+    private Attempt transferOnce(
+            String projectId, String url, String name, String cookie, String ua, File part) {
+        long have = part.exists() ? part.length() : 0;
+        long moved = 0;
+        HttpURLConnection conn = null;
+        try {
+            conn = (HttpURLConnection) new URL(url).openConnection();
+            conn.setConnectTimeout(20_000);
+            /*
+             * 【读超时不能太短】。移动网络卡顿几十秒是常态，超时太短会把
+             * 一条本来还活着的连接掐掉，白白浪费一次重试。
+             */
+            conn.setReadTimeout(60_000);
+            conn.setInstanceFollowRedirects(true);
+            if (cookie != null) conn.setRequestProperty("Cookie", cookie);
+            if (ua != null) conn.setRequestProperty("User-Agent", ua);
+            if (have > 0) conn.setRequestProperty("Range", "bytes=" + have + "-");
+
+            int code = conn.getResponseCode();
+
+            // ── 状态码显式分类：这一段就是 #3 的正解 ──────────────────
+            if (code == 401 || code == 403) {
+                return new Attempt(Attempt.FATAL, "登录过期了，请重新打开 App 再下载", 0);
+            }
+            if (code == 404 || code == 410) {
+                return new Attempt(Attempt.FATAL, "这份成片已经过期，请回项目里重新点一次下载", 0);
+            }
+            if (code == 416) {
+                // 断点比服务端的文件还长（成片重混过）→ 从 0 重来
+                return new Attempt(Attempt.RESET, "断点已失效，从头开始", 0);
+            }
+            if (code >= 500 || code == 408 || code == 429) {
+                // 服务端临时问题：等会儿再来，【绝不作废已经下好的部分】
+                return new Attempt(Attempt.RETRY, "服务端暂时不可用（HTTP " + code + "）", 0);
+            }
+            if (have > 0 && code == HttpURLConnection.HTTP_OK) {
+                /*
+                 * 要了 Range 却回 200 = 服务端不支持续传，只能从头来。
+                 * 不能把新数据接在旧数据后面——那样拼出来的文件是坏的，
+                 * 而且坏得很隐蔽（能下完、播不了）。
+                 */
+                return new Attempt(Attempt.RESET, "服务端不支持续传", 0);
+            }
+            if (code != HttpURLConnection.HTTP_OK && code != HttpURLConnection.HTTP_PARTIAL) {
+                return new Attempt(Attempt.RETRY, "HTTP " + code, 0);
+            }
+
+            // ⚠️ 不能用 getHeaderFieldLong：它是 API 24 的，而 minSdk 是 23
+            long len = parseLong(conn.getHeaderField("Content-Length"), -1);
+            long total = (len < 0) ? -1 : have + len;
+
+            try (InputStream in = conn.getInputStream();
+                 FileOutputStream out = new FileOutputStream(part, have > 0)) {
+                byte[] buf = new byte[BUF];
+                long done = have;
+                long lastNotify = 0;
+                long tickAt = System.currentTimeMillis();
+                long tickBytes = 0;
+                int n;
+                while ((n = in.read(buf)) > 0) {
+                    if (Boolean.TRUE.equals(CANCELLED.get(projectId))) {
+                        return new Attempt(Attempt.CANCELLED_OUT, null, moved);
+                    }
+                    if (Boolean.TRUE.equals(PAUSED.get(projectId))) {
+                        return new Attempt(Attempt.PAUSED_OUT, null, moved);
+                    }
+                    out.write(buf, 0, n);
+                    done += n;
+                    moved += n;
+                    tickBytes += n;
+
+                    DownloadStore.Record s = LIVE.get(projectId);
+                    if (s != null) {
+                        s.done = done;
+                        s.total = total;
+                        if (!DownloadStore.RUNNING.equals(s.status)) s.status = DownloadStore.RUNNING;
+                    }
+                    // 通知刷太勤会拖慢下载，1 秒一次足够；顺便算这一秒的速度
+                    long now = System.currentTimeMillis();
+                    if (now - lastNotify > 1000) {
+                        long dt = now - tickAt;
+                        if (s != null && dt > 0) s.bps = tickBytes * 1000 / dt;
+                        tickAt = now; tickBytes = 0;
+                        lastNotify = now;
+                        if (s != null) { notifyState(s); save(s); }
+                    }
+                }
+            }
+
+            // 读完了：长度对得上就算成功（服务端给了长度时才校验）
+            if (total > 0 && part.length() < total) {
+                return new Attempt(Attempt.RETRY,
+                        "传输不完整：" + part.length() + "/" + total, moved);
+            }
+            publish(part, name);
+            DownloadStore.Record s = LIVE.get(projectId);
+            if (s != null) { s.done = part.length(); s.total = part.length(); }
+            mark(projectId, DownloadStore.DONE, null);
+            notifyDone(name);
+            return new Attempt(Attempt.DONE, null, moved);
+
+        } catch (IOException e) {
+            /*
+             * 【磁盘满不是网络问题】。out.write 写不下去时抛的也是 IOException，
+             * 而它重试一万次还是同一个结果——上一版就这么无限"重连"下去。
+             */
+            String msg = String.valueOf(e.getMessage());
+            if (msg.contains("ENOSPC") || msg.contains("No space left")) {
+                return new Attempt(Attempt.FATAL, "手机存储空间不足，清理一些空间再下载", moved);
+            }
+            return new Attempt(Attempt.RETRY, msg, moved);
+        } finally {
+            if (conn != null) conn.disconnect();
+        }
+    }
+
+    /**
+     * 老版本的 .part 是按【标题】命名的，改成按 projectId 之后要认领回来，
+     * 否则用户那几十分钟换来的半成品会被当成不存在，从 0 重下。
+     */
+    private void migrateLegacyPart(File dir, String name, File target) {
+        try {
+            if (target.exists()) return;
+            File legacy = new File(dir, safeName(name) + ".part");
+            if (legacy.exists()) legacy.renameTo(target);
+        } catch (Exception ignored) { /* 认领不了就重下，不该因此崩 */ }
     }
 
     /**
@@ -515,20 +616,6 @@ public class DownloadService extends Service {
             }
         }
         part.delete();
-    }
-
-    /**
-     * 这个错误重试还有意义吗。
-     *
-     * 网络类的（超时、连接重置、DNS）重试就能好；而 404（成片已被清理）、
-     * 401/403（登录过期）重试一万次也是同一个结果——那种要立刻告诉用户，
-     * 让他去重新点一次下载或者重新登录，而不是盯着"重连中"干等。
-     */
-    private static boolean isFatal(String msg) {
-        if (msg == null) return false;
-        return msg.contains("HTTP 401") || msg.contains("HTTP 403")
-                || msg.contains("HTTP 404") || msg.contains("HTTP 410")
-                || msg.contains("续传被拒");
     }
 
     private static long parseLong(String s, long dflt) {
