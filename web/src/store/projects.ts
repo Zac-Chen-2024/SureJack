@@ -7,7 +7,7 @@ import { api } from '../api/client'
  * import 不了后端代码，只能各写一份；tests/web/projects-store.test.ts
  * 里有一条测试把两边钉在一起。
  */
-export const DEFAULT_SUBTITLE_MARGIN_V = 990
+export const DEFAULT_SUBTITLE_MARGIN_V = 980
 
 /**
  * 字幕能贴多低。**必须与后端 src/subtitles/project-ass.ts 的

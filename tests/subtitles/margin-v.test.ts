@@ -61,9 +61,9 @@ describe('字幕纵向位置 —— ASS 样式行', () => {
   it('Sub 样式行逐字节钉死', () => {
     const ass = buildAss({ lines, overlays: [], aspect, durationMs: 1000, mode: 'karaoke' })
     expect(styleLine(ass, 'Sub')).toBe(
-      `Style: Sub,${FONT_FAMILY},81,&H00000000,&H00000000,&H00FFFFFF,&H00000000,0,0,0,0,100,100,0,0,1,5,0,2,60,60,990,1`
+      `Style: Sub,${FONT_FAMILY},81,&H00000000,&H00000000,&H00FFFFFF,&H00000000,0,0,0,0,100,100,0,0,1,5,0,2,60,60,980,1`
     )
-    expect(DEFAULT_SUBTITLE_MARGIN_V).toBe(990)
+    expect(DEFAULT_SUBTITLE_MARGIN_V).toBe(980)
   })
 
   /*
