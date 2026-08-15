@@ -388,3 +388,19 @@ export function IconSettings (props: IconProps) {
     </Svg>
   )
 }
+
+/**
+ * 重来一次——环形箭头。「重选开头」用。
+ *
+ * 【故意不用顺时针整圈的"刷新"形状】：那个在别处普遍读作"重新加载、
+ * 回到原样"，而这里要说的是"换一批新的"。缺口开在右上、箭头指向外侧，
+ * 读起来是"再走一遍并且换个结果"，不是"撤销"。
+ */
+export function IconRefresh (props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M20 11a8 8 0 1 0-.6 4" />
+      <path d="M20 5v6h-6" />
+    </Svg>
+  )
+}

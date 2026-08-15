@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useProjects } from '../store/projects'
+import { useProjects, openingIds } from '../store/projects'
 import { usePipeline } from '../store/pipeline'
 import { useSubtitles } from '../store/subtitles'
 import { useLibrary } from '../store/library'
@@ -228,9 +228,7 @@ export function MobileWorkspace () {
         ) : screen === 'opening' && project ? (
           /* 挑到一半退出去了：点回来接着挑。续集也在这条线上 */
           <OpeningPicker
-            ids={[project, ...useProjects.getState().items.filter((x) => x.parentProjectId === project.id)]
-              .filter((x) => x.openingState === 'pending')
-              .map((x) => x.id)}
+            ids={openingIds(useProjects.getState().items, project.id)}
             onDone={() => { replace({ k: 'editor' }) }}
             onBack={() => { replace({ k: 'list' }) }}
           />

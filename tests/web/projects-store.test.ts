@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
-  maxSubtitleMarginV, subtitleHeightLabel, DEFAULT_SUBTITLE_MARGIN_V,
+  maxSubtitleMarginV, subtitleHeightLabel, DEFAULT_SUBTITLE_MARGIN_V, openingIds,
+  type Project,
 } from '../../web/src/store/projects'
 import {
   maxSubtitleMarginV as serverMax,
@@ -89,5 +90,34 @@ describe('前后端常量必须对齐', () => {
     const web = await import('../../web/src/store/projects')
     const backend = await import('../../src/subtitles/watermark.js')
     expect(web.DEFAULT_WATERMARK).toBe(backend.DEFAULT_WATERMARK)
+  })
+})
+
+describe('挑开头那一屏要挑哪几个项目', () => {
+  type P = Pick<Project, 'id' | 'parentProjectId' | 'openingState'>
+  const p = (id: string, openingState: 'pending' | 'settled', parentProjectId: string | null = null): P =>
+    ({ id, parentProjectId, openingState })
+
+  it('主片 + 续集里还没敲定的那些', () => {
+    const all = [p('a', 'pending'), p('a2', 'pending', 'a'), p('b', 'pending')]
+    expect(openingIds(all, 'a')).toEqual(['a', 'a2'])
+  })
+
+  it('续集已经敲定过了就不再挑它', () => {
+    const all = [p('a', 'pending'), p('a2', 'settled', 'a')]
+    expect(openingIds(all, 'a')).toEqual(['a'])
+  })
+
+  /*
+   * ⚠️ 这一条防的是【白屏】。挑选界面拿到空数组直接返回 null,
+   * 用户看到一片黑还以为 App 崩了。成片页那个「重选开头」按钮会先把项目
+   * 打回 pending 再跳过来,只要那次 load() 慢一拍,这里读到的就还是 settled。
+   */
+  it('一个 pending 都没有(重选开头时 load 慢了一拍)也不会给出空清单', () => {
+    expect(openingIds([p('a', 'settled')], 'a')).toEqual(['a'])
+  })
+
+  it('项目根本不在清单里也不会给出空清单', () => {
+    expect(openingIds([], 'a')).toEqual(['a'])
   })
 })

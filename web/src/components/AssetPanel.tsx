@@ -1,10 +1,13 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { AudioMix } from './AudioMix'
 import { useProjects } from '../store/projects'
 import {
   useLibrary, parseBgmName, groupPhases, segmentShares, describePlan, formatClock,
 } from '../store/library'
-import { IconFilm, IconMusic, IconLoader } from './ui/Icon'
+import { IconFilm, IconMusic, IconLoader, IconRefresh } from './ui/Icon'
+import { usePipeline } from '../store/pipeline'
+import { useNav } from '../store/nav'
+import { api } from '../api/client'
 
 /**
  * 素材区。**这里没有上传。**
@@ -224,7 +227,94 @@ export function AssetPanel () {
 export function BackgroundPanel () {
   const project = useProjects((s) => s.current())
   if (!project) return null
-  return <BackgroundStrip projectId={project.id} />
+  return (
+    <div>
+      <BackgroundStrip projectId={project.id} />
+      <ReopenButton />
+    </div>
+  )
+}
+
+/**
+ * 「重选开头」。**整个背景区唯一一个可操作项**。
+ *
+ * ── 为什么放在这儿 ──────────────────────────────────────────────────
+ * 上面那条分段条画的正是开头/常规/跑酷三段,而这个按钮只改【开头那一段】——
+ * 它要改的东西就在按钮上方两厘米处画着。放别处(顶栏菜单、项目列表)都要
+ * 用户先在脑子里建立"这个操作和背景有关"的联系。
+ *
+ * 常规和跑酷仍然全自动,所以这一块整体上还是"自动的东西",不是变成了
+ * 一个设置面板。
+ *
+ * ── ⚠️ 老片子【不显示】,不是禁用 ────────────────────────────────────
+ * 判据是 headBoundaryMs:它是配音完成那一刻算好写死的开头分界,老项目
+ * 那一列是 null。没有分界就没有固定的接缝,换开头只能整条重烧十几分钟。
+ *
+ * 用户明确要求这种情况【不显示这个选项】。这是对的:一个灰着的按钮加一句
+ * "这条片子不支持"只会让人反复琢磨为什么,而这个"为什么"和她要做的事
+ * 毫无关系——她的新片子全都支持。
+ */
+function ReopenButton () {
+  const project = useProjects((s) => s.current())
+  const masterReady = usePipeline((s) => s.film?.masterReady === true)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  if (!project) return null
+  /*
+   * ⚠️【判据要能扛住"后端还没更新"】。写成 `=== null` 踩过一次:前端先上线、
+   * 后端还是旧进程时,接口里【根本没有这个字段】,拿到的是 undefined,
+   * `undefined === null` 为假 → 按钮在所有老片子上全都冒出来,
+   * 而那正是用户明确要求不能出现的。
+   * 只认"是个正数"这一种情况,其余(null / undefined / 0)一律不显示。
+   */
+  const boundary = project.headBoundaryMs
+  if (typeof boundary !== 'number' || !(boundary > 0)) return null
+  /*
+   * 【还没有成片就不出现】。片子都没烧出来,"重选"无从谈起——第一次挑开头
+   * 走的是配音完成后那道闸,不是这个按钮。
+   */
+  if (!masterReady) return null
+
+  async function go (): Promise<void> {
+    if (!project) return
+    setBusy(true)
+    setError(null)
+    try {
+      /*
+       * ⚠️【必须先 hold】。挑选界面只认 openingState === 'pending' 的项目;
+       * 这条片子早就 settled 了,不打回去的话挑选界面拿到一个空清单,
+       * 直接白屏。hold 是幂等的。
+       */
+      await api.post(`/api/projects/${project.id}/opening/hold`, {})
+      await useProjects.getState().load()      // 让挑选界面读到刚变成 pending 的状态
+      useNav.getState().push({ k: 'opening' })  // 栈顶不再是抽屉 → 抽屉自动收起
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : '打不开挑选界面，再试一次')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="mt-3 border-t border-line pt-3">
+      <button
+        type="button" onClick={() => void go()} disabled={busy}
+        className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-line px-3 py-2.5 text-[13px] font-bold text-ink-200 disabled:opacity-40"
+      >
+        {busy ? <IconLoader className="size-3.5 animate-spin" /> : <IconRefresh className="size-3.5" />}
+        重选开头
+      </button>
+      {/*
+        【代价写在按钮下面,不写在按钮里】。「约 2 分钟」是她按下去之前
+        就该知道的事——不写的话她会拿"重烧一条片子要十几分钟"的经验
+        来预判,然后不敢点。
+      */}
+      <p className="mt-1.5 text-center text-[11px] leading-relaxed text-ink-400">
+        {error ?? '只重做开头那一段，约 2 分钟。后面的画面和字幕原样不动。'}
+      </p>
+    </div>
+  )
 }
 
 /**

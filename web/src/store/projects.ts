@@ -186,6 +186,25 @@ function saveLastProjectId (id: string): void {
   try { localStorage.setItem(LAST_PROJECT_KEY, id) } catch { /* 记不住就算了 */ }
 }
 
+/**
+ * 挑开头那一屏要挑哪几个项目:主片 + 它的续集里还没敲定的那些。
+ *
+ * ⚠️【空清单要兜底成"就挑这一个"】。挑选界面拿到空数组会直接返回 null =
+ * **白屏**。而空数组太容易出现了:成片页那个「重选开头」按钮会先把项目
+ * 打回 pending 再跳过来,只要那一次 load() 慢了一拍,这里读到的就还是
+ * settled——用户看到的是一片黑,还以为 App 崩了。
+ *
+ * 兜底成"就挑这一个"永远是安全的:这一屏本来就是为这个项目打开的。
+ */
+export function openingIds (
+  all: readonly Pick<Project, 'id' | 'parentProjectId' | 'openingState'>[],
+  projectId: string,
+): string[] {
+  const ids = [projectId, ...all.filter((x) => x.parentProjectId === projectId).map((x) => x.id)]
+  const pending = ids.filter((id) => all.find((x) => x.id === id)?.openingState === 'pending')
+  return pending.length > 0 ? pending : [projectId]
+}
+
 interface ProjectsState {
   items: Project[]
   currentId: string | null
