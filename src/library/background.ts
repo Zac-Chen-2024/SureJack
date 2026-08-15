@@ -134,6 +134,17 @@ export function planProjectBackground (
      * 用户要求两集开头不能一样，所以靠显式剔除，不靠随机自然分开。
      */
     excludeOpening?: readonly string[]
+    /**
+     * 【开头段必须正好这么长】，毫秒。为「重选开头」服务。
+     *
+     * 给了就不按比例算开头，也不允许缺口顺延——只有开头定长，
+     * 分界才固定，后半段才能在重选时原样复用。
+     *
+     * ⚠️【不给就完全走老逻辑】。这是给老项目的隔离：它们的排布、因而母带
+     * 指纹，必须逐字节不变，否则开机补合会把它们全部重烧。
+     * 判据是 project.headBoundaryMs 是不是 null，见 db/user-db.ts 那一列。
+     */
+    headBoundaryMs?: number | null
   } = {},
 ): BackgroundPlan {
   if (ttsDurationMs === null || ttsDurationMs <= 0) return { segments: [], totalMs: 0 }
@@ -148,6 +159,17 @@ export function planProjectBackground (
    * 防止任何新的小数来源再把整条背景排布打成 500。
    */
   const totalMs = Math.round(ttsDurationMs)
+
+  /*
+   * 边界只在【合法】时才传下去：null（老项目）、0、或者大到超过全片，
+   * 都当作"没有边界"走老逻辑。宁可退回老行为，也不能让一条不合理的边界
+   * 把排布搞成一团糟——它是从字幕算出来的，理论上不会越界，
+   * 但这一层不该建立在"上游一定对"的假设上。
+   */
+  const hb = opts.headBoundaryMs
+  const planOpts = (typeof hb === 'number' && Number.isInteger(hb) && hb > 0 && hb < totalMs)
+    ? { openingMs: hb }
+    : {}
 
   const rand = rng(seedFrom(projectId))
   // 三个桶依次用同一条随机流打乱：流是确定的，所以整体仍然可复现
@@ -183,8 +205,8 @@ export function planProjectBackground (
   // 素材库为空时 planBackground 会抛错——那是"库还没扫过"，
   // 和"配音没好"是两回事，不能都压成空排布，否则运维看不出该去扫库
   const plan = opts.sequel
-    ? planBackground(totalMs, { opening, regular, parkour }, [1, 0, 0])
-    : planBackground(totalMs, { opening, regular, parkour })
+    ? planBackground(totalMs, { opening, regular, parkour }, [1, 0, 0], planOpts)
+    : planBackground(totalMs, { opening, regular, parkour }, undefined, planOpts)
 
   return {
     totalMs: plan.totalMs,

@@ -106,6 +106,14 @@ export interface Project {
   /** 配音状态。设计文档第 6 节：改文案后置为 stale，提示需重新生成 */
   ttsState: 'none' | 'generating' | 'ready' | 'stale' | 'error'
   ttsDurationMs: number | null
+  /**
+   * 开头段在哪一毫秒结束。配音完成那一刻按字幕句末算好写死，之后永不改。
+   *
+   * **null = 这条片子的开头不定长**（老项目、还没配音、或自备字幕那条路）——
+   * 开头长度跟着挑的素材走，挑不满就顺延给下一段，也不支持重选开头。
+   * 有值 = 开头必须【正好】铺满到这里，挑不够后端会拒绝确认。
+   */
+  headBoundaryMs: number | null
   /** 选中的素材库 BGM 的 id。null = 不要背景音乐，是个有意义的值 */
   bgmLibraryId: string | null
   /** 背景音乐相对配音的音量，0..1。后端一直在用，默认 0.1 */

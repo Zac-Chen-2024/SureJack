@@ -55,6 +55,7 @@ export function OpeningPicker ({ ids, onDone, onBack }: {
       name: p?.name ?? '',
       ttsState: p?.ttsState ?? 'none',
       ttsDurationMs: p?.ttsDurationMs ?? null,
+      headBoundaryMs: p?.headBoundaryMs ?? null,
       isSequel: at > 0,
     }
   })
@@ -141,9 +142,19 @@ export function OpeningPicker ({ ids, onDone, onBack }: {
    * 挑几段用几段，剩下的时长自然落给跑酷。
    */
   const durationKnown = (current?.ttsDurationMs ?? 0) > 0
+  /*
+   * 【定长开头】：配音一完成，后端就按字幕句末把开头的边界算死了。有这个数
+   * 就以它为准，不再自己按 27% 估——两边各估各的必然对不上，而对不上的
+   * 后果是"界面说铺满了，后端说还差 3 秒"。
+   *
+   * ⚠️ 定长的开头【必须铺满才能确认】，和老项目"不补满也行、剩下自动接"
+   * 是两套规矩。差别在于开头定长，分界才固定，重选开头才只需重烧那一段。
+   */
+  const fixedMs = current?.headBoundaryMs ?? null
+  const fixed = !(current?.isSequel ?? true) && fixedMs !== null && fixedMs > 0
   const targetMs = current === undefined || current.isSequel
     ? 0
-    : Math.round((current.ttsDurationMs ?? 0) * OPENING_RATIO)
+    : fixed ? fixedMs! : Math.round((current.ttsDurationMs ?? 0) * OPENING_RATIO)
 
   /** 逐段累加，算出每一段的下场：整段用、被截短、还是根本用不上 */
   function fateOf (ids: string[], limitMs: number): Array<{ id: string; full: number; take: number }> {
@@ -279,7 +290,9 @@ export function OpeningPicker ({ ids, onDone, onBack }: {
           </p>
         )}
         {!current.isSequel && durationKnown && pickedMs < targetMs && pick.length > 0 && (
-          <p className="mt-1 text-[11px] text-ink-400">还差 {fmt(targetMs - pickedMs)}，不补满也行，剩下的自动接。</p>
+          fixed
+            ? <p className="mt-1 text-[11px] text-accent">还差 {fmt(targetMs - pickedMs)}，铺满才能开始。</p>
+            : <p className="mt-1 text-[11px] text-ink-400">还差 {fmt(targetMs - pickedMs)}，不补满也行，剩下的自动接。</p>
         )}
         {/* 铺满之后就不让再加了，所以这里只可能是"最后那段被截短"这一种情况 */}
         {!current.isSequel && durationKnown && pickedMs >= targetMs && (
@@ -356,7 +369,8 @@ export function OpeningPicker ({ ids, onDone, onBack }: {
           用默认素材
         </button>
         <button
-          type="button" onClick={() => void settle(true)} disabled={busy || pick.length === 0}
+          type="button" onClick={() => void settle(true)}
+          disabled={busy || pick.length === 0 || (fixed && pickedMs < targetMs)}
           className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-accent px-3 py-3 text-sm font-extrabold text-ink-950 disabled:opacity-40"
         >
           {busy ? <IconLoader className="size-4 animate-spin" /> : <IconCheck className="size-4" strokeWidth={2.6} />}

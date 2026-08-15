@@ -13,6 +13,8 @@ import { isAllowedVoice, clampRate, clampVolume, clampPitch } from './voices.js'
 import { normalizeScript } from '../importers/sanitize.js'
 import { enqueueFilm, type FilmDeps } from '../compose/film.js'
 import { overlongRuns } from '../subtitles/segment.js'
+import { headBoundary } from '../subtitles/head-boundary.js'
+import { deriveSubtitleLines } from '../subtitles/project-ass.js'
 import type { WordTiming } from '../types.js'
 import { planCuts, SUBTITLE_CUT_MAX } from '../subtitles/cut-ai.js'
 import { ensureAudioStats } from '../audio/routes.js'
@@ -176,6 +178,8 @@ export function registerTtsRoutes (app: FastifyInstance, deps: Deps): void {
          * 等他挑完还得重烧一遍——白烧十几分钟，他还会先看到一条不是自己
          * 挑的片子。挑完（或按了「用默认素材」）由那个接口负责排。
          */
+        // ⚠️ 顺序要紧：边界必须在合成入队【之前】落库，排布要用它
+        settleHeadBoundary(name, whitelist, req.params.id)
         planSubtitleCuts(name, whitelist, req.params.id, req.log)
         // 【预加载】配音一好就把波形和响度量出来，用户点进音频那一屏时数据已经在了
         void ensureAudioStats(name, whitelist, req.params.id, deps.libraryDataDir)
@@ -244,6 +248,47 @@ export function registerTtsRoutes (app: FastifyInstance, deps: Deps): void {
  * ⚠️【失败不能影响配音】：这一步只让字幕更好看，算不出来就退回机械切法。
  * 所以整段包在 try 里，也不 await——配音接口不该为它多等十几秒。
  */
+/**
+ * 【配音一完成就把开头段的边界算好写死】。
+ *
+ * 为「重选开头」服务：只要这个分界永远落在同一时刻，后半段就能原样复用，
+ * 用户重选开头时只重烧那一两分钟，而不是整条 14 分钟。
+ *
+ * ⚠️【必须在这一刻算，而且只算这一次】。词级时间戳是配音的产物，
+ * 在这一刻定死、之后永不改变——边界锚在它上面才是不可动摇的。
+ * 换成"每次现算"的话，比例常数以后一调，老项目的边界就跟着漂，
+ * 盘上那份后半段立刻对不上新时间轴。
+ *
+ * ⚠️【同步做，不能异步】。它必须在合成入队【之前】写进库：排布要用它来
+ * 定开头段长度，晚一步的话这一次烧的就是没有定长开头的版本，
+ * 而用户看到的却是"支持重选开头"。
+ *
+ * 算不出来（字幕太少、末尾大段静音）就留 null——那只意味着这条片子
+ * 不支持重选开头，不该让它连烧都烧不了。
+ *
+ * ── 为什么可以先于语义切分算 ──────────────────────────────────────
+ * 这一刻断点还没落库，拿到的是逗号切出来的原始句。之后 planSubtitleCuts
+ * 会把超过 14 字的句子【在句子内部】再切开——切出来的最后一片仍然结束在
+ * 原来那一句的句尾。所以边界永远还是某一句的句尾，句末对齐不会被破坏。
+ * （代价只是切分之后可能出现一个更早的句尾也 ≥ 目标，于是开头比"最紧"的
+ * 那个选择长零点几秒——无所谓，反正取的就是大的那一边。）
+ */
+function settleHeadBoundary (userName: string, whitelist: string[], projectId: string): void {
+  try {
+    const db = openUserDb(userName, whitelist)
+    try {
+      const project = db.getProject(projectId)
+      if (!project) return
+      // 自备 SRT 那条路没有"开头桶"的概念，不支持重选开头
+      if (project.subtitleMode === 'line') return
+      if (project.headBoundaryMs !== null) return   // 已经定过，终身不改
+      const b = headBoundary(deriveSubtitleLines(project), project.ttsDurationMs ?? 0)
+      if (b === null) return
+      db.updateProject(projectId, { headBoundaryMs: b.endMs })
+    } finally { db.close() }
+  } catch { /* 算不出边界不该影响配音本身已经成功这件事 */ }
+}
+
 function planSubtitleCuts (userName: string, whitelist: string[], projectId: string, log: {
   info: (o: object, m: string) => void
   warn: (o: object, m: string) => void
@@ -324,6 +369,7 @@ async function synthesizeProject (
         wordTimingsJson: JSON.stringify(result.words),
       })
     })
+    settleHeadBoundary(userName, whitelist, projectId)
     planSubtitleCuts(userName, whitelist, projectId, console as never)
     void ensureAudioStats(userName, whitelist, projectId, deps.libraryDataDir)
       .catch(() => { /* 同上 */ })

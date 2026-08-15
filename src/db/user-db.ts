@@ -209,6 +209,26 @@ export interface Project {
   renameState: 'none' | 'analyzing' | 'proposed' | 'confirmed'
   renameAnalysisJson: string | null
   renameMapJson: string | null
+  /**
+   * 【开头段的边界】，毫秒。**配音完成那一刻算好写死，之后永不改。**
+   *
+   * 为「重选开头」服务：只要这个分界永远落在同一时刻，后半段就能原样复用，
+   * 重选开头时只重烧那一两分钟，而不是整条 14 分钟。
+   *
+   * ⚠️【null 是有意义的值，不是"还没算"】：
+   *   · null = 老项目 / 还没配音 / 算不出边界 → 走原来的排布逻辑，
+   *            **不支持重选开头**
+   *   · 有值 = 开头桶必须正好铺满到这里，不允许缺口顺延
+   *
+   * 这个区分就是【隔离】本身：改填充规则会让排布变、母带指纹跟着变，
+   * 老项目会被开机补合全部重烧。靠这一列把新旧两套逻辑分开，老项目
+   * 逐字节不变。和"字幕上限 17→14 用 LEGACY_SUBTITLE_MAX_CHARS 隔离"
+   * 是同一个套路。
+   *
+   * ⚠️【必须落库，不能每次现算】。比例常数以后可能会调，现算的话老项目的
+   * 边界会跟着漂，盘上那份后半段就对不上新时间轴了。一次算定，终身有效。
+   */
+  headBoundaryMs: number | null
   createdAt: string
   updatedAt: string
 }
@@ -246,6 +266,7 @@ export interface UserDb {
     renameState?: 'none' | 'analyzing' | 'proposed' | 'confirmed'
     renameAnalysisJson?: string | null
     renameMapJson?: string | null
+    headBoundaryMs?: number | null
   }): Project | null
   deleteProject (id: string): boolean
   addAsset (input: {
@@ -303,6 +324,7 @@ interface Row {
   rename_state: string | null
   rename_analysis_json: string | null
   rename_map_json: string | null
+  head_boundary_ms: number | null
   created_at: string; updated_at: string
 }
 const toProject = (r: Row): Project => ({
@@ -340,6 +362,8 @@ const toProject = (r: Row): Project => ({
   renameState: (r.rename_state ?? 'none') as 'none' | 'analyzing' | 'proposed' | 'confirmed',
   renameAnalysisJson: r.rename_analysis_json ?? null,
   renameMapJson: r.rename_map_json ?? null,
+  // 老行没有这列 → null：走原排布逻辑，不支持重选开头
+  headBoundaryMs: r.head_boundary_ms ?? null,
   createdAt: r.created_at, updatedAt: r.updated_at,
 })
 
@@ -408,6 +432,7 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
       rename_state TEXT NOT NULL DEFAULT 'none',
       rename_analysis_json TEXT,
       rename_map_json TEXT,
+      head_boundary_ms INTEGER,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -510,6 +535,12 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
   addCol('rename_state', "rename_state TEXT NOT NULL DEFAULT 'none'")
   addCol('rename_analysis_json', 'rename_analysis_json TEXT')
   addCol('rename_map_json', 'rename_map_json TEXT')
+  /*
+   * ⚠️【可空，且【不给】默认值】。老项目补出来就是 NULL，正好落在
+   * "走原逻辑、不支持重选开头"那一档——这就是隔离本身。
+   * 给了默认值的话所有老项目会当场变成"支持"，排布跟着变，全部重烧。
+   */
+  addCol('head_boundary_ms', 'head_boundary_ms INTEGER')
 
   return {
     raw: db,
@@ -567,12 +598,13 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
         // 新项目默认走文本(karaoke)，改名默认开；自备路 adopt 时会关掉/不适用
         renameEnabled: true, renameState: 'none',
         renameAnalysisJson: null, renameMapJson: null,
+        headBoundaryMs: null,   // 配音完成那一刻才算得出来
         createdAt: now, updatedAt: now,
       }
       db.prepare(
         `INSERT INTO projects
-          (id, name, script_text, aspect_ratio, tts_state, tts_duration_ms, word_timings_json, bgm_volume, subtitle_mode, bgm_library_id, subtitle_margin_v, subtitle_font_size, cover_title, watermark_text, opening_pick_json, opening_state, subtitle_cuts_json, split_draft_json, voice_gain, audio_stats_json, voice_draft_json, touched_at, archived_at, downloaded_at, in_video_title, parent_project_id, episode_index, voice_name, voice_rate, voice_volume, voice_pitch, rename_enabled, rename_state, rename_analysis_json, rename_map_json, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          (id, name, script_text, aspect_ratio, tts_state, tts_duration_ms, word_timings_json, bgm_volume, subtitle_mode, bgm_library_id, subtitle_margin_v, subtitle_font_size, cover_title, watermark_text, opening_pick_json, opening_state, subtitle_cuts_json, split_draft_json, voice_gain, audio_stats_json, voice_draft_json, touched_at, archived_at, downloaded_at, in_video_title, parent_project_id, episode_index, voice_name, voice_rate, voice_volume, voice_pitch, rename_enabled, rename_state, rename_analysis_json, rename_map_json, head_boundary_ms, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         project.id, project.name, project.scriptText, project.aspectRatio,
         project.ttsState, project.ttsDurationMs, project.wordTimingsJson,
@@ -584,7 +616,7 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
         project.touchedAt, project.archivedAt, project.downloadedAt, project.inVideoTitle, project.parentProjectId, project.episodeIndex,
         project.voiceName, project.voiceRate, project.voiceVolume, project.voicePitch,
         project.renameEnabled ? 1 : 0, project.renameState,
-        project.renameAnalysisJson, project.renameMapJson,
+        project.renameAnalysisJson, project.renameMapJson, project.headBoundaryMs,
         now, now,
       )
       return project
@@ -607,6 +639,7 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
           touched_at = ?, archived_at = ?, downloaded_at = ?, in_video_title = ?, parent_project_id = ?, episode_index = ?,
           voice_name = ?, voice_rate = ?, voice_volume = ?, voice_pitch = ?,
           rename_enabled = ?, rename_state = ?, rename_analysis_json = ?, rename_map_json = ?,
+          head_boundary_ms = ?,
           updated_at = ?
           WHERE id = ?`
       ).run(
@@ -653,6 +686,8 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
         // null 是有意义的值（清空分析/映射）→ 判 undefined 而非 ??
         patch.renameAnalysisJson !== undefined ? patch.renameAnalysisJson : row.rename_analysis_json,
         patch.renameMapJson !== undefined ? patch.renameMapJson : row.rename_map_json,
+        // null 是有意义的值（"不支持重选开头"）→ 判 undefined 而非 ??
+        patch.headBoundaryMs !== undefined ? patch.headBoundaryMs : row.head_boundary_ms,
         now, id,
       )
       const updated = db.prepare('SELECT * FROM projects WHERE id = ?').get(id) as Row

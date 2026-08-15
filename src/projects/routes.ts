@@ -53,6 +53,7 @@ export function registerProjectRoutes (app: FastifyInstance, deps: Deps): void {
     if (picked.length > 0) return picked
     return openingIdsOf(planProjectBackground(lib, p.id, p.ttsDurationMs, {
       sequel: p.parentProjectId !== null,
+      headBoundaryMs: p.headBoundaryMs,
     }))
   }
 
@@ -385,16 +386,54 @@ export function registerProjectRoutes (app: FastifyInstance, deps: Deps): void {
         }
 
         if (raw.length > 0) {
+          /*
+           * 【挑不够就不让确认】。开头段必须【正好】铺满到边界——分界固定，
+           * 后半段才能在重选开头时原样复用。铺不满的话老逻辑会把缺口顺延给
+           * 下一段，开头就跟着素材长短漂，那正是要根治的问题。
+           *
+           * ⚠️【不循环补齐】。同一个片子重复播，一眼就看出是凑数的。
+           * 宁可挡在这里，把还差多少秒说清楚，让作者接着挑。
+           */
+          const need = project.headBoundaryMs
+          if (need !== null && need > 0) {
+            const dur = new Map(listBucket(lib, OPENING_BUCKET).map((it) => [it.id, it.durationMs]))
+            const have = raw.reduce((sum, id) => sum + (dur.get(id) ?? 0), 0)
+            if (have < need) {
+              const short = Math.ceil((need - have) / 1000)
+              return reply.code(400).send({
+                error: `开头还差 ${short} 秒，请再多挑几段（需要 ${Math.ceil(need / 1000)} 秒）`,
+                shortBySec: short,
+                needMs: need,
+              })
+            }
+          }
           pick = raw
         } else {
           // 「用默认素材」：把现算的默认排布物化下来
           const parentPick = project.parentProjectId === null
             ? []
             : openingOf(lib, name, project.parentProjectId)
-          pick = openingIdsOf(planProjectBackground(lib, project.id, project.ttsDurationMs, {
+          /*
+           * 【默认清单也要铺满边界】，否则"用默认素材"物化出来的那几段
+           * 加起来不到边界，下一次照这份清单排布就直接抛错——用户会卡在
+           * 一条自己没挑过的片子上出不去。
+           *
+           * 万一整个开头桶加起来都不够长（68 段、理论上才可能），退回原来的
+           * 顺延逻辑并记日志：这条片子不定长、不支持重选开头，但至少能烧出来。
+           */
+          const defOpts = {
             sequel: project.parentProjectId !== null,
             excludeOpening: parentPick,
-          }))
+          }
+          try {
+            pick = openingIdsOf(planProjectBackground(
+              lib, project.id, project.ttsDurationMs,
+              { ...defOpts, headBoundaryMs: project.headBoundaryMs },
+            ))
+          } catch (e: unknown) {
+            req.log.warn({ err: e, projectId: project.id }, '开头桶铺不满边界，默认排布退回顺延逻辑')
+            pick = openingIdsOf(planProjectBackground(lib, project.id, project.ttsDurationMs, defOpts))
+          }
         }
       } finally {
         lib.close()
@@ -436,6 +475,13 @@ export function registerProjectRoutes (app: FastifyInstance, deps: Deps): void {
             sequel: project.parentProjectId !== null,
             // 挑过的按挑的铺；没挑过（老项目）是空数组 → 走原来的洗牌，指纹不变
             openingPick: parseOpeningPick(project.openingPickJson),
+            /*
+             * 【三个产出排布的地方必须传同一个边界】：烧录、预拼、预览接口。
+             * 漏掉任何一个，那一处算出的排布就和别处不同——预览里看到的
+             * 和烧出来的不是同一条片子，而这种错极难排查。
+             * 老项目这一列是 null，三处一致地走老逻辑。
+             */
+            headBoundaryMs: project.headBoundaryMs,
           })
       } finally {
         lib.close()

@@ -128,6 +128,13 @@ function currentPlan (
             sequel: project.parentProjectId !== null,
             // 挑过的按挑的铺；没挑过（老项目）是空数组 → 走原来的洗牌，指纹不变
             openingPick: parseOpeningPick(project.openingPickJson),
+            /*
+             * 【三个产出排布的地方必须传同一个边界】：烧录、预拼、预览接口。
+             * 漏掉任何一个，那一处算出的排布就和别处不同——预览里看到的
+             * 和烧出来的不是同一条片子，而这种错极难排查。
+             * 老项目这一列是 null，三处一致地走老逻辑。
+             */
+            headBoundaryMs: project.headBoundaryMs,
           })
     if (plan.segments.length === 0) return null
     return { segments: plan.segments, fingerprint: planFingerprint(plan.segments, aspect), aspect }

@@ -119,10 +119,27 @@ function fillByLooping (pool: readonly LibraryItem[], needMs: number): Segment[]
  * @param buckets 三个视频桶，每个桶内按想要的播放顺序排列。
  * @param ratio 三段占比，默认 27/27/46。
  */
+export interface PlanOptions {
+  /**
+   * 【开头段必须正好这么长】。给了就不按比例算开头，也不允许缺口顺延。
+   *
+   * 为「重选开头」服务：只要开头和后半段的分界永远落在同一时刻，
+   * 后半段就能原样复用，重选时只重烧开头那一两分钟。
+   * 而分界要固定，开头就必须是【定长】的——按比例算出来的那个数不是定长，
+   * 它其实是 min(比例 × 总长, 挑选素材的总时长)，换一批素材就会漂
+   * （实测同样挑 6 个，换一批从 78.0 秒变成 72.5 秒）。
+   *
+   * ⚠️【不给就完全走老逻辑】。这是给老项目的隔离：它们的排布、
+   * 因而母带指纹，必须逐字节不变，否则开机补合会把它们全部重烧。
+   */
+  openingMs?: number
+}
+
 export function planBackground (
   totalMs: number,
   buckets: Buckets,
   ratio: readonly [number, number, number] = DEFAULT_RATIO,
+  opts: PlanOptions = {},
 ): ComposePlan {
   if (!Number.isInteger(totalMs) || totalMs <= 0) {
     throw new Error(`配音时长必须是正整数毫秒，收到：${totalMs}`)
@@ -137,7 +154,25 @@ export function planBackground (
     throw new Error('素材库里没有可用的视频素材，无法排布背景轨')
   }
 
-  const targets = splitTargets(totalMs, ratio)
+  const fixedOpening = opts.openingMs
+  if (fixedOpening !== undefined
+      && (!Number.isInteger(fixedOpening) || fixedOpening <= 0 || fixedOpening >= totalMs)) {
+    throw new Error(`开头段时长必须是 0 到 ${totalMs} 之间的整数毫秒，收到：${fixedOpening}`)
+  }
+
+  /*
+   * 定长开头：开头吃掉 fixedOpening，剩下的时长【按常规和跑酷原本的比例
+   * 再分一次】。直接沿用原比例的话，两者之和不等于剩余时长，
+   * 差额会掉进最后那个 carry 里，等于把定长的意义抵消掉一部分。
+   */
+  const targets = fixedOpening === undefined
+    ? splitTargets(totalMs, ratio)
+    : (() => {
+        const rest = totalMs - fixedOpening
+        const r1 = ratio[1] + ratio[2]
+        const b = r1 > 0 ? Math.floor(rest * (ratio[1] / r1)) : 0
+        return [fixedOpening, b, rest - b] as [number, number, number]
+      })()
   const segments: Segment[] = []
 
   /*
@@ -152,6 +187,20 @@ export function planBackground (
     const r = fillFrom(items, 0, need)
     segments.push(...r.segments)
     carry = need - r.filledMs
+
+    /*
+     * 【定长开头铺不满就报错，不顺延】。顺延的话开头会变短，
+     * 分界跟着漂，后半段就复用不了了——那正是这个选项要消灭的东西。
+     *
+     * 调用方（挑开头那一屏）负责在用户确认之前就挡住"素材不够"：
+     * 界面上实时显示"已选 78 秒 / 需要 153 秒"，凑够了才让确认。
+     * 所以走到这里还不够，属于调用方失职，要明确地炸出来，
+     * 而不是默默产出一条分界漂了的片子。
+     */
+    if (phase === 0 && fixedOpening !== undefined && carry > 0) {
+      throw new Error(
+        `开头素材不够铺满 ${Math.round(fixedOpening / 1000)} 秒，还差 ${Math.round(carry / 1000)} 秒，请多挑几段`)
+    }
   }
 
   // 三个桶加起来都不够长，只能循环（规则 5）
