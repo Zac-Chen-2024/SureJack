@@ -33,6 +33,7 @@ import { buildBackgroundTrack } from './build.js'
 import { reusableOutput, writeStamp as writeStampFile } from './stamp.js'
 import type { ExportQueue } from '../queue/queue.js'
 import type { AspectPreset } from '../types.js'
+import { parseLayoutRatio } from './plan.js'
 
 /** 背景轨的文件名。导出和预拼落在同一个位置，谁先做完都算数。 */
 export const BG_TRACK_FILE = 'bg-track.mp4'
@@ -135,6 +136,7 @@ function currentPlan (
              * 老项目这一列是 null，三处一致地走老逻辑。
              */
             headBoundaryMs: project.headBoundaryMs,
+            layoutRatio: parseLayoutRatio(project.layoutRatioJson),
           })
     if (plan.segments.length === 0) return null
     return { segments: plan.segments, fingerprint: planFingerprint(plan.segments, aspect), aspect }

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { api } from '../../api/client'
 import { useProjects } from '../../store/projects'
 import { usePipeline } from '../../store/pipeline'
-import { IconCheck, IconChevronLeft, IconClose, IconLoader, IconPlay } from '../ui/Icon'
+import { IconCheck, IconChevronLeft, IconClose, IconLoader, IconPlay, IconRefresh } from '../ui/Icon'
 import { OpeningPreview } from './OpeningPreview'
 
 /**
@@ -151,10 +151,15 @@ export function OpeningPicker ({ ids, onDone, onBack }: {
    * 是两套规矩。差别在于开头定长，分界才固定，重选开头才只需重烧那一段。
    */
   const fixedMs = current?.headBoundaryMs ?? null
-  const fixed = !(current?.isSequel ?? true) && fixedMs !== null && fixedMs > 0
-  const targetMs = current === undefined || current.isSequel
+  /*
+   * ⚠️【续集也算定长】。它的开头段同样是铺满到分界为止（排布那边对续集
+   * 一视同仁地按 openingMs 铺），而这一屏原来给续集不显示目标——
+   * 于是他挑两段就确认，后端拿"还差 N 秒"把他挡回来，界面却没提示过。
+   */
+  const fixed = fixedMs !== null && fixedMs > 0
+  const targetMs = current === undefined
     ? 0
-    : fixed ? fixedMs! : Math.round((current.ttsDurationMs ?? 0) * OPENING_RATIO)
+    : fixed ? fixedMs! : (current.isSequel ? 0 : Math.round((current.ttsDurationMs ?? 0) * OPENING_RATIO))
 
   /** 逐段累加，算出每一段的下场：整段用、被截短、还是根本用不上 */
   function fateOf (ids: string[], limitMs: number): Array<{ id: string; full: number; take: number }> {
@@ -180,7 +185,7 @@ export function OpeningPicker ({ ids, onDone, onBack }: {
    * 几分钟里完全没法用）。等时长到了再开始拦。
    */
   function roomLeftMs (): number {
-    if (current === undefined || current.isSequel || !durationKnown) return Number.POSITIVE_INFINITY
+    if (current === undefined || targetMs <= 0 || !durationKnown) return Number.POSITIVE_INFINITY
     return targetMs - pickedMs
   }
 
@@ -212,7 +217,31 @@ export function OpeningPicker ({ ids, onDone, onBack }: {
     setPicks({ ...picks, [current.id]: now.filter((_, k) => k !== at) })
   }
 
-  /** 敲定这一集。pick 为空 = 用默认素材（后端会把默认排布物化下来） */
+  /**
+   * 【自动】：把还差的时长补满，补出来的直接填进格子里。
+   *
+   * 一个都没挑就是整段全自动；挑了几段就在他挑的后面接着补；已经满了就
+   * 什么都不做。算法在服务端（先让超出最少、再用更少的片子），
+   * **只有一份实现**——放前端再写一遍，两边迟早漂，而漂了的症状是
+   * "界面说铺满了、烧出来最后一段被切了"，极难查。
+   */
+  async function autoFill (): Promise<void> {
+    if (!current) return
+    setBusy(true)
+    setError(null)
+    try {
+      const r = await api.post<{ pick: string[] }>(
+        `/api/projects/${current.id}/opening/autofill`, { pick })
+      setPicks({ ...picks, [current.id]: r.pick })
+      if (r.pick.length === pick.length) setTip('已经铺满了，不用再补')
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : '自动补齐没成功，再试一次')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /** 敲定这一集 */
   async function settle (usePick: boolean): Promise<void> {
     if (!current) return
     setBusy(true)
@@ -267,16 +296,16 @@ export function OpeningPicker ({ ids, onDone, onBack }: {
         <div className="flex items-baseline justify-between text-xs text-ink-300">
           {/* 显示【实际会播的】总长：最后那段被截短的话，全长和真正播的对不上 */}
           <span>已选 {pick.length} 段 · {fmt(
-            !current.isSequel && durationKnown ? Math.min(pickedMs, targetMs) : pickedMs)}</span>
-          {current.isSequel
-            ? <span className="text-ink-400">默认 5 段，之后直接进跑酷</span>
+            targetMs > 0 && durationKnown ? Math.min(pickedMs, targetMs) : pickedMs)}</span>
+          {targetMs <= 0
+            ? <span className="text-ink-400">挑几段用几段，之后直接进跑酷</span>
             : durationKnown
               ? <span className="text-ink-400">目标 {fmt(targetMs)}</span>
               : <span className="flex items-center gap-1 text-ink-400"><IconLoader className="size-3 animate-spin" />配音生成中</span>}
         </div>
         {/* 目标时长要等配音出来才算得准，没出来之前不画进度条——
             画一根按空值算的条，等于给用户一个错的额度 */}
-        {!current.isSequel && durationKnown && (
+        {targetMs > 0 && durationKnown && (
           <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-ink-800">
             <div
               className="h-full rounded-full bg-accent transition-[width] duration-200"
@@ -284,18 +313,18 @@ export function OpeningPicker ({ ids, onDone, onBack }: {
             />
           </div>
         )}
-        {!current.isSequel && !durationKnown && (
+        {targetMs > 0 && !durationKnown && (
           <p className="mt-1 text-[11px] text-ink-400">
             开头要铺多长是按配音总长算的（27%）。配音还在生成，先挑着，算好了这儿会显示目标。
           </p>
         )}
-        {!current.isSequel && durationKnown && pickedMs < targetMs && pick.length > 0 && (
+        {targetMs > 0 && durationKnown && pickedMs < targetMs && pick.length > 0 && (
           fixed
             ? <p className="mt-1 text-[11px] text-accent">还差 {fmt(targetMs - pickedMs)}，铺满才能开始。</p>
             : <p className="mt-1 text-[11px] text-ink-400">还差 {fmt(targetMs - pickedMs)}，不补满也行，剩下的自动接。</p>
         )}
         {/* 铺满之后就不让再加了，所以这里只可能是"最后那段被截短"这一种情况 */}
-        {!current.isSequel && durationKnown && pickedMs >= targetMs && (
+        {targetMs > 0 && durationKnown && pickedMs >= targetMs && (
           <p className="mt-1 text-[11px] text-accent">开头铺满了。最后那段会截到正好接上，多的部分不播。</p>
         )}
       </div>
@@ -303,7 +332,7 @@ export function OpeningPicker ({ ids, onDone, onBack }: {
       {/* 已选的一排：顺序就是播放顺序 */}
       {pick.length > 0 && (
         <div className="flex gap-1.5 overflow-x-auto px-4 pb-2">
-          {fateOf(pick, current.isSequel ? 0 : targetMs).map((f, at) => {
+          {fateOf(pick, targetMs).map((f, at) => {
             const unused = f.take === 0
             const cut = f.take > 0 && f.take < f.full
             return (
@@ -362,11 +391,18 @@ export function OpeningPicker ({ ids, onDone, onBack }: {
         className="flex gap-2 border-t border-line bg-ink-900 px-4 pb-[env(safe-area-inset-bottom,0px)] pt-3"
         style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 12px)' }}
       >
+        {/*
+          【「自动」取代了原来的「用默认素材」】。老按钮是"我不挑了，你看着办"，
+          而现在的规矩是**必须挑够**——自动只是帮他把剩下的补上，
+          补完他还能接着改。一个都没挑时按它，就等于原来的"用默认"。
+        */}
         <button
-          type="button" onClick={() => void settle(false)} disabled={busy}
-          className="flex-1 rounded-xl border border-line px-3 py-3 text-sm font-bold text-ink-300 disabled:opacity-40"
+          type="button" onClick={() => void autoFill()}
+          disabled={busy || !durationKnown || (fixed && pickedMs >= targetMs)}
+          className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-line px-3 py-3 text-sm font-bold text-ink-300 disabled:opacity-40"
         >
-          用默认素材
+          {busy ? <IconLoader className="size-4 animate-spin" /> : <IconRefresh className="size-4" />}
+          自动
         </button>
         <button
           type="button" onClick={() => void settle(true)}

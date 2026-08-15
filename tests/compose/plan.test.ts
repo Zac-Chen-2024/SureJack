@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   planBackground,
-  DEFAULT_RATIO,
+  DEFAULT_RATIO, LEGACY_LAYOUT_RATIO,
   type Segment,
   type LibraryItem,
 } from '../../src/compose/plan.js'
@@ -42,7 +42,17 @@ describe('planBackground', () => {
   })
 
   it('默认比例是 27/27/46', () => {
-    expect([...DEFAULT_RATIO]).toEqual([0.27, 0.27, 0.46])
+    expect([...DEFAULT_RATIO]).toEqual([0.15, 0.39, 0.46])
+    /*
+     * ⚠️【老项目那一组永远不能动】。layout_ratio_json 为 NULL 的片子回落到它
+     * ——也就是加"存比例"之前建的所有片子。改一个小数点，她盘上每一条片子的
+     * 排布就变了，母带指纹跟着变，开机补合会把它们全部重烧一遍。
+     */
+    expect([...LEGACY_LAYOUT_RATIO]).toEqual([0.27, 0.27, 0.46])
+    // 开头缩掉的 12 个点【全给常规】，跑酷一分不动
+    expect(DEFAULT_RATIO[2]).toBe(LEGACY_LAYOUT_RATIO[2])
+    expect(DEFAULT_RATIO[0] + DEFAULT_RATIO[1])
+      .toBeCloseTo(LEGACY_LAYOUT_RATIO[0] + LEGACY_LAYOUT_RATIO[1], 10)
   })
 
   it('11 分钟配音里地铁跑酷占最大一段', () => {
@@ -55,8 +65,8 @@ describe('planBackground', () => {
   it('素材够时，开头段接近目标比例', () => {
     const opening = sumMs(planBackground(660000, rich).segments
       .filter((s) => s.itemId.startsWith('o')))
-    expect(opening).toBeGreaterThan(660000 * 0.27 - 30000)
-    expect(opening).toBeLessThan(660000 * 0.27 + 30000)
+    expect(opening).toBeGreaterThan(660000 * DEFAULT_RATIO[0] - 30000)
+    expect(opening).toBeLessThan(660000 * DEFAULT_RATIO[0] + 30000)
   })
 
   it('不循环重复：素材够时同一片不出现两次', () => {
@@ -143,10 +153,10 @@ describe('planBackground 的边界情况', () => {
       parkour: [item('p1', 3600000)],
     })
     expect(sumMs(p.segments)).toBe(1000)
-    // 1000ms × 0.27 = 270 / 270 / 460
+    // 1000ms × 15/39/46
     expect(p.segments).toEqual([
-      { itemId: 'o1', startMs: 0, takeMs: 270 },
-      { itemId: 'r1', startMs: 0, takeMs: 270 },
+      { itemId: 'o1', startMs: 0, takeMs: 150 },
+      { itemId: 'r1', startMs: 0, takeMs: 390 },
       { itemId: 'p1', startMs: 0, takeMs: 460 },
     ])
   })

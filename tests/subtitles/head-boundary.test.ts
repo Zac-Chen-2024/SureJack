@@ -114,12 +114,20 @@ describe('算不出来时返回 null，绝不抛', () => {
 })
 
 describe('默认比例', () => {
-  it('是 27%，和排布的开头桶比例一致但【互相独立】', () => {
-    expect(HEAD_TARGET_RATIO).toBe(0.27)
+  /*
+   * 15%（2026-08-15 从 27% 调下来）。和排布的 DEFAULT_RATIO[0] 是同一个数，
+   * 但【互相独立】——排布的比例以后可能因为素材结构再调，而边界一旦定了
+   * 就再也不能动（动了后半段就复用不了）。
+   *
+   * ⚠️ 改这个数只影响以后新建的项目：每条片子的分界在配音完成那一刻
+   * 算好写进 head_boundary_ms，之后一辈子用自己那一个。
+   */
+  it('是 15%', () => {
+    expect(HEAD_TARGET_RATIO).toBe(0.15)
   })
 
   it('不传比例时就用它', () => {
     const lines = evenLines(100)
-    expect(headBoundary(lines, 100_000)).toEqual(headBoundary(lines, 100_000, 0.27))
+    expect(headBoundary(lines, 100_000)).toEqual(headBoundary(lines, 100_000, HEAD_TARGET_RATIO))
   })
 })

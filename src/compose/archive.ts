@@ -122,16 +122,51 @@ export async function sweepArchive (
     const db = openUserDb(user, whitelist)
     let rows
     try { rows = db.listProjects() } finally { db.close() }
+    /*
+     * rows 是【开始扫之前】的一份快照，而下面会一边扫一边归档（主片带着
+     * 续集一起收）。不记一笔的话，轮到那条续集自己时快照里它还是"没归档"，
+     * 于是又收一遍——第二遍没东西可删，但会把 archivedAt 覆盖成新时间，
+     * 归档时长就从头算起了。
+     */
+    const done = new Set<string>()
+
+    /** 收一条。没东西可收就返回 false（母带都不在了，说明本来就是收着的） */
+    const take = async (id: string, name: string): Promise<boolean> => {
+      if (done.has(id)) return false
+      const dir = assetDir(user, whitelist, id)
+      if (!existsSync(join(dir, FILM_MASTER_FILE))) return false
+      done.add(id)
+      const freed = await archiveProject(user, whitelist, id)
+      out.push({ projectId: id, name, freedBytes: freed })
+      return true
+    }
+
     for (const p of rows) {
+      if (done.has(p.id)) continue
       if (p.archivedAt !== '') continue                  // 已经收起来了
       if (p.downloadedAt === '') continue                // 没下载过 = 还没定稿
       const touched = Date.parse(p.touchedAt || p.updatedAt)
       if (!Number.isFinite(touched)) continue
       if (now - touched < ARCHIVE_AFTER_MS) continue
-      const dir = assetDir(user, whitelist, p.id)
-      if (!existsSync(join(dir, FILM_MASTER_FILE))) continue   // 没东西可收
-      const freed = await archiveProject(user, whitelist, p.id)
-      out.push({ projectId: p.id, name: p.name, freedBytes: freed })
+      if (!await take(p.id, p.name)) continue
+
+      /*
+       * 【续集跟着主片一起收】——**不问它自己下载过没有**。
+       *
+       * 用户明确选了这条：续集通常一两分钟，复原很快，而"主片收了、续集
+       * 还摊着"会让同一部戏的两半在盘上长期不同步。
+       *
+       * ⚠️【这一条盖掉了"没下载的文件就一直留着"】。那条规矩是为正片定的：
+       * 正片还没下载 = 用户还在打磨，收走等于帮倒忙。续集不一样——它跟着
+       * 主片走，主片都定稿两小时没动了，续集独自留在盘上没有意义。
+       *
+       * ⚠️【收的是文件，不是数据】。库里一个字段都没删，复原就是重烧一遍
+       * 画面。而且**复原是各复原各的**：点主片只回主片，续集要单独点。
+       */
+      for (const kid of rows) {
+        if (kid.parentProjectId !== p.id) continue
+        await take(kid.id, kid.name)
+      }
     }
   }
   return out

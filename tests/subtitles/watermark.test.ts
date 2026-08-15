@@ -26,9 +26,24 @@ describe('水印的位置轮转', () => {
       .toEqual(['左上', '右中', '左下', '右上', '左中', '右下'])
   })
 
-  it('时间节点是 0 / 1分半 / 3分 / 6分 / 9分 / 12分', () => {
-    expect(watermarkSegments(13 * 60_000).map((s) => s.startMs))
-      .toEqual([0, 90_000, 180_000, 360_000, 540_000, 720_000])
+  /*
+   * 【六段等长，1 分半一跳】。原来后三段是 3 分钟一跳（6/9/12 分），
+   * 结果第 3 到第 9 分钟水印一个角都不沾——全程在画面中间斜着游走。
+   * 用户报"七分半的水印没有了"就是这么来的：它在画面正中，往角上找不到。
+   */
+  it('时间节点是 0 / 1:30 / 3:00 / 4:30 / 6:00 / 7:30', () => {
+    expect(watermarkSegments(9 * 60_000).map((s) => s.startMs))
+      .toEqual([0, 90_000, 180_000, 270_000, 360_000, 450_000])
+  })
+
+  it('每一段都正好 1 分半', () => {
+    for (const s of watermarkSegments(9 * 60_000)) expect(s.legMs).toBe(90_000)
+  })
+
+  /* 用户点名的那一刻：7:30 必须【落在角上】，不能在半路 */
+  it('7:30 正好在右下角上', () => {
+    const s = watermarkSegments(13 * 60_000).find((x) => x.startMs === 450_000)!
+    expect(s.from.name).toBe('右下')
   })
 
   /**
@@ -116,7 +131,7 @@ describe('水印进 ASS', () => {
   it('最后一段被片尾截断，速度不变（\\move 时长仍是整段）', () => {
     const ass = buildAss({ ...BASE, durationMs: 200_000, watermark: '周周' })
     const last = ass.split('\n').filter((l) => l.includes(',Watermark,,')).at(-1)!
-    expect(last).toContain(',0,180000)}')      // 第三段（3分→6分）本该走 180 秒
+    expect(last).toContain(',0,90000)}')       // 第三段（3:00→4:30）本该走 90 秒
     expect(last).toContain('0:03:20.00,')      // 但只画到 3:20（片尾）
   })
 

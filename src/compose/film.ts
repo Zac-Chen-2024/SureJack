@@ -59,6 +59,7 @@ import { splitFingerprints, type SplitFingerprints } from './split-fp.js'
 import { planHeadSwap, swapHead } from './reopen.js'
 import type { AspectPreset, Clip } from '../types.js'
 import { isLegacyParams, type VoiceParams } from '../tts/voices.js'
+import { parseLayoutRatio } from './plan.js'
 
 /** 成片文件名。手动导出和后台自动合成落在同一个位置，谁先做完都算数。 */
 export const FILM_FILE = 'export.mp4'
@@ -337,6 +338,7 @@ export function resolveFilm (
              * 老项目这一列是 null，三处一致地走老逻辑。
              */
             headBoundaryMs: project.headBoundaryMs,
+            layoutRatio: parseLayoutRatio(project.layoutRatioJson),
           })
         if (plan.segments.length === 0) {
           return { ok: false, code: 'blocked', error: '算不出背景排布，请确认配音时长和素材库' }

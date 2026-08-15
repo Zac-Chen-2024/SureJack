@@ -41,11 +41,52 @@ export interface Buckets {
   parkour: readonly LibraryItem[]
 }
 
-/** 默认比例：开头 27% / 常规 27% / 地铁跑酷 46%（11 分钟 → 约 3/3/5 分钟）。 */
-export const DEFAULT_RATIO: readonly [number, number, number] = [0.27, 0.27, 0.46]
+/**
+ * 【老项目的比例】：开头 27% / 常规 27% / 跑酷 46%。
+ *
+ * ⚠️【这个数永远不能动】。它是 layout_ratio_json 为 NULL 的项目回落到的那一组
+ * ——也就是加"存比例"这件事之前建的所有片子。改一个小数点，她盘上每一条
+ * 片子的排布就变了，母带指纹跟着变，开机补合会把它们全部重烧一遍。
+ */
+export const LEGACY_LAYOUT_RATIO: readonly [number, number, number] = [0.27, 0.27, 0.46]
 
+/**
+ * 【新建项目用的比例】：开头 15% / 常规 39% / 跑酷 46%。
+ *
+ * 开头从 27% 缩到 15%（用户 2026-08-15 定的），空出来的 12 个点**全给常规**，
+ * 跑酷那 46% 一分不动。
+ *
+ * ⚠️【改这个数只影响以后新建的项目】。每条片子在配音完成那一刻把当时的
+ * 比例写进 layout_ratio_json，之后一辈子用自己那一组。
+ */
+export const DEFAULT_RATIO: readonly [number, number, number] = [0.15, 0.39, 0.46]
+
+/**
+ * 把库里存的那串 JSON 变回三元组。
+ *
+ * ⚠️【读不出来一律回落到 LEGACY_LAYOUT_RATIO,绝不抛】。这一列为 NULL 的
+ * 是加"存比例"之前建的所有片子,它们本来就该走老比例;而一串坏 JSON
+ * 也不该让用户连片子都合不出来——退回老比例最多是排布不合新口味,
+ * 抛异常是整条链路断掉。
+ */
 /** 比例之和允许的浮点误差。0.333+0.333+0.334 这类写法不该被判为非法。 */
 const RATIO_EPSILON = 1e-6
+
+export function parseLayoutRatio (json: string | null): readonly [number, number, number] {
+  if (json === null || json === '') return LEGACY_LAYOUT_RATIO
+  try {
+    const v: unknown = JSON.parse(json)
+    if (!Array.isArray(v) || v.length !== 3) return LEGACY_LAYOUT_RATIO
+    const r = v.map(Number)
+    if (r.some((x) => !Number.isFinite(x) || x < 0)) return LEGACY_LAYOUT_RATIO
+    if (Math.abs(r[0]! + r[1]! + r[2]! - 1) > RATIO_EPSILON) return LEGACY_LAYOUT_RATIO
+    return [r[0]!, r[1]!, r[2]!]
+  } catch {
+    return LEGACY_LAYOUT_RATIO
+  }
+}
+
+
 
 /**
  * 按比例把 totalMs 切成三段的目标时长。

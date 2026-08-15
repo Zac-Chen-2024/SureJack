@@ -29,15 +29,18 @@ import type { SubtitleLine } from '../types.js'
  */
 
 /**
- * 开头段占全片的目标比例。
+ * 开头段占全片的目标比例。**15%**（2026-08-15 从 27% 调下来）。
  *
- * 和 compose/plan.ts 的 DEFAULT_RATIO[0] 是同一个数(27%),但**故意不复用**:
+ * 和 compose/plan.ts 的 DEFAULT_RATIO[0] 是同一个数,但**故意不复用**:
  * 那个是"排布时三个桶怎么分",这个是"开头边界大概取在哪儿"。
- * 两者现在数值相同纯属自然——排布的比例以后可能因为素材结构调整,
+ * 数值相同纯属自然——排布的比例以后可能因为素材结构调整,
  * 而边界一旦定了就再也不能动(动了后半段就复用不了)。
  * 各自独立,改一个不牵连另一个。
+ *
+ * ⚠️【改这个数只影响以后新建的项目】。每条片子的分界在配音完成那一刻
+ * 算好写进 head_boundary_ms,之后一辈子用自己那一个。
  */
-export const HEAD_TARGET_RATIO = 0.27
+export const HEAD_TARGET_RATIO = 0.15
 
 export interface HeadBoundary {
   /** 开头包含到第几句(0 起算,含这一句) */

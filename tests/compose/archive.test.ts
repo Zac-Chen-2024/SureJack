@@ -18,10 +18,14 @@ const LIST = [USER]
 
 afterEach(async () => { await rm(userDbDir(USER, LIST), { recursive: true, force: true }) })
 
-async function seed (name: string, opts: { downloaded?: string; touched?: string } = {}): Promise<string> {
+async function seed (
+  name: string,
+  opts: { downloaded?: string; touched?: string; parent?: string } = {},
+): Promise<string> {
   const db = openUserDb(USER, LIST)
   const p = db.createProject(name)
   db.updateProject(p.id, {
+    ...(opts.parent === undefined ? {} : { parentProjectId: opts.parent, episodeIndex: 2 }),
     downloadedAt: opts.downloaded ?? '',
     touchedAt: opts.touched ?? new Date().toISOString(),
   })
@@ -112,5 +116,68 @@ describe('孤儿素材目录', () => {
     const id = await seed('活的')
     await sweepOrphanAssets(LIST)
     expect(existsSync(join(assetDir(USER, LIST, id), 'voice.mp3'))).toBe(true)
+  })
+})
+
+describe('续集跟着主片一起收', () => {
+  const long = new Date(Date.now() - ARCHIVE_AFTER_MS - 60_000).toISOString()
+
+  /*
+   * 用户定的：续集无条件随主片归档。续集通常一两分钟、复原很快，而
+   * "主片收了、续集还摊着"会让同一部戏的两半在盘上长期不同步。
+   *
+   * ⚠️ 这一条【盖掉了「没下载的文件就一直留着」】。那条规矩是为正片定的
+   * ——正片没下载 = 用户还在打磨，收走是帮倒忙。续集跟着主片走。
+   */
+  it('主片被收 → 续集哪怕没下载过也跟着收', async () => {
+    const main = await seed('主片', { downloaded: long, touched: long })
+    await seed('续集', { parent: main })          // 没下载、刚刚才动过
+
+    const r = await sweepArchive(LIST)
+    expect(r.map((x) => x.name).sort()).toEqual(['主片', '续集'])
+
+    const db = openUserDb(USER, LIST)
+    for (const p of db.listProjects()) expect(p.archivedAt).not.toBe('')
+    db.close()
+  })
+
+  /* 反过来不成立：续集自己到点了，不该把还在用的主片一起收走 */
+  it('续集被收，主片不跟着走', async () => {
+    const main = await seed('还在改的主片')
+    await seed('到点的续集', { parent: main, downloaded: long, touched: long })
+
+    const r = await sweepArchive(LIST)
+    expect(r.map((x) => x.name)).toEqual(['到点的续集'])
+
+    const db = openUserDb(USER, LIST)
+    expect(db.listProjects().find((p) => p.name === '还在改的主片')?.archivedAt).toBe('')
+    db.close()
+  })
+
+  /*
+   * ⚠️ rows 是开工前的快照，而收主片时已经把续集一起收了。不去重的话，
+   * 轮到续集自己那一行时快照里它还是"没归档"，于是又收一遍——第二遍没
+   * 东西可删，但会把 archivedAt 覆盖成新时间，归档时长从头算起。
+   */
+  it('同一条不会被收两次（续集自己也到点时）', async () => {
+    const main = await seed('主片', { downloaded: long, touched: long })
+    await seed('续集', { parent: main, downloaded: long, touched: long })
+
+    const r = await sweepArchive(LIST)
+    expect(r.map((x) => x.projectId).length).toBe(new Set(r.map((x) => x.projectId)).size)
+    expect(r.length).toBe(2)
+  })
+
+  it('已经收着的续集不会再被翻出来收一遍', async () => {
+    const main = await seed('主片', { downloaded: long, touched: long })
+    const kid = await seed('早就收了的续集', { parent: main })
+    await archiveProject(USER, LIST, kid)
+    const at = openUserDb(USER, LIST).getProject(kid)!.archivedAt
+
+    const r = await sweepArchive(LIST)
+    expect(r.map((x) => x.name)).toEqual(['主片'])
+    const db = openUserDb(USER, LIST)
+    expect(db.getProject(kid)?.archivedAt).toBe(at)   // 时间没被覆盖
+    db.close()
   })
 })

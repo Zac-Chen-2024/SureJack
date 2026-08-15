@@ -32,6 +32,7 @@ function makeProject (patch: Partial<Project> = {}): Project {
     subtitleFontSize: 64, coverTitle: '', watermarkText: '', openingPickJson: '', openingState: 'settled' as const, subtitleCutsJson: '', splitDraftJson: '', voiceGain: 1, audioStatsJson: '', voiceDraftJson: '', touchedAt: '', archivedAt: '', downloadedAt: '', inVideoTitle: '', parentProjectId: null, episodeIndex: 1, voiceName: 'zh-CN-XiaoxiaoNeural', voiceRate: 0, voiceVolume: 0, voicePitch: 0, subtitleMarginV: DEFAULT_SUBTITLE_MARGIN_V,
     renameEnabled: false, renameState: 'none',
     headBoundaryMs: null,
+  layoutRatioJson: null,
     renameAnalysisJson: null, renameMapJson: null,
     createdAt: '2026-07-19T00:00:00.000Z', updatedAt: '2026-07-19T00:00:00.000Z',
     ...patch,

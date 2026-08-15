@@ -14,6 +14,7 @@ import { normalizeScript } from '../importers/sanitize.js'
 import { enqueueFilm, type FilmDeps } from '../compose/film.js'
 import { overlongRuns } from '../subtitles/segment.js'
 import { headBoundary } from '../subtitles/head-boundary.js'
+import { DEFAULT_RATIO } from '../compose/plan.js'
 import { deriveSubtitleLines } from '../subtitles/project-ass.js'
 import type { WordTiming } from '../types.js'
 import { planCuts, SUBTITLE_CUT_MAX } from '../subtitles/cut-ai.js'
@@ -284,7 +285,16 @@ function settleHeadBoundary (userName: string, whitelist: string[], projectId: s
       if (project.headBoundaryMs !== null) return   // 已经定过，终身不改
       const b = headBoundary(deriveSubtitleLines(project), project.ttsDurationMs ?? 0)
       if (b === null) return
-      db.updateProject(projectId, { headBoundaryMs: b.endMs })
+      /*
+       * 【比例和分界一起定死】。这一列存的是"这条片子当时按什么比例排"。
+       * 不存的话，以后一调常量，她盘上每一条片子的排布就跟着变、母带指纹
+       * 变、开机补合把它们全部重烧一遍——而老片子该保持原样。
+       * 存下来之后，改常量只影响以后新建的。
+       */
+      db.updateProject(projectId, {
+        headBoundaryMs: b.endMs,
+        layoutRatioJson: JSON.stringify(DEFAULT_RATIO),
+      })
     } finally { db.close() }
   } catch { /* 算不出边界不该影响配音本身已经成功这件事 */ }
 }

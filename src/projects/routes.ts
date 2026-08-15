@@ -9,13 +9,15 @@ import { getSession, requireAuth } from '../auth/session.js'
 import { assetDir } from '../assets/storage.js'
 import { openLibraryDb } from '../library/library-db.js'
 import {
-  hasVideoMaterials, planProjectBackground, parseOpeningPick, openingIdsOf, OPENING_BUCKET,
+  hasVideoMaterials, planProjectBackground, parseOpeningPick, openingIdsOf, OPENING_BUCKET, rng, seedFrom, shuffled,
 } from '../library/background.js'
 import { listBucket } from '../library/scan.js'
 import { bgTrackInfo, type PrebuildDeps } from '../compose/prebuild.js'
 import { enqueueFilm } from '../compose/film.js'
 import { ensureAudioStats } from '../audio/routes.js'
 import { downloadPrep } from '../compose/download-queue.js'
+import { parseLayoutRatio } from '../compose/plan.js'
+import { fillToTarget } from '../library/auto-fill.js'
 
 type Deps = PrebuildDeps
 
@@ -54,6 +56,7 @@ export function registerProjectRoutes (app: FastifyInstance, deps: Deps): void {
     return openingIdsOf(planProjectBackground(lib, p.id, p.ttsDurationMs, {
       sequel: p.parentProjectId !== null,
       headBoundaryMs: p.headBoundaryMs,
+      layoutRatio: parseLayoutRatio(p.layoutRatioJson),
     }))
   }
 
@@ -328,6 +331,70 @@ export function registerProjectRoutes (app: FastifyInstance, deps: Deps): void {
     })
 
   /**
+   * 【自动补满开头】。作者按下「自动」时调它。
+   *
+   * body.pick = 他现在已经挑的那些（可以是空的）。
+   * 返回**补完之后的完整清单**，前面是他自己挑的、原样不动，后面是补上的。
+   *
+   * ── 为什么放在服务端算 ──────────────────────────────────────────────
+   * 这套"先让超出最少、再用更少的片子"的算法（compose 那边真按它铺）
+   * 只该有【一份】实现。放前端就要再写一遍，两边迟早会漂——而漂了之后
+   * 的症状是"界面说正好铺满、烧出来最后一段被切了"，极难查。
+   *
+   * ⚠️【只算，不落库、不放行】。作者按了自动只是把格子填上，他还可以接着
+   * 改；真正定下来的是 POST /opening 那一个。
+   */
+  app.post<{ Params: { id: string }; Body: { pick?: unknown } }>(
+    '/api/projects/:id/opening/autofill', { preHandler: requireAuth }, async (req, reply) => {
+      const name = getSession(req)!
+      const project = withUserDb(name, (db) => db.getProject(req.params.id))
+      if (!project) return reply.code(404).send({ error: '项目不存在' })
+
+      const need = project.headBoundaryMs
+      if (need === null || need <= 0) {
+        return reply.code(409).send({ error: '这条片子还没算出开头的长度，等配音生成完再试' })
+      }
+
+      const raw = Array.isArray(req.body?.pick)
+        ? req.body.pick.filter((x): x is string => typeof x === 'string')
+        : []
+
+      const lib = openLibraryDb(libraryDataDir)
+      try {
+        const all = listBucket(lib, OPENING_BUCKET)
+        const byId = new Map(all.map((it) => [it.id, it]))
+        const bad = raw.filter((id) => !byId.has(id))
+        if (bad.length > 0) {
+          return reply.code(400).send({ error: `有 ${bad.length} 段素材不在开头素材库里，刷新一下再挑` })
+        }
+        const have = raw.reduce((sum, id) => sum + (byId.get(id)?.durationMs ?? 0), 0)
+        if (have >= need) return { pick: raw, added: [] }   // 已经满了，没什么可补的
+
+        /*
+         * 候选：整个开头桶，去掉他已经选过的。
+         *
+         * 【先按项目 id 洗一遍】。背包算法只认时长，不认顺序——不洗的话
+         * 每条片子都会挑到同样那几段（库里同长度的素材一大把）。
+         * 洗过之后同样时长的选中的是不同的段，两条片子的开头才不会撞脸。
+         *
+         * 【续集还要避开主片用过的】。两集开头不一样是用户明确要求过的，
+         * 不能指望随机自然分开——同一个 68 段的桶，按概率平均会撞上一段。
+         */
+        const used = new Set(raw)
+        if (project.parentProjectId !== null) {
+          for (const id of openingOf(lib, name, project.parentProjectId)) used.add(id)
+        }
+        const rand = rng(seedFrom(project.id))
+        const pool = shuffled(all, rand).filter((it) => !used.has(it.id) && it.durationMs > 0)
+
+        const added = fillToTarget(pool, need - have)
+        return { pick: [...raw, ...added.map((x) => x.id)], added: added.map((x) => x.id) }
+      } finally {
+        lib.close()
+      }
+    })
+
+  /**
    * 把这个项目挂起，等作者挑开头。
    *
    * ⚠️【必须在开始配音【之前】调，而且要等它返回】。配音一完成，服务端
@@ -428,7 +495,11 @@ export function registerProjectRoutes (app: FastifyInstance, deps: Deps): void {
           try {
             pick = openingIdsOf(planProjectBackground(
               lib, project.id, project.ttsDurationMs,
-              { ...defOpts, headBoundaryMs: project.headBoundaryMs },
+              {
+                ...defOpts,
+                headBoundaryMs: project.headBoundaryMs,
+                layoutRatio: parseLayoutRatio(project.layoutRatioJson),
+              },
             ))
           } catch (e: unknown) {
             req.log.warn({ err: e, projectId: project.id }, '开头桶铺不满边界，默认排布退回顺延逻辑')
@@ -482,6 +553,7 @@ export function registerProjectRoutes (app: FastifyInstance, deps: Deps): void {
              * 老项目这一列是 null，三处一致地走老逻辑。
              */
             headBoundaryMs: project.headBoundaryMs,
+            layoutRatio: parseLayoutRatio(project.layoutRatioJson),
           })
       } finally {
         lib.close()

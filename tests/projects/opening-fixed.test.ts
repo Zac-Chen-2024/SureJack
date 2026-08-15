@@ -203,3 +203,80 @@ describe('「用默认素材」', () => {
     expect((res.json().openingPick as string[]).length).toBe(11)
   })
 })
+
+describe('「自动」补满', () => {
+  /*
+   * 「自动」取代了原来的「用默认素材」。老按钮是"我不挑了你看着办"，
+   * 现在的规矩是**必须挑够**——自动只是帮他把剩下的补上，补完还能改。
+   */
+  it('一个都没挑 → 直接铺满整个开头段', async () => {
+    const a = await makeApp()
+    const cookie = await loginAs(a, '定长甲')
+    const id = await makeReady(a, '定长甲', cookie, '全自动', { totalMs: 400_000, boundaryMs: 100_000 })
+
+    const res = await a.inject({
+      method: 'POST', url: `/api/projects/${id}/opening/autofill`,
+      payload: { pick: [] }, cookies: { sj_session: cookie },
+    })
+    expect(res.statusCode).toBe(200)
+    const pick = res.json().pick as string[]
+    expect(pick.length * 10_000).toBeGreaterThanOrEqual(100_000)   // 每段 10 秒
+    expect(new Set(pick).size).toBe(pick.length)                    // 不重复
+  })
+
+  it('挑了几段 → 他挑的原样在前，后面接着补', async () => {
+    const a = await makeApp()
+    const cookie = await loginAs(a, '定长甲')
+    const id = await makeReady(a, '定长甲', cookie, '补一半', { totalMs: 400_000, boundaryMs: 100_000 })
+
+    const mine = ids(3)
+    const res = await a.inject({
+      method: 'POST', url: `/api/projects/${id}/opening/autofill`,
+      payload: { pick: mine }, cookies: { sj_session: cookie },
+    })
+    const body = res.json()
+    expect(body.pick.slice(0, 3)).toEqual(mine)                     // 顺序不动
+    expect(body.pick.length * 10_000).toBeGreaterThanOrEqual(100_000)
+    expect(body.added.every((x: string) => !mine.includes(x))).toBe(true)
+  })
+
+  it('已经挑满了 → 什么都不补', async () => {
+    const a = await makeApp()
+    const cookie = await loginAs(a, '定长甲')
+    const id = await makeReady(a, '定长甲', cookie, '已经满了', { totalMs: 400_000, boundaryMs: 50_000 })
+
+    const mine = ids(6)   // 60s > 50s
+    const res = await a.inject({
+      method: 'POST', url: `/api/projects/${id}/opening/autofill`,
+      payload: { pick: mine }, cookies: { sj_session: cookie },
+    })
+    expect(res.json()).toEqual({ pick: mine, added: [] })
+  })
+
+  /* 补完就应该能确认——这是这个按钮存在的全部意义 */
+  it('自动补完之后，确认能过', async () => {
+    const a = await makeApp()
+    const cookie = await loginAs(a, '定长甲')
+    const id = await makeReady(a, '定长甲', cookie, '补完能确认', { totalMs: 400_000, boundaryMs: 100_000 })
+
+    const filled = (await a.inject({
+      method: 'POST', url: `/api/projects/${id}/opening/autofill`,
+      payload: { pick: ids(2) }, cookies: { sj_session: cookie },
+    })).json().pick as string[]
+
+    expect((await settle(a, cookie, id, filled)).statusCode).toBe(200)
+  })
+
+  it('还没算出分界（配音没好）→ 409，说清等什么', async () => {
+    const a = await makeApp()
+    const cookie = await loginAs(a, '定长乙')
+    const id = await makeReady(a, '定长乙', cookie, '老项目', { totalMs: 400_000, boundaryMs: null })
+
+    const res = await a.inject({
+      method: 'POST', url: `/api/projects/${id}/opening/autofill`,
+      payload: { pick: [] }, cookies: { sj_session: cookie },
+    })
+    expect(res.statusCode).toBe(409)
+    expect(res.json().error).toContain('配音')
+  })
+})

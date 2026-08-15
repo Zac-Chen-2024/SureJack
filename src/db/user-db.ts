@@ -229,6 +229,19 @@ export interface Project {
    * 边界会跟着漂，盘上那份后半段就对不上新时间轴了。一次算定，终身有效。
    */
   headBoundaryMs: number | null
+  /**
+   * 这条片子的三段式排布比例(开头/常规/跑酷),JSON 的三元组。
+   *
+   * **null = 老项目,用 LEGACY_LAYOUT_RATIO(27/27/46)**。
+   *
+   * ⚠️【必须存下来,不能只放个常量在代码里】。比例一调,所有项目的排布
+   * 跟着变 → 母带指纹变 → 开机补合把她盘上每一条片子都重烧一遍。
+   * 存下来之后,老片子拿的永远是自己当时那一组,改常量只影响以后新建的。
+   *
+   * 【为什么存比例本身而不是"规则版本号"】：版本号要求代码里永远留着
+   * 每一版规则的表;存三元组的话,以后再改多少次都不用回头改代码。
+   */
+  layoutRatioJson: string | null
   createdAt: string
   updatedAt: string
 }
@@ -267,6 +280,7 @@ export interface UserDb {
     renameAnalysisJson?: string | null
     renameMapJson?: string | null
     headBoundaryMs?: number | null
+    layoutRatioJson?: string | null
   }): Project | null
   deleteProject (id: string): boolean
   addAsset (input: {
@@ -325,6 +339,7 @@ interface Row {
   rename_analysis_json: string | null
   rename_map_json: string | null
   head_boundary_ms: number | null
+  layout_ratio_json: string | null
   created_at: string; updated_at: string
 }
 const toProject = (r: Row): Project => ({
@@ -364,6 +379,7 @@ const toProject = (r: Row): Project => ({
   renameMapJson: r.rename_map_json ?? null,
   // 老行没有这列 → null：走原排布逻辑，不支持重选开头
   headBoundaryMs: r.head_boundary_ms ?? null,
+  layoutRatioJson: r.layout_ratio_json ?? null,
   createdAt: r.created_at, updatedAt: r.updated_at,
 })
 
@@ -433,6 +449,7 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
       rename_analysis_json TEXT,
       rename_map_json TEXT,
       head_boundary_ms INTEGER,
+      layout_ratio_json TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -541,6 +558,11 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
    * 给了默认值的话所有老项目会当场变成"支持"，排布跟着变，全部重烧。
    */
   addCol('head_boundary_ms', 'head_boundary_ms INTEGER')
+  /*
+   * ⚠️【故意不给默认值】。回填成 NULL 才是对的：老项目就该走
+   * LEGACY_LAYOUT_RATIO，它们的排布、因而母带指纹，必须逐字节不变。
+   */
+  addCol('layout_ratio_json', 'layout_ratio_json TEXT')
 
   return {
     raw: db,
@@ -599,12 +621,13 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
         renameEnabled: true, renameState: 'none',
         renameAnalysisJson: null, renameMapJson: null,
         headBoundaryMs: null,   // 配音完成那一刻才算得出来
+        layoutRatioJson: null,  // 同上，和分界一起定下来
         createdAt: now, updatedAt: now,
       }
       db.prepare(
         `INSERT INTO projects
-          (id, name, script_text, aspect_ratio, tts_state, tts_duration_ms, word_timings_json, bgm_volume, subtitle_mode, bgm_library_id, subtitle_margin_v, subtitle_font_size, cover_title, watermark_text, opening_pick_json, opening_state, subtitle_cuts_json, split_draft_json, voice_gain, audio_stats_json, voice_draft_json, touched_at, archived_at, downloaded_at, in_video_title, parent_project_id, episode_index, voice_name, voice_rate, voice_volume, voice_pitch, rename_enabled, rename_state, rename_analysis_json, rename_map_json, head_boundary_ms, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          (id, name, script_text, aspect_ratio, tts_state, tts_duration_ms, word_timings_json, bgm_volume, subtitle_mode, bgm_library_id, subtitle_margin_v, subtitle_font_size, cover_title, watermark_text, opening_pick_json, opening_state, subtitle_cuts_json, split_draft_json, voice_gain, audio_stats_json, voice_draft_json, touched_at, archived_at, downloaded_at, in_video_title, parent_project_id, episode_index, voice_name, voice_rate, voice_volume, voice_pitch, rename_enabled, rename_state, rename_analysis_json, rename_map_json, head_boundary_ms, layout_ratio_json, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         project.id, project.name, project.scriptText, project.aspectRatio,
         project.ttsState, project.ttsDurationMs, project.wordTimingsJson,
@@ -617,6 +640,7 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
         project.voiceName, project.voiceRate, project.voiceVolume, project.voicePitch,
         project.renameEnabled ? 1 : 0, project.renameState,
         project.renameAnalysisJson, project.renameMapJson, project.headBoundaryMs,
+        project.layoutRatioJson,
         now, now,
       )
       return project
@@ -640,6 +664,7 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
           voice_name = ?, voice_rate = ?, voice_volume = ?, voice_pitch = ?,
           rename_enabled = ?, rename_state = ?, rename_analysis_json = ?, rename_map_json = ?,
           head_boundary_ms = ?,
+          layout_ratio_json = ?,
           updated_at = ?
           WHERE id = ?`
       ).run(
@@ -688,6 +713,7 @@ export function openUserDb (name: string, whitelist: string[]): UserDb {
         patch.renameMapJson !== undefined ? patch.renameMapJson : row.rename_map_json,
         // null 是有意义的值（"不支持重选开头"）→ 判 undefined 而非 ??
         patch.headBoundaryMs !== undefined ? patch.headBoundaryMs : row.head_boundary_ms,
+        patch.layoutRatioJson !== undefined ? patch.layoutRatioJson : row.layout_ratio_json,
         now, id,
       )
       const updated = db.prepare('SELECT * FROM projects WHERE id = ?').get(id) as Row

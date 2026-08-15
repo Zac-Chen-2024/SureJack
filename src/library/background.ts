@@ -1,4 +1,4 @@
-import { planBackground, type LibraryItem } from '../compose/plan.js'
+import { planBackground, type LibraryItem, LEGACY_LAYOUT_RATIO } from '../compose/plan.js'
 import type { LibraryDb } from './library-db.js'
 import { listBucket } from './scan.js'
 
@@ -145,6 +145,12 @@ export function planProjectBackground (
      * 判据是 project.headBoundaryMs 是不是 null，见 db/user-db.ts 那一列。
      */
     headBoundaryMs?: number | null
+    /**
+     * 这条片子的三段比例。**从库里那一列来,不是从常量来**——
+     * 常量一调,所有老片子的排布就跟着变、母带指纹变、集体重烧。
+     * 不给就是老比例(见 compose/plan.ts 的 LEGACY_LAYOUT_RATIO)。
+     */
+    layoutRatio?: readonly [number, number, number]
   } = {},
 ): BackgroundPlan {
   if (ttsDurationMs === null || ttsDurationMs <= 0) return { segments: [], totalMs: 0 }
@@ -206,7 +212,8 @@ export function planProjectBackground (
   // 和"配音没好"是两回事，不能都压成空排布，否则运维看不出该去扫库
   const plan = opts.sequel
     ? planBackground(totalMs, { opening, regular, parkour }, [1, 0, 0], planOpts)
-    : planBackground(totalMs, { opening, regular, parkour }, undefined, planOpts)
+    : planBackground(totalMs, { opening, regular, parkour },
+      opts.layoutRatio ?? LEGACY_LAYOUT_RATIO, planOpts)
 
   return {
     totalMs: plan.totalMs,
