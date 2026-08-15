@@ -185,8 +185,17 @@ export function registerExportRoutes (app: FastifyInstance, deps: Deps): void {
       const path = join(previewDir(dir), f)
       if (!existsSync(path)) return reply.code(404).send({ error: '分段不存在' })
       /*
-       * 分段是【内容寻址】的：同一个索引里的 seg-0007.ts 永远是同一段字节，
-       * 母带重烧会把整个目录清掉重来。所以可以放心长缓存。
+       * ⚠️【分段名是按位置的，不是按内容的】。seg-0000.ts 永远叫这个名字，
+       * 而母带一重烧，同一个 URL back 的就是【不同的字节】。
+       *
+       * 所以能长缓存的前提是：索引里给每个分段挂了按内容算的版本号
+       * （`seg-0000.ts?v=a3f91c2b`，见 compose/preview.ts 的 stampPlaylist）。
+       * 内容变了版本号就变，URL 跟着变，缓存自然miss。
+       *
+       * 这里【曾经】写着"分段是内容寻址的"——那是错的，代价是重选开头之后
+       * 预览里开头一直不变（下载和封面都是对的，只有预览不对），
+       * 因为换头只改了第一个分段，而它在浏览器缓存里被标成了 immutable。
+       *
        * 索引本身不缓存——它是那份"目录"，重做之后必须立刻拿到新的。
        */
       if (f.endsWith('.ts')) reply.header('Cache-Control', 'private, max-age=604800, immutable')

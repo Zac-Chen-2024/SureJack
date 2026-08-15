@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { mkdir, rm, readdir } from 'node:fs/promises'
+import { mkdir, rm, readdir, readFile, writeFile } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -106,6 +107,44 @@ async function buildPreviewOnce (
     '-hls_segment_filename', join(dir, 'seg-%04d.ts'),
     join(dir, PREVIEW_PLAYLIST),
   ], { maxBuffer: 1024 * 1024 * 32 })
+
+  await stampPlaylist(dir)
+}
+
+/**
+ * 给索引里的每个分段挂上【按内容算的】版本号:`seg-0000.ts?v=a3f91c2b`。
+ *
+ * ── 为什么必须有 ────────────────────────────────────────────────────
+ * 分段是【按位置】命名的,不是按内容:seg-0000.ts 永远叫这个名字,而母带
+ * 一重烧,同一个 URL back 的就是【不同的字节】。而分段是按 `immutable`
+ * 长缓存发出去的(见 queue/routes.ts)——浏览器根本不会再问服务器。
+ *
+ * 于是:重烧完,盘上是新的,索引是新的,用户看到的还是【旧画面】。
+ * 真踩过一次:重选开头之后,下载下来是对的、封面是对的,唯独预览里
+ * 开头没变——因为换头只改了第一个分段的字节,后面几十个分段本来就一样,
+ * 缓存里那份旧的 seg-0000.ts 就是唯一错的东西。
+ *
+ * ── 为什么按内容而不是按母带指纹 ────────────────────────────────────
+ * 挂一个整份的版本号(?v=母带指纹)一行就能写完,但那样【每个】分段都会
+ * 失效。9 分半的片子预览约 70MB,而她那条跨洲的线只有几百 KB/s。
+ * 按内容算的话,换开头只有第一个分段变,后面几十个继续命中缓存。
+ *
+ * 哈希只在【生成预览时】算一次,不在每次请求时算。
+ */
+async function stampPlaylist (dir: string): Promise<void> {
+  const path = join(dir, PREVIEW_PLAYLIST)
+  const text = await readFile(path, 'utf-8')
+  const out: string[] = []
+  for (const line of text.split('\n')) {
+    const name = line.trim()
+    if (/^seg-\d{4}\.ts$/.test(name)) {
+      const buf = await readFile(join(dir, name))
+      out.push(`${name}?v=${createHash('sha1').update(buf).digest('hex').slice(0, 8)}`)
+    } else {
+      out.push(line)
+    }
+  }
+  await writeFile(path, out.join('\n'), 'utf-8')
 }
 
 /** 预览一共占多少字节。给归档统计用 */

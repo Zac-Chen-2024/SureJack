@@ -73,3 +73,56 @@ describe('预览分段', () => {
     await expect(buildPreview(dir, join(dir, '不存在.mp4'))).rejects.toThrow('母带')
   })
 })
+
+describe('分段挂内容版本号', () => {
+  /*
+   * ⚠️ 这一组是【线上真踩的 bug】钉成的回归测试。
+   *
+   * 分段名是【按位置】的：seg-0000.ts 永远叫这个名字，而母带一重烧，
+   * 同一个 URL back 的就是不同的字节。而分段是按 immutable 长缓存发出去的
+   * ——浏览器根本不会再问服务器。
+   *
+   * 症状：重选开头之后，下载下来是对的、封面是对的，唯独预览里开头没变。
+   * 因为换头只改了第一个分段的字节，后面几十个分段本来就一样，
+   * 缓存里那份旧的 seg-0000.ts 就是唯一错的东西。
+   */
+  it('索引里每个分段都带 ?v=<内容哈希>', async () => {
+    const master = await makeMaster(12)
+    await buildPreview(dir, master)
+    const m3u8 = await readFile(join(previewDir(dir), PREVIEW_PLAYLIST), 'utf8')
+    const segLines = m3u8.split('\n').filter((l) => l.trim().startsWith('seg-'))
+    expect(segLines.length).toBeGreaterThan(1)
+    for (const l of segLines) expect(l.trim()).toMatch(/^seg-\d{4}\.ts\?v=[0-9a-f]{8}$/)
+  }, 120_000)
+
+  /*
+   * 【内容变了版本号才变】。按母带指纹挂一个整份的版本号一行就能写完，
+   * 但那样每个分段都会失效——9 分半的片子预览约 70MB，而她那条跨洲的线
+   * 只有几百 KB/s。按内容算，换开头只有第一个分段变。
+   */
+  it('同样的内容 → 同样的版本号（不会平白让缓存失效）', async () => {
+    const master = await makeMaster(12)
+    await buildPreview(dir, master)
+    const a = await readFile(join(previewDir(dir), PREVIEW_PLAYLIST), 'utf8')
+    await buildPreview(dir, master, { force: true })   // 原样重做一遍
+    const b = await readFile(join(previewDir(dir), PREVIEW_PLAYLIST), 'utf8')
+    expect(b).toBe(a)
+  }, 180_000)
+
+  it('内容变了 → 版本号跟着变', async () => {
+    const master = await makeMaster(12)
+    await buildPreview(dir, master)
+    const before = await readFile(join(previewDir(dir), PREVIEW_PLAYLIST), 'utf8')
+
+    // 换一条画面完全不同的母带，重做预览
+    const other = join(dir, 'other.mp4')
+    await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y',
+      '-f', 'lavfi', '-i', 'smptebars=d=12:s=1080x1920:r=30',
+      '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-an', '-t', '12', other])
+    await buildPreview(dir, other, { force: true })
+    const after = await readFile(join(previewDir(dir), PREVIEW_PLAYLIST), 'utf8')
+
+    const v = (m: string): string[] => [...m.matchAll(/\?v=([0-9a-f]{8})/g)].map((x) => x[1]!)
+    expect(v(after)[0]).not.toBe(v(before)[0])
+  }, 180_000)
+})
