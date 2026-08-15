@@ -76,5 +76,11 @@ export interface RenderJob {
    * 会让编码结果逐字节不同,而老片子必须保持原样。
    */
   keyframeAtMs?: number | null
+  /**
+   * `-t` 精确到毫秒(而不是默认的 0.1 秒)。**重选开头时必须为 true**:
+   * 头段要正好等于分界,长一帧后面整条字幕就相对配音偏 33 毫秒。
+   * 平时不传——改了会让重烧出来的片子和从前差一帧。
+   */
+  exactDuration?: boolean
   outPath: string
 }

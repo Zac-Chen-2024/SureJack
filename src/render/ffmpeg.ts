@@ -50,6 +50,21 @@ export function createProgressParser (
  * 届时先把片段拼接成中间文件，再走这条同样的路径。
  */
 /**
+ * 母带的视频编码参数。
+ *
+ * ⚠️【只此一份】。重选开头时新烧的那一段要和盘上那条母带的后半段用
+ * `-c copy` 拼起来,而 concat demuxer 是流级拼接:两边的编码参数只要有
+ * 一处对不上,轻则报错,重则拼出一个只有前半段能正常播的文件——**时长
+ * 还是对的**,肉眼看进度条完全正常。抽成一个常量,让"两边一致"这件事
+ * 由代码结构保证,而不是靠记得同时改两处。
+ */
+export const MASTER_VIDEO_ARGS = [
+  '-r', '30',
+  '-c:v', 'libx264', '-preset', 'fast', '-crf', '21',
+  '-pix_fmt', 'yuv420p',
+] as const
+
+/**
  * 强制关键帧的参数。没有分界(老项目、自备字幕那条路)就返回空数组——
  * **一个参数都不加**,编码结果和从前逐字节相同。
  *
@@ -70,7 +85,17 @@ export function buildArgs (job: RenderJob): string[] {
     throw new Error('多片段拼接尚未实现——需要两趟渲染，见 render/ffmpeg.ts 的说明')
   }
 
-  const durationSec = (job.durationMs / 1000).toFixed(1)
+  /*
+   * 【重选开头时必须精确到毫秒】。开头段的长度要【正好】等于分界:
+   * 后半段是从母带的那一毫秒切下来的,头段长一帧,后面整条字幕就相对
+   * 配音晚 33 毫秒——而且是从接缝一直错到片尾。
+   *
+   * 平时(整条烧录)保持 `.toFixed(1)` 不动:改了会让重烧出来的片子和从前
+   * 差一帧,而老项目的一切都该保持原样。
+   */
+  const durationSec = job.exactDuration === true
+    ? (job.durationMs / 1000).toFixed(3)
+    : (job.durationMs / 1000).toFixed(1)
   const hasBgm = Boolean(job.bgmPath)
 
   /*
@@ -96,7 +121,6 @@ export function buildArgs (job: RenderJob): string[] {
       '-map', '[v]',
       '-an',                      // 明确不要音轨
       '-t', durationSec,
-      '-r', '30',
       /*
        * 【在开头段的分界处强制一个关键帧】。重选开头时后半段是拿
        * `-ss <分界> -c copy` 原样切出来的,而 `-c copy` 只能从关键帧起——
@@ -106,8 +130,7 @@ export function buildArgs (job: RenderJob): string[] {
        * 编码结果逐字节和从前相同。多加一个 I 帧的代价极小(几十 KB)。
        */
       ...keyframeArg(job),
-      '-c:v', 'libx264', '-preset', 'fast', '-crf', '21',
-      '-pix_fmt', 'yuv420p',
+      ...MASTER_VIDEO_ARGS,
       '-movflags', '+faststart',
       job.outPath,
     ]

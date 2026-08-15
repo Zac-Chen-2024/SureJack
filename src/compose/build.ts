@@ -176,7 +176,7 @@ export function concatListContent (paths: readonly string[]): string {
 }
 
 /** 跑一次 ffmpeg。失败时把 stderr 带出来——否则排查等于瞎猜。 */
-function ffmpeg (args: string[]): Promise<void> {
+export function ffmpeg (args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
     const proc = spawn('ffmpeg', args)
     let stderr = ''

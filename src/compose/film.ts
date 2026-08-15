@@ -56,6 +56,7 @@ import {
 } from './prebuild.js'
 import { readStamp, reusableOutput, writeStamp } from './stamp.js'
 import { splitFingerprints, type SplitFingerprints } from './split-fp.js'
+import { planHeadSwap, swapHead } from './reopen.js'
 import type { AspectPreset, Clip } from '../types.js'
 import { isLegacyParams, type VoiceParams } from '../tts/voices.js'
 
@@ -522,6 +523,38 @@ async function buildFilm (
   await writeFile(assPath, f.ass, 'utf-8')
 
   /*
+   * 【只换开头的快路径】。用户重选了开头素材,而后半段一个字节都没变——
+   * 那就没必要重烧十几分钟:把盘上那条母带的后半段原样切下来,只烧新的
+   * 开头(约占 27%),再无损拼回去。实测 14 分钟 → 约 2 分钟。
+   *
+   * ⚠️【必须排在拼背景轨【之前】】。整条背景轨 385MB、要拼好几分钟,
+   * 而这条路只需要开头那几段。排在后面的话省下的时间又还回去了。
+   *
+   * ⚠️【走不通就当无事发生】。planHeadSwap / swapHead 都不抛,失败一律
+   * 回到下面整条重烧那条老路——慢十几分钟,但永远正确。
+   */
+  const masterPath = join(f.dir, FILM_MASTER_FILE)
+  let masterReuse = await reusableOutput(
+    f.dir, MASTER_STAMP_FILE, FILM_MASTER_FILE, f.masterFingerprint,
+  )
+  if (masterReuse === null) {
+    const swap = await planHeadSwap(f.dir, f)
+    if (swap !== null) {
+      const ok = await swapHead({
+        dir: f.dir, f, plan: swap, libraryDataDir: deps.libraryDataDir, assPath,
+        onProgress: (p) => onProgress(p * MASTER_SHARE), signal,
+      })
+      if (ok) {
+        await writeStamp(f.dir, MASTER_STAMP_FILE, {
+          fingerprint: f.masterFingerprint, status: 'done', jobId, ...splitStamp(f),
+        })
+        // 下面那两大段(拼背景轨 + 整条烧录)一律跳过
+        masterReuse = masterPath
+      }
+    }
+  }
+
+  /*
    * 公式模式：先要一条与配音等长的无声背景轨，再当作【单个背景视频】
    * 进现有烧录管线——烧录那一侧一行都不用改。
    *
@@ -530,7 +563,7 @@ async function buildFilm (
    * 指纹文件读不出来、素材库被扫过导致排布变了——统统回 null，落到下面
    * 即时生成这条老路。用户绝不该因为一个后台优化没做成就拿不到片子。
    */
-  if (f.plan !== null) {
+  if (masterReuse === null && f.plan !== null) {
     const bgFingerprint = planFingerprint(f.plan.segments, f.aspect)
     if (await reusableBgTrack(f.dir, bgFingerprint) === null) {
       await buildBackgroundTrack({
@@ -552,10 +585,6 @@ async function buildFilm (
    * 母带指纹对得上就整段跳过——换一首背景音乐正是走这条路，
    * 于是"换 BGM"从 12 分钟变成 9 秒。
    */
-  const masterPath = join(f.dir, FILM_MASTER_FILE)
-  const masterReuse = await reusableOutput(
-    f.dir, MASTER_STAMP_FILE, FILM_MASTER_FILE, f.masterFingerprint,
-  )
   if (masterReuse === null) {
     /*
      * 【写临时文件再 rename】。直接写 masterPath 的话，重烧期间它是半截的，
