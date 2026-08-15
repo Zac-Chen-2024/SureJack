@@ -67,5 +67,14 @@ export interface RenderJob {
   assPath: string
   aspect: AspectPreset
   durationMs: number
+  /**
+   * 【在这一毫秒强制放一个关键帧】。为「重选开头」服务:
+   * `-c copy` 只能从关键帧切开,而实测母带的关键帧平均 7.7 秒才有一个,
+   * 分界处几乎必然没有。没有这一帧,后半段就切不干净,重选开头只能整条重烧。
+   *
+   * ⚠️【不给就一个参数都不加】。这是给老项目的隔离:多一个 `-force_key_frames`
+   * 会让编码结果逐字节不同,而老片子必须保持原样。
+   */
+  keyframeAtMs?: number | null
   outPath: string
 }

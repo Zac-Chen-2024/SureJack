@@ -49,6 +49,20 @@ export function createProgressParser (
  * 只能作用于输入文件，没法作用于 concat 的结果）。多片段留到阶段 3 前实现，
  * 届时先把片段拼接成中间文件，再走这条同样的路径。
  */
+/**
+ * 强制关键帧的参数。没有分界(老项目、自备字幕那条路)就返回空数组——
+ * **一个参数都不加**,编码结果和从前逐字节相同。
+ *
+ * ffmpeg 的 `-force_key_frames` 收的是【秒】,给一个时刻就在那儿放一个 I 帧,
+ * 平时的关键帧照旧。三位小数足够:30fps 下一帧 33 毫秒。
+ */
+function keyframeArg (job: RenderJob): string[] {
+  const ms = job.keyframeAtMs
+  if (typeof ms !== 'number' || !Number.isFinite(ms) || ms <= 0) return []
+  if (ms >= job.durationMs) return []      // 分界在片尾之外,放了也切不出后半段
+  return ['-force_key_frames', (ms / 1000).toFixed(3)]
+}
+
 export function buildArgs (job: RenderJob): string[] {
   const clip = job.clips[0]
   if (!clip) throw new Error('至少需要一个背景视频片段')
@@ -83,6 +97,15 @@ export function buildArgs (job: RenderJob): string[] {
       '-an',                      // 明确不要音轨
       '-t', durationSec,
       '-r', '30',
+      /*
+       * 【在开头段的分界处强制一个关键帧】。重选开头时后半段是拿
+       * `-ss <分界> -c copy` 原样切出来的,而 `-c copy` 只能从关键帧起——
+       * 实测母带的关键帧平均 7.7 秒一个,分界处没有的话切出来前几帧是花的。
+       *
+       * ⚠️【只在给了分界时加】。老项目 headBoundaryMs 是 null,一个参数都不加,
+       * 编码结果逐字节和从前相同。多加一个 I 帧的代价极小(几十 KB)。
+       */
+      ...keyframeArg(job),
       '-c:v', 'libx264', '-preset', 'fast', '-crf', '21',
       '-pix_fmt', 'yuv420p',
       '-movflags', '+faststart',

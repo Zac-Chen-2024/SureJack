@@ -55,6 +55,7 @@ import {
   BG_TRACK_FILE, enqueueBgTrack, planFingerprint, reusableBgTrack, writeStamp as writeBgStamp, type PrebuildDeps, BG_STAMP_FILE,
 } from './prebuild.js'
 import { readStamp, reusableOutput, writeStamp } from './stamp.js'
+import { splitFingerprints, type SplitFingerprints } from './split-fp.js'
 import type { AspectPreset, Clip } from '../types.js'
 import { isLegacyParams, type VoiceParams } from '../tts/voices.js'
 
@@ -228,6 +229,13 @@ export interface FilmPlan {
   fingerprint: string
   /** 母带指纹。只有它变了才值得付十几分钟重烧视频的代价 */
   masterFingerprint: string
+  /**
+   * 开头段在哪一毫秒结束,以及拆成两半的指纹。
+   *
+   * **null = 这条片子不能只重烧开头**(老项目、自备背景视频、排布和分界
+   * 对不上),重选开头得整条重烧。见 compose/split-fp.ts。
+   */
+  split: (SplitFingerprints & { boundaryMs: number }) | null
   /** 这个项目的素材目录。成片、母带、背景轨、字幕、指纹都落在这儿 */
   dir: string
   /** 插在最前面那两帧上的标题。空项目名兜底见 coverTitleOf */
@@ -411,6 +419,26 @@ export function resolveFilm (
     voiceGain: project.voiceGain,
   }
 
+  /*
+   * 【能不能只重烧开头】。要三个条件同时成立:项目有分界(老项目是 null)、
+   * 背景走的是公式排布(自备视频没有"开头那几段"可换)、排布正好在分界处
+   * 断开(定长开头保证了这一点)。缺一样就是 null = 重选开头要整条重烧。
+   *
+   * ⚠️ rest 里放的是【母带层的其余输入】,和 masterFingerprint 那几项对齐:
+   * 它们任一变化都该让后半段作废,漏一项就会拿一条陈旧的后半段去拼。
+   */
+  const boundaryMs = project.headBoundaryMs
+  const split = (boundaryMs !== null && plan !== null)
+    ? splitFingerprints({
+      aspect, durationMs, ass: assForHash, boundaryMs, segments: plan.segments,
+      rest: [
+        fpInput.voicePath, fpInput.voiceParams.voice, fpInput.voiceParams.rate,
+        fpInput.voiceParams.volume, fpInput.voiceParams.pitch,
+        fpInput.watermarkText, fpInput.subtitleCutsJson,
+      ],
+    })
+    : null
+
   return {
     ok: true,
     film: {
@@ -418,6 +446,7 @@ export function resolveFilm (
       aspect, durationMs, dir, coverTitle: coverTitleOf(project),
       fingerprint: filmFingerprint(fpInput),
       masterFingerprint: masterFingerprint(fpInput),
+      split: split === null || boundaryMs === null ? null : { ...split, boundaryMs },
     },
   }
 }
@@ -437,6 +466,26 @@ function registerFilmAsset (
     db.addAsset({ projectId, kind: 'export', path, originalName, size: 0, durationMs })
   } finally {
     db.close()
+  }
+}
+
+/**
+ * 这一次烧出来的母带,在指纹旁挂文件里该记下的拆分信息。
+ *
+ * ⚠️【`keyframeForced` 记的是事实,不是推断】。加这个功能之前烧的母带
+ * 在分界处没有关键帧,而分界本身现在照样算得出来——只看分界就去切,
+ * 切出来的后半段前几帧是花的,而且到用户点开才会发现。
+ * 这个字段只有【这一次真的传了 -force_key_frames】才写上。
+ */
+function splitStamp (f: FilmPlan): {
+  boundaryMs?: number; headFingerprint?: string; tailFingerprint?: string; keyframeForced?: true
+} {
+  if (f.split === null) return {}
+  return {
+    boundaryMs: f.split.boundaryMs,
+    headFingerprint: f.split.head,
+    tailFingerprint: f.split.tail,
+    keyframeForced: true,
   }
 }
 
@@ -524,6 +573,12 @@ async function buildFilm (
        */
       silentMaster: true,
       bgmVolume: f.project.bgmVolume,
+      /*
+       * 【在分界处强制一个关键帧】。只有带着这一帧烧出来的母带,重选开头时
+       * 才能用 `-c copy` 无损切出后半段。split 为 null(老项目等)就不传,
+       * 一个参数都不加 → 编码结果和从前逐字节相同。
+       */
+      keyframeAtMs: f.split?.boundaryMs ?? null,
       assPath, aspect: f.aspect, durationMs: f.durationMs, outPath: partial,
     }, f.plan === null
       ? (p) => onProgress(p * MASTER_SHARE)
@@ -532,7 +587,15 @@ async function buildFilm (
     // 用户点「中断」→ signal abort → ffmpeg 被杀，不再白烧十几分钟
     signal)
     await rename(partial, masterPath)
-    await writeStamp(f.dir, MASTER_STAMP_FILE, { fingerprint: f.masterFingerprint, status: 'done', jobId })
+    /*
+     * 【把拆分信息一起记下】。重选开头时要靠它回答"盘上这条母带能不能
+     * 只换开头":分界对得上、后半段指纹没变、而且【当初确实强制过关键帧】,
+     * 三条都成立才敢切。**不能靠推断**——现在算得出分界,不代表当初那条
+     * 母带是带着这一帧烧的(它可能是加这个功能之前烧的)。
+     */
+    await writeStamp(f.dir, MASTER_STAMP_FILE, {
+      fingerprint: f.masterFingerprint, status: 'done', jobId, ...splitStamp(f),
+    })
 
     /*
      * 【背景轨用完就删】。它是纯中间产物——母带烧完之后再也没有人读它，
@@ -560,7 +623,7 @@ async function buildFilm (
         await rm(join(f.dir, BG_STAMP_FILE), { force: true }).catch(() => {})
         // 把它的 mtime 记进母带指纹：删掉之后还能证明这次没白拼一遍
         await writeStamp(f.dir, MASTER_STAMP_FILE, {
-          fingerprint: f.masterFingerprint, status: 'done', jobId,
+          fingerprint: f.masterFingerprint, status: 'done', jobId, ...splitStamp(f),
           bgFreed: { bytes: st.size, mtimeMs: st.mtimeMs },
         })
       }

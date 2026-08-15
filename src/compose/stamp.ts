@@ -46,6 +46,24 @@ export interface Stamp {
    * 预拼这个优化存在的唯一理由。把 mtime 留在指纹里，测试和排查都还能对得上。
    */
   bgFreed?: { bytes: number, mtimeMs: number }
+  /**
+   * ── 以下四项只出现在【母带】的旁挂文件里,为「重选开头」服务 ──────
+   *
+   * 有了它们,重选开头时才能回答"盘上这条母带的后半段能不能原样拿来拼"。
+   * 缺任何一项都当成"不能",退回整条重烧——这条路慢十几分钟,但永远正确。
+   */
+  /** 开头段在哪一毫秒结束 */
+  boundaryMs?: number
+  /** 开头那一段的指纹:换开头素材它就变 */
+  headFingerprint?: string
+  /** 后半段的指纹:**只要它没变,后半段就能复用** */
+  tailFingerprint?: string
+  /**
+   * ⚠️【这一条烧的时候真的传了 `-force_key_frames`】。
+   * 不是推断出来的:加这个功能之前烧的母带在分界处没有关键帧,而分界
+   * 照样算得出来。没有这一帧就 `-c copy`,切出来的后半段前几帧是花的。
+   */
+  keyframeForced?: true
 }
 
 export async function writeStamp (dir: string, file: string, stamp: Stamp): Promise<void> {
@@ -63,6 +81,7 @@ export async function readStamp (dir: string, file: string): Promise<Stamp | nul
     if (typeof parsed !== 'object' || parsed === null) return null
     const rec: Record<string, unknown> = { ...parsed }
     const { fingerprint, status, error, jobId } = rec
+    const { boundaryMs, headFingerprint, tailFingerprint, keyframeForced } = rec
     if (typeof fingerprint !== 'string') return null
     /*
      * 认不出来的 status 一律丢掉而不是保留。丢掉会退化成 "缺省 = done"，
@@ -75,6 +94,15 @@ export async function readStamp (dir: string, file: string): Promise<Stamp | nul
       ...(known ? { status } : {}),
       ...(typeof error === 'string' ? { error } : {}),
       ...(typeof jobId === 'string' ? { jobId } : {}),
+      /*
+       * 拆分那四项【要么整组都在,要么当作没有】。少一项就去切,切法和
+       * 判据就对不上了;而"当作没有"的后果只是整条重烧——慢,但永远正确。
+       */
+      ...(typeof boundaryMs === 'number' && boundaryMs > 0
+        && typeof headFingerprint === 'string' && typeof tailFingerprint === 'string'
+        && keyframeForced === true
+        ? { boundaryMs, headFingerprint, tailFingerprint, keyframeForced: true as const }
+        : {}),
     }
   } catch {
     return null

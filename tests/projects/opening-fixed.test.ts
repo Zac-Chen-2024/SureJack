@@ -87,10 +87,8 @@ async function makeReady (
   return id
 }
 
-function settle (
-  a: FastifyInstance, cookie: string, id: string, pick: string[],
-): ReturnType<FastifyInstance['inject']> {
-  return a.inject({
+async function settle (a: FastifyInstance, cookie: string, id: string, pick: string[]) {
+  return await a.inject({
     method: 'POST', url: `/api/projects/${id}/opening`, payload: { pick }, cookies: { sj_session: cookie },
   })
 }
