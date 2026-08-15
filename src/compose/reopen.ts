@@ -5,7 +5,6 @@ import { promisify } from 'node:util'
 import { join } from 'node:path'
 import { ffmpeg, buildBackgroundTrack, concatListContent } from './build.js'
 import { readStamp } from './stamp.js'
-import { probeDurationMs } from '../render/probe.js'
 import { render } from '../render/index.js'
 import type { FilmPlan } from './film.js'
 
@@ -45,8 +44,8 @@ const HEAD_FILE = 'head.partial.mp4'
 const TAIL_FILE = 'tail.partial.mp4'
 const LIST_FILE = 'reopen-list.txt'
 
-/** 一帧的毫秒数(30fps)。拼接后的时长允许差这么多 */
-const FRAME_MS = 1000 / 30
+/** 母带的帧率。和 render/ffmpeg.ts 的 `-r 30` 一致 */
+const FPS = 30
 
 export interface SwapPlan {
   boundaryMs: number
@@ -98,6 +97,65 @@ async function firstPacketIsKeyframe (path: string): Promise<boolean> {
   }
 }
 
+/** 数视频包。**判断切得对不对只能靠它**,见 countPackets 的调用处 */
+async function countPackets (path: string): Promise<number> {
+  const { stdout } = await exec('ffprobe', [
+    '-v', 'error', '-select_streams', 'v', '-count_packets',
+    '-show_entries', 'stream=nb_read_packets', '-of', 'csv=p=0', path,
+  ], { maxBuffer: 1 << 20 })
+  const n = Number(stdout.trim())
+  if (!Number.isFinite(n) || n <= 0) throw new Error(`数不出视频包：${path}`)
+  return n
+}
+
+/**
+ * 【真正能切的那一刀在哪儿】。返回分界【当时那一帧或之后】第一个关键帧的时刻,秒。
+ *
+ * ⚠️【绝不能直接拿分界去切】。烧录时 `-force_key_frames 5.960` 并不会在 5.960
+ * 放一帧——它在【第一个 pts ≥ 5.960 的帧】上放,30fps 下那是 5.966667。
+ * 而 `-ss 5.960 -c copy` 找的是"不晚于 5.960 的关键帧",于是退回到 0.000,
+ * 把【整条片子】都当成后半段搬走。
+ *
+ * 实测过一次:分界 5.960 秒的片子,拼出来 779 帧(应该 600),多的正好是
+ * 一整段旧开头——而 ffprobe 报的时长是 20.001 秒,看着完全正常。
+ *
+ * （早先在 7.500 秒上试过一次是好的:那个数正好落在 30fps 的帧网格上,
+ * 关键帧就在 7.500。真实的分界来自字幕句末,基本不会这么巧。）
+ */
+export function pickCutPoint (
+  keyframeSec: readonly number[], boundaryMs: number, fps: number = FPS,
+): number | null {
+  if (!Number.isFinite(boundaryMs) || boundaryMs <= 0) return null
+  // 容忍半帧：分界正好压在关键帧上时，浮点抖动不该让我们跳到下一个关键帧
+  const target = boundaryMs / 1000 - 0.5 / fps
+  const hit = keyframeSec.find((t) => Number.isFinite(t) && t >= target)
+  if (hit === undefined) return null
+  /*
+   * ⚠️【必须就在分界那一帧上】。我们烧的时候在分界处强制过一帧,所以正常
+   * 情况下 hit 和分界最多差不到一帧。差得多说明【那一帧不在】——找到的是
+   * 别的地方一个碰巧的关键帧。照它切,接缝就跑到了别处:头段会比挑的开头
+   * 素材还长,而后半段从一个谁也没打算切的地方开始。
+   * 这种时候老老实实整条重烧。
+   */
+  if (hit - boundaryMs / 1000 >= 1 / fps) return null
+  return hit
+}
+
+async function cutPointSec (masterPath: string, boundaryMs: number): Promise<number | null> {
+  try {
+    const { stdout } = await exec('ffprobe', [
+      '-v', 'error', '-select_streams', 'v', '-show_packets',
+      '-show_entries', 'packet=pts_time,flags', '-of', 'csv=p=0', masterPath,
+    ], { maxBuffer: 64 << 20 })
+    const keys = stdout.split('\n')
+      .filter((l) => l.includes('K'))
+      .map((l) => Number(l.split(',')[0]))
+    return pickCutPoint(keys, boundaryMs)
+  } catch {
+    return null
+  }
+}
+
 /**
  * 真的换。成功返回 true(新的 master.mp4 已经就位),失败返回 false。
  *
@@ -133,7 +191,26 @@ export async function swapHead (
   }
 
   try {
-    const wholeMs = await probeDurationMs(masterPath)
+    const wholeFrames = await countPackets(masterPath)
+
+    /*
+     * 【先问清楚这一刀到底该落在哪一毫秒】。不是分界本身——见 cutPointSec。
+     * 问不出来(那条母带压根没有这一帧)就退回整条重烧。
+     */
+    const cutSec = await cutPointSec(masterPath, plan.boundaryMs)
+    if (cutSec === null) {
+      await cleanup()
+      return false
+    }
+    /*
+     * 头段的帧数 = 切点之前的帧数。后面所有的校验都拿它当标尺。
+     * 切点是某一帧的 pts,所以乘回帧率再取整就是那一帧的序号。
+     */
+    const headFrames = Math.round(cutSec * FPS)
+    if (headFrames <= 0 || headFrames >= wholeFrames) {
+      await cleanup()
+      return false
+    }
 
     /*
      * ── ① 切后半段 ────────────────────────────────────────────────
@@ -142,23 +219,27 @@ export async function swapHead (
      */
     await ffmpeg([
       '-hide_banner', '-loglevel', 'error', '-y',
-      '-ss', (plan.boundaryMs / 1000).toFixed(3),
+      '-ss', cutSec.toFixed(6),
       '-i', masterPath,
       '-c', 'copy',
       tailPath,
     ])
     /*
      * ⚠️【切完必须验第一个包是关键帧】。不验的话,一条没有那一帧的母带
-     * 也能"切成功"——ffmpeg 不报错,只是把整条搬了过来。而这个错误要到
-     * 用户点开片子才看得见。
+     * 也能"切成功"——ffmpeg 不报错,只是把整条搬了过来。
      */
     if (!await firstPacketIsKeyframe(tailPath)) {
       await cleanup()
       return false
     }
-    const tailMs = await probeDurationMs(tailPath)
-    // 后半段应当正好是"整条 − 分界"。差超过一帧说明切点没落在预期的地方
-    if (Math.abs(tailMs - (wholeMs - plan.boundaryMs)) > FRAME_MS) {
+    /*
+     * ⚠️【验帧数,不能验时长】。切歪的时候 ffmpeg 会把整条搬过来,再用
+     * edit list 把起点标到切点——**容器时长因此仍然是"整条 − 分界"**,
+     * 拿时长去验等于没验。实测就是这么放过去一条 779 帧的片子(应该 600),
+     * 而 ffprobe 报的时长只差 1 毫秒。
+     * 帧数不会骗人:搬了多少就是多少。
+     */
+    if (await countPackets(tailPath) !== wholeFrames - headFrames) {
       await cleanup()
       return false
     }
@@ -182,13 +263,13 @@ export async function swapHead (
       bgmVolume: f.project.bgmVolume,
       assPath, aspect: f.aspect,
       /*
-       * ⚠️【正好烧到分界,而且要毫秒精度】。字幕的时间轴是从 0 起的整条,
-       * 烧到分界就停,画面和字幕自然都只剩开头那一段。
-       * 长一帧的话,后半段整体后移 33 毫秒,字幕就相对配音晚了——
-       * 而且是从接缝一直错到片尾。
+       * ⚠️【正好烧 headFrames 帧,一帧不多一帧不少】。字幕的时间轴是从 0 起的
+       * 整条,烧到这儿就停,画面和字幕自然都只剩开头那一段。
+       * 多一帧的话后半段整体后移 33 毫秒,字幕从接缝一直错到片尾;
+       * 少一帧则拼出来短一帧。用帧数而不是时间,见 types.ts 的 frames。
        */
-      durationMs: plan.boundaryMs,
-      exactDuration: true,
+      durationMs: Math.round(cutSec * 1000),
+      frames: headFrames,
       outPath: headPath,
     }, (p) => onProgress(35 + p * 0.55), signal)
     onProgress(90)
@@ -208,12 +289,11 @@ export async function swapHead (
     ])
 
     /*
-     * ⚠️【拼完再验一次总长】。concat 对参数不一致【不一定报错】,可能产出
-     * 一个只有前半段能正常播的文件,而时长看着完全正常。总长对不上是这类
-     * 故障最容易抓到的信号。
+     * ⚠️【拼完再数一次帧】。concat 对参数不一致【不一定报错】,可能产出
+     * 一个只有前半段能正常播的文件;而上面那类切歪的故障更阴——时长完全正常,
+     * 只是多了一整段旧开头。**帧数是唯一不会骗人的那个数**,一帧都不能差。
      */
-    const joinedMs = await probeDurationMs(joined).catch(() => -1)
-    if (Math.abs(joinedMs - wholeMs) > FRAME_MS * 2) {
+    if (await countPackets(joined).catch(() => -1) !== wholeFrames) {
       await rm(joined, { force: true }).catch(() => {})
       await cleanup()
       return false

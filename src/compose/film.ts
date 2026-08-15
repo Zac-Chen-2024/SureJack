@@ -548,8 +548,16 @@ async function buildFilm (
         await writeStamp(f.dir, MASTER_STAMP_FILE, {
           fingerprint: f.masterFingerprint, status: 'done', jobId, ...splitStamp(f),
         })
+        /*
+         * 【留一条日志】。换头和整条重烧产出的文件长得一样(排布没变的那部分
+         * 本来就该编码成一样的字节),事后从产物上分辨不出走的是哪条路。
+         * 出了问题要能回答"这条片子当时到底重烧了没有"——只能靠这一行。
+         */
+        console.log(`[重选开头] 只换开头成功 project=${projectId} 分界=${(swap.boundaryMs / 1000).toFixed(3)}s 开头${swap.headSegmentCount}段`)
         // 下面那两大段(拼背景轨 + 整条烧录)一律跳过
         masterReuse = masterPath
+      } else {
+        console.log(`[重选开头] 换头没走通，退回整条重烧 project=${projectId}`)
       }
     }
   }

@@ -85,17 +85,15 @@ export function buildArgs (job: RenderJob): string[] {
     throw new Error('多片段拼接尚未实现——需要两趟渲染，见 render/ffmpeg.ts 的说明')
   }
 
+  const durationSec = (job.durationMs / 1000).toFixed(1)
   /*
-   * 【重选开头时必须精确到毫秒】。开头段的长度要【正好】等于分界:
-   * 后半段是从母带的那一毫秒切下来的,头段长一帧,后面整条字幕就相对
-   * 配音晚 33 毫秒——而且是从接缝一直错到片尾。
-   *
-   * 平时(整条烧录)保持 `.toFixed(1)` 不动:改了会让重烧出来的片子和从前
-   * 差一帧,而老项目的一切都该保持原样。
+   * 【长度怎么截】。平时按时间(`-t`);重选开头烧头段时按【帧数】——
+   * 头段要正好停在后半段那一刀之前,而那一刀落在某一帧的 pts 上,
+   * 拿时间去截只能在多一帧和少一帧之间猜。见 types.ts 的 frames。
    */
-  const durationSec = job.exactDuration === true
-    ? (job.durationMs / 1000).toFixed(3)
-    : (job.durationMs / 1000).toFixed(1)
+  const cutArgs = Number.isInteger(job.frames) && (job.frames ?? 0) > 0
+    ? ['-frames:v', String(job.frames)]
+    : ['-t', durationSec]
   const hasBgm = Boolean(job.bgmPath)
 
   /*
@@ -120,7 +118,7 @@ export function buildArgs (job: RenderJob): string[] {
       ].join(';'),
       '-map', '[v]',
       '-an',                      // 明确不要音轨
-      '-t', durationSec,
+      ...cutArgs,
       /*
        * 【在开头段的分界处强制一个关键帧】。重选开头时后半段是拿
        * `-ss <分界> -c copy` 原样切出来的,而 `-c copy` 只能从关键帧起——
