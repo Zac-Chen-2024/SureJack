@@ -130,9 +130,15 @@ export function MobileWorkspace () {
   const filmUnknown = usePipeline((s) => s.film === null)
   /** 后端算好的"还缺什么"。空态那一屏直接显示它，别再讲一句放之四海的废话 */
   const filmReason = usePipeline((s) => s.film?.reason ?? null)
-  // 流程在跑（配音中/合成中/出错）→ 盖进度蒙层，而不是"还没成片"的空态
+  /*
+   * 流程在跑（配音中/合成中/合成出错）→ 盖进度蒙层，而不是"还没成片"的空态。
+   *
+   * ⚠️【配音失败【不算】流程在跑】。那一屏是为"合成"准备的，唯一的动作是
+   * 从断点接着走；而配音没成功过就没有断点，把人送过去等于给他一个
+   * 按了没反应的按钮。配音失败走文案页那条路（见 openProject）。
+   */
   const inProgress = !!project && (
-    project.ttsState === 'generating' || project.ttsState === 'error'
+    project.ttsState === 'generating'
     || filmState === 'building' || filmState === 'error'
     // 等空间也要停在"合成中"这一屏——那儿才有「去下载」的引导
     || filmState === 'waiting_disk'
@@ -185,7 +191,25 @@ export function MobileWorkspace () {
      * 这条片子的合成正被闸门拦着，给他看「合成中」或者「还没有成片」
      * 都是把他晾在原地——他要做的那件事就是挑开头。
      */
-    if (p && p.openingState === 'pending') { push({ k: 'opening' }) } else if (p && p.ttsState === 'none') { setResumeDraft(true); push({ k: 'newproject' }) } else push({ k: 'editor' })
+    /*
+     * 【配音失败也回文案那一页】，和"还没配过"走同一条路。
+     *
+     * 原来 'error' 掉进编辑器 → inProgress 判真 → 甩到「合成中」那一屏，
+     * 而那一屏唯一的动作是「接着上次继续」（走 /retry）。可是 /retry 是给
+     * **合成**链路用的：它从盘上最远的完好产物接着走，而配音都没成功过，
+     * 断点永远是 none，retry 什么都做不了——线上真的空转了 6 次。
+     *
+     * 配音失败该做的事只有一件：回到文案那一页重新生成。
+     */
+    /*
+     * ⚠️【配音失败要排在"开头待挑"【前面】】。新建那条线是先挂起闸门
+     * (opening/hold) 再发配音的，所以配音一失败，项目就停在
+     * pending + error 上。先判 pending 的话会把她送进挑选界面——
+     * 而那一屏要等配音时长才画得出目标，她会对着「配音生成中」
+     * 永远等一个不会来的数。
+     */
+    const needsScript = p && (p.ttsState === 'none' || p.ttsState === 'error')
+    if (needsScript) { setResumeDraft(true); push({ k: 'newproject' }) } else if (p && p.openingState === 'pending') { push({ k: 'opening' }) } else push({ k: 'editor' })
   }
   /*
    * 【新建之前必须把"接着完成"的标记清掉】。同一屏（newproject）现在有两种
@@ -237,7 +261,9 @@ export function MobileWorkspace () {
           <MobileNewProject
             onBack={back}
             onGo={goEditor}
-            resumeId={resumeDraft && project && project.ttsState === 'none' ? project.id : undefined}
+            resumeId={resumeDraft && project
+              && (project.ttsState === 'none' || project.ttsState === 'error')
+              ? project.id : undefined}
           />
         ) : !project ? (
           <MobileProjectList onOpen={openProject} onNew={openNew} />

@@ -30,7 +30,12 @@ export function MobileGenerating ({ onBack, projectName }: { onBack: () => void;
 
   const voiceReady = ttsState === 'ready'
   const composing = filmState === 'building'
-  const errored = ttsState === 'error' || filmState === 'error'
+  /*
+   * ⚠️【只管【合成】失败】。配音失败不再走这一屏——它的补救动作是"回文案页
+   * 重新生成"，而这里唯一的按钮是从断点接着走的 /retry，对没配音的项目
+   * 一点用都没有（线上空转过 6 次）。见 MobileWorkspace 的 openProject。
+   */
+  const errored = filmState === 'error'
   /*
    * 【等空间不是失败】。磁盘腾不出来时合成会停在这儿，而用户一下载走
    * 一条片子，空间回来了它就【自动继续】——所以既不能画成红色报错，
@@ -95,8 +100,14 @@ export function MobileGenerating ({ onBack, projectName }: { onBack: () => void;
               把上面这个错误码告诉开发人员。也可以先点下面重试一次——
               已经做完的部分不会重来。
             </p>
+            {/*
+              ⚠️【这行是【说明】，不是按钮】。它曾经用 accent 色单独居中一行，
+              而 /retry 在没东西可接着走时回的正是「生成配音」四个字——
+              用户当成按钮点了半天，点不动。现在压成灰字并加前缀，
+              一眼看得出是句话。
+            */}
             {retried !== null && (
-              <p className="mt-2 text-[11px] text-accent">{retried}</p>
+              <p className="mt-2 text-[11px] leading-relaxed text-ink-400">下一步：{retried}</p>
             )}
             <button
               type="button" disabled={busy}
