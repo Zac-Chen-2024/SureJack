@@ -18,6 +18,7 @@ import { ensureAudioStats } from '../audio/routes.js'
 import { downloadPrep } from '../compose/download-queue.js'
 import { parseLayoutRatio } from '../compose/plan.js'
 import { fillToTarget } from '../library/auto-fill.js'
+import { settleAfterVoice } from '../tts/settle-after-voice.js'
 
 type Deps = PrebuildDeps
 
@@ -432,6 +433,25 @@ export function registerProjectRoutes (app: FastifyInstance, deps: Deps): void {
       const project = withUserDb(name, (db) => db.getProject(req.params.id))
       if (!project) return reply.code(404).send({ error: '项目不存在' })
 
+      /*
+       * ⚠️【配音没就绪就不许敲定】。开头要铺多长是从配音总长算出来的，
+       * 配音还没好的时候"挑够了吗"根本没有答案——下面那道"还差 N 秒"的闸
+       * 判的是 head_boundary_ms，而它此刻是 null，于是【整道闸不参与】。
+       *
+       * 线上真踩过：配音失败(Azure 挂了)时她挑了 57 秒就确认了，
+       * 后来配音成功、边界算出来 81 秒，这条片子从此合不出来，
+       * 而 settled 之后她回不到挑选界面，自己救不了自己。
+       *
+       * 草稿照存不误（/opening/draft 不受这条限制），只是最后这一下要等配音。
+       */
+      if ((project.ttsDurationMs ?? 0) <= 0) {
+        return reply.code(409).send({
+          error: project.ttsState === 'error'
+            ? '配音没有生成成功，先回去重新生成一次再挑开头'
+            : '配音还在生成，开头要铺多长还算不出来，等它好了再确认',
+        })
+      }
+
       const raw = Array.isArray(req.body?.pick)
         ? req.body.pick.filter((x): x is string => typeof x === 'string')
         : []
@@ -630,6 +650,18 @@ export function registerProjectRoutes (app: FastifyInstance, deps: Deps): void {
         subtitleMode: 'line',
         ...(scriptText === undefined ? {} : { scriptText }),
       }))
+
+      /*
+       * ⚠️【配音换了，分界必须跟着换】。这里是【第三个】写 tts_duration_ms
+       * 的地方（另两个是主片配音、续集配音），一样要走同一个维护点。
+       *
+       * 漏掉它的后果：一条先做文本配音(边界已定)、后来改成自备音频的项目
+       * 会留着一个【过期的边界】——而自备这条路根本没有开头桶的概念。
+       * settleAfterVoice 会把它写回 null，这条片子干干净净地走老排布。
+       *
+       * 不变量：head_boundary_ms 必须和当前这份 wordTimings 同源。
+       */
+      settleAfterVoice(name, whitelist, req.params.id, libraryDataDir)
 
       /*
        * 自备配音这条路和 Azure 那条一样，到这里就"配音就绪"了——

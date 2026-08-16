@@ -141,6 +141,16 @@ export function OpeningPicker ({ ids, onDone, onBack }: {
    * 续集不算：那套公式是"几段开头 + 全程跑酷"，开头段没有上限，
    * 挑几段用几段，剩下的时长自然落给跑酷。
    */
+  /*
+   * ⚠️【配音失败要当成一种状态,不能当成"还没好"】。
+   *
+   * 这一屏原来只认两种:时长出来了 / 没出来。而配音失败时时长永远不会出来,
+   * 于是它一直显示「配音生成中」,目标是 0,fixed 为 false,
+   * **"挑够了吗"那道闸整个不参与**——她挑几段就能敲定，
+   * 而后来配音成功、边界算出来比她挑的长，这条片子就再也合不出来了。
+   * 线上真发生过(周周日光,57 秒的清单对 81 秒的边界)。
+   */
+  const voiceFailed = current?.ttsState === 'error'
   const durationKnown = (current?.ttsDurationMs ?? 0) > 0
   /*
    * 【定长开头】：配音一完成，后端就按字幕句末把开头的边界算死了。有这个数
@@ -264,6 +274,27 @@ export function OpeningPicker ({ ids, onDone, onBack }: {
   }
 
   if (current === undefined) return null
+
+  /*
+   * 【配音失败就别让她在这儿耗着】。这一屏做不了任何有意义的事:
+   * 目标时长算不出来，挑了也不能确认。直接说清楚，把她送回去重新生成。
+   */
+  if (voiceFailed) {
+    return (
+      <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-ink-950 px-8 text-center">
+        <p className="text-base font-semibold text-danger">配音没有生成成功</p>
+        <p className="max-w-[78vw] text-sm leading-relaxed text-ink-300">
+          开头要铺多长是按配音总长算的，配音没好就没法挑。回去重新生成一次配音吧。
+        </p>
+        <button
+          type="button" onClick={onBack}
+          className="rounded-full bg-accent px-5 py-2.5 text-sm font-bold text-ink-950"
+        >
+          回去重新生成
+        </button>
+      </div>
+    )
+  }
 
   return (
     <div className="absolute inset-0 flex flex-col bg-ink-950" style={{ paddingTop: 'calc(env(safe-area-inset-top, 0px) + 12px)' }}>
@@ -406,7 +437,13 @@ export function OpeningPicker ({ ids, onDone, onBack }: {
         </button>
         <button
           type="button" onClick={() => void settle(true)}
-          disabled={busy || pick.length === 0 || (fixed && pickedMs < targetMs)}
+          /*
+           * ⚠️【配音没就绪就不许确认】。开头要铺多长是从配音总长算出来的——
+           * 配音还没好的时候，"挑够了吗"这个问题【根本没有答案】，
+           * 那就不该让她敲定。她照样可以进来挑、挑一半走人（存草稿），
+           * 只是最后那一下要等配音。
+           */
+          disabled={busy || pick.length === 0 || !durationKnown || (fixed && pickedMs < targetMs)}
           className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-accent px-3 py-3 text-sm font-extrabold text-ink-950 disabled:opacity-40"
         >
           {busy ? <IconLoader className="size-4 animate-spin" /> : <IconCheck className="size-4" strokeWidth={2.6} />}

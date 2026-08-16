@@ -280,3 +280,127 @@ describe('「自动」补满', () => {
     expect(res.json().error).toContain('配音')
   })
 })
+
+describe('清单比分界短时，不能把片子卡死', () => {
+  /*
+   * ⚠️ 线上真踩的死锁：
+   *
+   * 配音第一次失败（Azure 挂了）→ 那时 head_boundary_ms 还是 null →
+   * POST /opening 的"挑够了吗"闸门【形同虚设】（它是按边界判的）→
+   * 57 秒的清单就被 settled 了。后来配音成功、边界算出来 81 秒 →
+   * 排布要求正好铺满 → planBackground 抛「开头素材不够铺满」→
+   * judgeFilm 压成一句"暂时算不出成片需要的素材排布"。
+   *
+   * 而项目已经是 settled，用户【回不到挑选界面】，自己救不了自己。
+   *
+   * "必须挑够"是【挑选界面】的规矩，不该由排布来兜底执行——
+   * 排布的职责是把片子做出来。
+   */
+  it('清单不够铺满边界 → 自动补齐，照样算得出排布', async () => {
+    const a = await makeApp()
+    const cookie = await loginAs(a, '定长甲')
+    const id = await makeReady(a, '定长甲', cookie, '短清单', { totalMs: 400_000, boundaryMs: 100_000 })
+
+    // 绕过接口直接落一份【不够长】的清单，复现线上那个状态
+    const db = openUserDb('定长甲', LIST)
+    db.updateProject(id, { openingPickJson: JSON.stringify(ids(4)), openingState: 'settled' })
+    db.close()
+
+    const res = await a.inject({
+      method: 'GET', url: `/api/projects/${id}/background-plan`, cookies: { sj_session: cookie },
+    })
+    expect(res.statusCode).toBe(200)
+    const plan = res.json()
+    expect(plan.segments.length).toBeGreaterThan(0)
+    // 开头段确实铺满到了边界
+    let head = 0
+    for (const s of plan.segments) { if (s.bucket !== '1-开头') break; head += s.takeMs }
+    expect(head).toBe(100_000)
+  })
+
+  it('他自己挑的那几段仍然排在最前面，顺序不动', async () => {
+    const a = await makeApp()
+    const cookie = await loginAs(a, '定长甲')
+    const id = await makeReady(a, '定长甲', cookie, '保序', { totalMs: 400_000, boundaryMs: 100_000 })
+    const mine = ids(3)
+    const db = openUserDb('定长甲', LIST)
+    db.updateProject(id, { openingPickJson: JSON.stringify(mine), openingState: 'settled' })
+    db.close()
+
+    const plan = (await a.inject({
+      method: 'GET', url: `/api/projects/${id}/background-plan`, cookies: { sj_session: cookie },
+    })).json()
+    expect(plan.segments.slice(0, 3).map((s: { itemId: string }) => s.itemId)).toEqual(mine)
+  })
+})
+
+describe('配音没就绪，不许敲定开头', () => {
+  /*
+   * ⚠️ 这就是那个死锁的【源头】。
+   *
+   * 开头要铺多长是从配音总长算出来的，所以"挑够了吗"那道闸判的是
+   * head_boundary_ms——而配音没好时它是 null，于是【整道闸不参与】，
+   * 只剩"至少挑了一段"。线上她在 Azure 挂掉时挑了 57 秒就确认了，
+   * 后来配音成功、边界算出来 81 秒，这条片子从此合不出来，
+   * 而 settled 之后她回不到挑选界面，自己救不了自己。
+   */
+  it('配音还在生成 → 409，不落清单、不放行', async () => {
+    const a = await makeApp()
+    const cookie = await loginAs(a, '定长甲')
+    const res0 = await a.inject({
+      method: 'POST', url: '/api/projects', payload: { name: '配音还没好' }, cookies: { sj_session: cookie },
+    })
+    const id = res0.json().id as string
+    const db0 = openUserDb('定长甲', LIST)
+    db0.updateProject(id, { ttsState: 'generating', openingState: 'pending' })
+    db0.close()
+
+    const res = await settle(a, cookie, id, ids(2))
+    expect(res.statusCode).toBe(409)
+    expect(res.json().error).toContain('还在生成')
+
+    const db = openUserDb('定长甲', LIST)
+    const p = db.getProject(id)!
+    db.close()
+    expect(p.openingState).toBe('pending')                      // 闸门还在
+    expect(parseOpeningPick(p.openingPickJson)).toEqual([])      // 什么都没落
+  })
+
+  it('配音失败 → 409，并且说清要回去重新生成', async () => {
+    const a = await makeApp()
+    const cookie = await loginAs(a, '定长甲')
+    const res0 = await a.inject({
+      method: 'POST', url: '/api/projects', payload: { name: '配音失败了' }, cookies: { sj_session: cookie },
+    })
+    const id = res0.json().id as string
+    const db0 = openUserDb('定长甲', LIST)
+    db0.updateProject(id, { ttsState: 'error', openingState: 'pending' })
+    db0.close()
+
+    const res = await settle(a, cookie, id, ids(2))
+    expect(res.statusCode).toBe(409)
+    expect(res.json().error).toContain('重新生成')
+  })
+
+  /* 草稿不受影响——挑一半接个电话是常态，那一份随时都该存得下 */
+  it('配音没好也照样能存草稿', async () => {
+    const a = await makeApp()
+    const cookie = await loginAs(a, '定长甲')
+    const res0 = await a.inject({
+      method: 'POST', url: '/api/projects', payload: { name: '存草稿' }, cookies: { sj_session: cookie },
+    })
+    const id = res0.json().id as string
+    const db0 = openUserDb('定长甲', LIST)
+    db0.updateProject(id, { ttsState: 'generating', openingState: 'pending' })
+    db0.close()
+
+    const res = await a.inject({
+      method: 'POST', url: `/api/projects/${id}/opening/draft`,
+      payload: { pick: ids(2) }, cookies: { sj_session: cookie },
+    })
+    expect(res.statusCode).toBe(200)
+    const db = openUserDb('定长甲', LIST)
+    expect(parseOpeningPick(db.getProject(id)!.openingPickJson)).toEqual(ids(2))
+    db.close()
+  })
+})

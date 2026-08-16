@@ -1,4 +1,5 @@
 import { planBackground, type LibraryItem, LEGACY_LAYOUT_RATIO } from '../compose/plan.js'
+import { fillToTarget } from './auto-fill.js'
 import type { LibraryDb } from './library-db.js'
 import { listBucket } from './scan.js'
 
@@ -200,9 +201,35 @@ export function planProjectBackground (
     ? pick.map((id) => openingById.get(id)).filter((it): it is LibraryItem => it !== undefined)
     : openingAll.filter((it) => !exclude.has(it.id))
 
-  const opening = opts.sequel && pick.length === 0
+  let opening = opts.sequel && pick.length === 0
     ? openingPool.slice(0, SEQUEL_OPENING_CLIPS)
     : openingPool
+
+  /*
+   * ⚠️【铺不满就当场补上,绝不抛】。
+   *
+   * 定长开头要求这个池子加起来 ≥ 分界,不然 planBackground 会抛
+   * 「开头素材不够铺满 N 秒」。而抛在这一层是【死锁】:
+   * judgeFilm 把它压成一句"暂时算不出成片需要的素材排布",
+   * 而项目此刻已经是 settled——用户回不到挑选界面,自己救不了自己。
+   *
+   * 线上真发生过:配音第一次失败(Azure 挂了),那时 head_boundary_ms 还是
+   * null,于是 POST /opening 的"挑够了吗"闸门形同虚设,57 秒的清单就被
+   * settled 了;后来配音成功、边界算出来是 81 秒,这条片子就再也合不出来。
+   *
+   * "必须挑够"是【挑选界面】的规矩,不该由排布来兜底执行——排布的职责是
+   * 把片子做出来。补齐用的是和「自动」按钮同一套算法(先让超出最少、
+   * 再用更少的片子),而且从同一条种子随机流里取,结果是确定的。
+   */
+  const need = planOpts.openingMs ?? 0
+  if (need > 0) {
+    const have = opening.reduce((sum, it) => sum + it.durationMs, 0)
+    if (have < need) {
+      const used = new Set([...opening.map((it) => it.id), ...exclude])
+      const rest = openingAll.filter((it) => !used.has(it.id) && it.durationMs > 0)
+      opening = [...opening, ...fillToTarget(rest, need - have) as LibraryItem[]]
+    }
+  }
   const regular = opts.sequel ? [] : regularAll
 
   const byId = new Map<string, LibraryItem>()
