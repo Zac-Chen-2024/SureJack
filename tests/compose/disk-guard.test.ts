@@ -41,7 +41,19 @@ async function makeProject (
   const dir = assetDir(LIST[0]!, LIST, p.id)
   const { mkdir } = await import('node:fs/promises')
   await mkdir(dir, { recursive: true })
-  await writeFile(join(dir, FILM_MASTER_FILE), Buffer.alloc((opts.masterMB ?? 1) * 1024 * 1024))
+  /*
+   * ⚠️【归档 = 母带被删掉】，所以造"已归档"的夹具时不能留着母带。
+   *
+   * 这里【曾经】两个都写：标了 archivedAt，还照样写一份 master.mp4——
+   * 那正是线上那个非法态（标记过期）。当时判据是"光看 archivedAt"，
+   * 所以假数据也能过；改成 isArchived（标记在【而且】母带确实不在）之后，
+   * 这份夹具就露馅了：一条母带还在的项目本来就该是可回收的。
+   *
+   * 用例的意图没变（真收着的不重复收），变的是夹具得说实话。
+   */
+  if (opts.archived !== true) {
+    await writeFile(join(dir, FILM_MASTER_FILE), Buffer.alloc((opts.masterMB ?? 1) * 1024 * 1024))
+  }
   return p.id
 }
 
@@ -62,9 +74,22 @@ describe('第一步：只收「已下载但还没归档」的', () => {
     expect(reclaimable(LIST).map((r) => r.projectId)).not.toContain(id)
   })
 
-  it('已经归档的不重复收', async () => {
+  it('真的收着的（母带确实不在）不重复收', async () => {
     const id = await makeProject('已归档的', { downloaded: true, archived: true })
     expect(reclaimable(LIST).map((r) => r.projectId)).not.toContain(id)
+  })
+
+  /*
+   * ⚠️ 线上真发生过：状态接口把归档的片子又重烧了出来，而 archivedAt 没人清。
+   * 光看标记的话，这 6.9 GB 就永远没人来收——**磁盘告急时也不回收**。
+   * 读事实就能自愈：母带回来了，它就重新算进可回收的。
+   */
+  it('标了归档但母带又回来了 → 重新算进可回收的', async () => {
+    const id = await makeProject('母带又长出来了', { downloaded: true, masterMB: 3 })
+    const db = openUserDb(LIST[0]!, LIST)
+    db.updateProject(id, { archivedAt: new Date().toISOString() })   // 标记过期，母带还在
+    db.close()
+    expect(reclaimable(LIST).map((r) => r.projectId)).toContain(id)
   })
 })
 

@@ -3,7 +3,7 @@ import { existsSync, statSync, readdirSync } from 'node:fs'
 import { join, dirname, resolve } from 'node:path'
 import { openUserDb } from '../db/user-db.js'
 import { assetDir } from '../assets/storage.js'
-import { archiveProject } from './archive.js'
+import { archiveProject, isArchived } from './archive.js'
 import { FILM_MASTER_FILE } from './film.js'
 import { PREVIEW_DIR } from './preview.js'
 
@@ -108,8 +108,9 @@ export function reclaimable (whitelist: string[]): Reclaimable[] {
     } catch { continue }
     for (const p of rows) {
       if (p.downloadedAt === '') continue     // 还没拿走 → 不能动
-      if (p.archivedAt !== '') continue       // 已经收起来了
       const dir = assetDir(u, whitelist, p.id)
+      // 【读事实不读标记】：母带要是又被烧出来了，它就该重新算进可回收的
+      if (isArchived(p.archivedAt, dir)) continue
       const bytes = reclaimableBytes(dir)
       if (bytes <= 0) continue
       out.push({ user: u, projectId: p.id, name: p.name, bytes, downloadedAt: p.downloadedAt })
@@ -135,8 +136,8 @@ export function undownloaded (whitelist: string[]): Array<{
     } catch { continue }
     for (const p of rows) {
       if (p.downloadedAt !== '') continue     // 已经拿走了
-      if (p.archivedAt !== '') continue
       const dir = assetDir(u, whitelist, p.id)
+      if (isArchived(p.archivedAt, dir)) continue
       if (!existsSync(join(dir, FILM_MASTER_FILE))) continue   // 还没合成好
       out.push({ user: u, projectId: p.id, name: p.name, bytes: reclaimableBytes(dir) })
     }

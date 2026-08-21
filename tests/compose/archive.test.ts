@@ -181,3 +181,44 @@ describe('续集跟着主片一起收', () => {
     db.close()
   })
 })
+
+describe('读事实，不读标记', () => {
+  const long = new Date(Date.now() - ARCHIVE_AFTER_MS - 60_000).toISOString()
+
+  /*
+   * ⚠️ 线上真发生过，而且是系统性的：状态接口在 missing 那一档会
+   * "该有却没有 → 现在排一条"，而【归档本来就是把母带删掉】——
+   * 在它眼里每条归档项目都是"该有却没有"。她一打开 App，列表页给每条
+   * 项目轮询一次 /film，后台就默默把收起来的片子一条条重烧。
+   *
+   * 实测 18 条【全部】是归档后 1~3 小时又长出来的，而 archivedAt 没人清。
+   * 于是 sweepArchive 和 disk-guard 都当它们"已经收起来了"而跳过——
+   * 7.8 GB 永久占在盘上，磁盘一路到 92%，归档等于完全白做。
+   *
+   * 判据必须是 isArchived（标记在【而且】母带确实不在），
+   * 这样母带一旦又回来，下一轮扫描就能重新收它，脏状态自愈。
+   */
+  it('标了归档但母带又回来了 → 照样能被收走', async () => {
+    const id = await seed('母带又长出来了', { downloaded: long, touched: long })
+    // 先正常归档一次（母带被删）
+    await archiveProject(USER, LIST, id)
+    // 再模拟"状态接口把它重烧了出来"：母带回来，archivedAt 还留着
+    await writeFile(join(assetDir(USER, LIST, id), 'master.mp4'), 'x'.repeat(1000))
+
+    const r = await sweepArchive(LIST)
+    expect(r.map((x) => x.name)).toEqual(['母带又长出来了'])
+    expect(existsSync(join(assetDir(USER, LIST, id), 'master.mp4'))).toBe(false)
+  })
+
+  /* 真·归档（标记在、母带确实不在）还是要跳过，别空转 */
+  it('真的收着的不会被反复扫', async () => {
+    const id = await seed('真收着', { downloaded: long, touched: long })
+    await archiveProject(USER, LIST, id)
+    const at = openUserDb(USER, LIST).getProject(id)!.archivedAt
+
+    expect(await sweepArchive(LIST)).toEqual([])
+    const db = openUserDb(USER, LIST)
+    expect(db.getProject(id)?.archivedAt).toBe(at)   // 时间没被覆盖
+    db.close()
+  })
+})

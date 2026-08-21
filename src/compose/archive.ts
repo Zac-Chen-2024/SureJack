@@ -143,7 +143,15 @@ export async function sweepArchive (
 
     for (const p of rows) {
       if (done.has(p.id)) continue
-      if (p.archivedAt !== '') continue                  // 已经收起来了
+      /*
+       * ⚠️【读事实，不读标记】。判据是 isArchived（标记在 **而且** 母带确实不在），
+       * 不是光看 archivedAt。
+       *
+       * 差别很致命：母带被重新烧出来之后（线上真发生过 18 条），光看标记会
+       * 一直把它当"已经收起来了"而跳过——那 7.8 GB 就再也没人来收，
+       * 永久占在盘上。改成看事实，这类脏状态下一轮扫描就自愈了。
+       */
+      if (isArchived(p.archivedAt, assetDir(user, whitelist, p.id))) continue
       if (p.downloadedAt === '') continue                // 没下载过 = 还没定稿
       const touched = Date.parse(p.touchedAt || p.updatedAt)
       if (!Number.isFinite(touched)) continue

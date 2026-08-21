@@ -959,6 +959,25 @@ async function judgeFilm (
   if (!r.ok) return { kind: 'blocked', reason: r.error }
 
   const { dir, fingerprint, masterFingerprint: mfp } = r.film
+
+  /*
+   * ⚠️【归档的项目绝不自动排队】。
+   *
+   * 下面 missing 那一档会"该有却没有 → 现在排一条"，而【归档本来就是
+   * 把母带删掉】——在它眼里每一条归档项目都是"该有却没有"。
+   *
+   * 线上真发生过，而且是系统性的：她一打开 App，列表页给每条项目轮询
+   * 一次 /film，后台就默默把已经收起来的片子一条条重烧（每条十几分钟）。
+   * 实测 18 条【全部】是归档后 1~3 小时又长出来的，archivedAt 却没人清——
+   * 于是 sweepArchive 和 disk-guard 都当它们"已经收起来了"而跳过，
+   * 7.8 GB 就此永久占在盘上，磁盘一路涨到 92%。归档等于完全白做。
+   *
+   * 恢复【必须是用户主动点的】——那是归档功能本来的约定（弹窗说清楚
+   * "恢复要重新合成，大约 15 分钟"，让他自己决定值不值）。
+   */
+  if (r.film.project.archivedAt !== '') {
+    return { kind: 'blocked', reason: '这条片子太久没用已经收起来了，点「恢复」重新生成画面' }
+  }
   const stamp = await readStamp(dir, FILM_STAMP_FILE)
   const jobId = stamp?.jobId ?? null
   const snap = jobId === null ? null : deps.queue.snapshot(jobId)

@@ -287,6 +287,18 @@ export function MobileWorkspace () {
                     <EmptyPreview
                       onBack={back} projectName={project.name}
                       reason={filmReason}
+                      /*
+                       * 【收起来的片子要给一个真的「恢复」按钮】。状态接口现在
+                       * 不再自动重烧归档项目（那正是它把 7.8 GB 又填回盘上的原因），
+                       * 于是这一屏会显示"已经收起来了，点恢复"——而这一屏原本
+                       * 只有一个「去配音那一栏」。文案指着一个不存在的按钮，
+                       * 这个坑刚踩过一次，不能再来。
+                       */
+                      archived={project.archivedAt !== ''}
+                      onRestore={() => {
+                        void api.post(`/api/projects/${project.id}/restore`)
+                          .then(() => useProjects.getState().load())
+                      }}
                       hasScript={(project.scriptText ?? '').trim().length > 0}
                       onWriteScript={() => push({
                         k: 'sheet',
@@ -441,7 +453,11 @@ function PreviewLoading ({ onBack, projectId, projectName }: {
  * 后端在 /film 里已经算好了 reason（"还没有配音，先点「生成配音」"
  * 之类），这里直接把它摆出来：他卡在哪一步、下一步做什么，一眼看到。
  */
-function EmptyPreview ({ onBack, projectName, onWriteScript, reason, hasScript }: {
+function EmptyPreview ({
+  onBack, projectName, onWriteScript, reason, hasScript, archived = false, onRestore,
+}: {
+  archived?: boolean
+  onRestore?: () => void
   onBack: () => void; projectName: string; onWriteScript: () => void
   /** 后端说的"还缺什么"。null = 它也没话说 */
   reason: string | null
@@ -472,10 +488,10 @@ function EmptyPreview ({ onBack, projectName, onWriteScript, reason, hasScript }
           */}
         <button
           type="button"
-          onClick={onWriteScript}
+          onClick={archived ? onRestore : onWriteScript}
           className="mt-1 rounded-xl bg-accent px-5 py-2.5 text-sm font-bold text-ink-950 transition-colors hover:bg-accent-dim"
         >
-          {hasScript ? '去配音那一栏' : '开始写文案'}
+          {archived ? '恢复这条片子' : hasScript ? '去配音那一栏' : '开始写文案'}
         </button>
       </div>
     </div>
